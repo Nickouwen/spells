@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Spells</string>
+	<key>CFBundleExecutable</key>
+	<string>Spells</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>dev.nic.spells</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Spells</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Hours reads and stores the current tab's address locally to record which site you were working on. Optional AI classification can send metadata to configured services.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Scry reads the calendar event for a meeting you record, to name who was invited.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Incant listens only while you hold the dictation key, to turn your speech into text.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Scry records the other side of a call (system audio) only while you're recording a meeting.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.nic.spells</string>
+			<key>CFBundleURLSchemes</key>
+			<array><string>spells</string></array>
+		</dict>
+	</array>
+</dict>
+</plist>

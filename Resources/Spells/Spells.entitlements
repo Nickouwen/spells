@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- TCC attributes the nested HoursSpell's Apple Events to this bundle, so the entitlement
+	     (and NSAppleEventsUsageDescription) must be here too, or the browser is denied with no prompt. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	<!-- Same for Incant's microphone (hardened runtime needs the entitlement on the attributed bundle). -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<!-- Scry's calendar read (hardened runtime; TCC attributes it to Spells.app too). -->
+	<key>com.apple.security.personal-information.calendars</key>
+	<true/>
+</dict>
+</plist>

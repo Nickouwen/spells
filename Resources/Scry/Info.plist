@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>Scry</string>
+	<key>CFBundleIdentifier</key>
+	<string>dev.nic.spells.scry</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Scry</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Scry reads the calendar event for a meeting you record, to name who was invited.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Scry records your side of a meeting only while you're recording it.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Scry records the other side of a call (system audio) only while you're recording a meeting.</string>
+</dict>
+</plist>
