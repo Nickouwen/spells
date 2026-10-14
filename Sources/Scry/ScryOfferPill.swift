@@ -27,8 +27,9 @@ import HoursCore
         panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.hidesOnDeactivate = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        panel.collectionBehavior = everySpace
     }
+    private let everySpace: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
 
     /// While recording: "● mm:ss" (or "Ending · 12s") + ■, kept up for the whole recording. Called every
     /// second; once up it only updates the label (no re-animation).
@@ -107,6 +108,7 @@ import HoursCore
     }
 
     private func present(_ full: NSRect) {
+        panel.collectionBehavior = everySpace   // re-asserted per show (see IncantOverlay.show)
         if !panel.isVisible {   // drop down out of the top edge
             panel.alphaValue = 0
             panel.setFrame(Self.retracted(full), display: false)
@@ -139,17 +141,7 @@ import HoursCore
         body.addSubview(record); body.addSubview(close)
         body.setAccessibilityLabel("Scry: record \(appName)?")
         panel.contentView = body
-        if !panel.isVisible {   // drop down out of the top edge
-            panel.alphaValue = 0
-            panel.setFrame(Self.retracted(full), display: false)
-        }
-        panel.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = reduceMotion ? 0 : 0.18
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().setFrame(full, display: true)
-            panel.animator().alphaValue = 1
-        }
+        present(full)
     }
 
     func hide() {

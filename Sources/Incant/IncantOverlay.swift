@@ -9,6 +9,7 @@ import HoursCore
 @MainActor final class IncantOverlay {
     private static let size = NSSize(width: 64, height: 32)
     private static let gap: CGFloat = 6             // from the notch / the island's left edge
+    static let everySpace: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
     private let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
                                 styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
     private let view = IncantIndicatorView(frame: NSRect(origin: .zero, size: size))
@@ -35,7 +36,7 @@ import HoursCore
         panel.hasShadow = false
         panel.ignoresMouseEvents = true
         panel.hidesOnDeactivate = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        panel.collectionBehavior = Self.everySpace
         panel.contentView = view
     }
 
@@ -47,6 +48,9 @@ import HoursCore
         view.reset()
         setFixing(false)
         let full = Self.frame()
+        // Re-assert all-Spaces on every show: after enough order-out/in cycles the window server had it
+        // pinned to one Space (seen 2026-10-14: indicator "showing", alpha 1, on Space 55 while you were on 1).
+        panel.collectionBehavior = Self.everySpace
         if !panel.isVisible {   // drop down out of the top edge (from where it would retract to)
             panel.alphaValue = 0
             panel.setFrame(Self.retracted(full), display: false)
