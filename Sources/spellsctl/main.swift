@@ -13,6 +13,8 @@ usage: spellsctl export  [--period current|previous|YYYY-MM-DD..YYYY-MM-DD] [--m
        spellsctl tracker [--pause MIN] [--idle SEC]   (set live settings, print tracker_state; --pause 0 = resume)
        spellsctl import-rize --source <snapshot.json|api> [--dry-run] [--since YYYY-MM-DD]
                         (api: needs RIZE_API_KEY; saves a snapshot under $SPELLS_HOME/imports, then imports it)
+       spellsctl add     --date YYYY-MM-DD --start HH:MM --hours H [--label L] [--category ID] [--note TEXT] [--dry-run]
+                        (manual time the tracker didn't see; same chained, undoable edit as the app's add-time)
        spellsctl standup [--date YYYY-MM-DD] [--regenerate] [--print]
                         (EOD standup from that calendar day's Claude Code transcripts via claude -p;
                          --print shows the stored text without generating)
@@ -171,6 +173,10 @@ do {
     case "import-rize":
         allow("--source", "--dry-run", "--since")
         try await importRize()
+
+    case "add":
+        allow("--date", "--start", "--hours", "--label", "--category", "--note", "--dry-run")
+        try addTime()
 
     case "standup":
         allow("--date", "--regenerate", "--print")
