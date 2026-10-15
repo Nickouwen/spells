@@ -39,4 +39,4 @@ Keep personal settings and credentials in local configuration, never in source o
 
 ## License
 
-No open-source license is granted in this snapshot. See `LICENSE`.
+MIT. See `LICENSE`. Third-party notices are in `THIRD_PARTY_NOTICES.md`.
