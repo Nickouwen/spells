@@ -154,7 +154,7 @@ import ScryCore
         #expect(p.contains("Previous standup (2026-10-02):\nCarry-Forward:\nRescraper job scoping"))
         #expect(p.contains("<log>\nLOG\n</log>"))
         #expect(p.contains("gets the single line \"None\""))
-        #expect(p.contains("each line at most ~20 words") && p.contains("3–5 Worked On items"))
+        #expect(p.contains("each line at most ~12 words") && p.contains("2–4 Worked On items") && p.contains("3 under Carry-Forward"))
         #expect(!p.contains("personal side projects"))
         #expect(!p.contains("Meetings (Scry)"))
         let q = StandupPrompt.build(name: "N", date: LocalDate(year: 2026, month: 10, day: 5), timeContext: "", previous: nil,
