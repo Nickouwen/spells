@@ -230,6 +230,21 @@ private let fullNote = ScryNote(
     #expect(names == ["Alex Client", "Jordan", "Example User"])
 }
 
+@Test func namesFromOCRDropMeetJunk() {   // a real Meet call's junk, names swapped
+    let names = ScryNames.fromOCR([["Co", "Contributors", "Sam Rivera", "Alex Client", "Alex's Loom Notetaker",
+                                    "Ask Gemini", "JIl", "Sam Rive", "IlI", "Ill"]])
+    #expect(names == ["Sam Rivera", "Alex Client"])
+}
+
+@Test func soleFarSpeakerIsTheOnlyOtherPerson() {
+    let segs = [ScrySegment(speaker: "You", start: 0, end: 1, text: "Hi."),
+                ScrySegment(speaker: "Speaker A", start: 1, end: 2, text: "Hey.")]
+    #expect(ScryNames.soleSpeaker(segs, names: ["Sam Rivera", "Alex Client"], userName: "Sam") == ["Speaker A": "Alex Client"])
+    #expect(ScryNames.soleSpeaker(segs, names: ["Alex Client", "Jordan"], userName: "Sam").isEmpty)
+    let two = segs + [ScrySegment(speaker: "Speaker B", start: 2, end: 3, text: "Yo.")]
+    #expect(ScryNames.soleSpeaker(two, names: ["Alex Client"], userName: "Sam").isEmpty)
+}
+
 @Test func actionItemsAndToggle() {
     let md = """
     # T

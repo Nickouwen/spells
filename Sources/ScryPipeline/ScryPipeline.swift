@@ -75,7 +75,10 @@ public enum ScryPipeline {
             json = try merged(you: try await you, farSide: them); diarized = them != nil
         }
         let scribeMs = ms(clock.now - t0)
-        let segments = try ScryTranscript.segments(fromScribeJSON: json)
+        let raw = try ScryTranscript.segments(fromScribeJSON: json)
+        // Named before the summary, so its recap says "Alex", not "Speaker A".
+        let sole = capture.app == nil ? [:] : ScryNames.soleSpeaker(raw, names: names, userName: settings.userName)
+        let segments = ScryTranscript.renamed(raw, sole)
 
         let appName = capture.app.flatMap { ScryCallApps.known[$0] }
         let prompt = ScryPrompt.summary(segments: segments, participants: names, userNotes: capture.userNotes,
@@ -85,12 +88,13 @@ public enum ScryPipeline {
         let summary = try ScryPrompt.parseSummary(try await claude(prompt))
         let claudeMs = ms(clock.now - t0)
 
+        let speakers = sole.merging(summary.speakers) { a, _ in a }
         var participants = names
-        for n in summary.speakers.values.sorted() where !participants.contains(where: { $0 == n || $0.hasPrefix(n + " ") }) {
+        for n in speakers.values.sorted() where !participants.contains(where: { $0 == n || $0.hasPrefix(n + " ") }) {
             participants.append(n)   // "Alex" is already there as "Alex Client"
         }
         let note = ScryNote(meta: .init(startedAt: capture.startedAt, endedAt: capture.endedAt, app: appName,
-                                        participants: participants, speakers: summary.speakers),
+                                        participants: participants, speakers: speakers),
                             summary: summary, userNotes: capture.userNotes,
                             segments: ScryTranscript.renamed(segments, summary.speakers))
         let url = unique(ScryNote.fileURL(root: settings.rootURL, startedAt: capture.startedAt, title: summary.title))

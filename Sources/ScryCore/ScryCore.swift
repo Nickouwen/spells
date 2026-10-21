@@ -594,7 +594,9 @@ public enum ScryNames {
     /// OCR lines from call-window screenshots → likely participant names: 1–4 words, letters (plus
     /// ' - .), each word capitalised or all-caps initials, not call-app chrome ("Mute", "Share Screen",
     /// "Participants", "Leave", "Recording", "Meeting details"…), not timers/URLs; parentheticals like
-    /// "(Host)" or "(You)" stripped. Deduped across screenshots, order of first appearance.
+    /// "(Host)" or "(You)" stripped. Also dropped: one-word labels under 3 letters, I/l/J misreads ("IlI"),
+    /// notetaker bots, and a name that's a cut-off copy of another ("Sam Rive" beside "Sam Rivera").
+    /// Deduped across screenshots, order of first appearance.
     public static func fromOCR(_ screenshots: [[String]]) -> [String] {
         var seen = Set<String>(), out: [String] = []
         for raw in screenshots.joined() {
@@ -605,12 +607,16 @@ public enum ScryNames {
                   words.allSatisfy({ $0.first!.isUppercase }),
                   words.contains(where: { $0.contains(where: \.isLowercase) }), // bare initials ("TT") are avatars
                   name.firstMatch(of: /[a-z]\.[a-z]/) == nil,                    // domains
+                  words.count > 1 || name.count >= 3,
+                  !words.contains(where: { $0.allSatisfy("IlJ1|".contains) }),
+                  !words.contains(where: { bots.contains($0.lowercased()) }),
                   !chrome.contains(name.lowercased()), !chromeVerbs.contains(words[0].lowercased()),
                   seen.insert(name.lowercased()).inserted else { continue }
             out.append(name)
         }
-        return out
+        return out.filter { n in !out.contains { $0.count > n.count && $0.lowercased().hasPrefix(n.lowercased()) } }
     }
+    private static let bots: Set<String> = ["notetaker", "bot", "assistant", "otter", "fireflies", "recorder"]
     // ponytail: hand-kept lists of Zoom/Meet/Teams/Slack/FaceTime chrome; add to them as new labels leak through.
     private static let chrome: Set<String> = [
         "participants", "recording", "chat", "reactions", "react", "apps", "whiteboards", "notes", "security", "more",
@@ -620,6 +626,7 @@ public enum ScryNames {
         "camera", "microphone", "mic", "connected", "connecting", "reconnecting", "talking", "muted", "unmuted", "rec",
         "live", "new", "pin", "spotlight", "rename", "polls", "raise hand", "lower hand", "phone", "computer audio",
         "screen", "screen share", "whiteboard", "transcript", "minimize", "full screen", "exit full screen",
+        "contributors", "ask gemini", "gemini", "take notes", "companion",
     ]
     /// First words that never start a name ("Stop Video", "Share Screen", "Leave", "Meeting details").
     private static let chromeVerbs: Set<String> = [
@@ -643,12 +650,25 @@ public enum ScryNames {
     /// Who's with you, for the recording pill: on-screen names minus your own (first word matched,
     /// case-insensitive), as "A, B +N" plus the full list; `fallback` (the app, or "In person") when none.
     public static func pillLabel(_ names: [String], userName: String, fallback: String) -> (short: String, full: String) {
-        let me = userName.split(separator: " ").first.map { $0.lowercased() } ?? ""
-        let others = names.filter { $0.split(separator: " ").first.map { $0.lowercased() } != me }
+        let others = others(names, userName: userName)
         guard !others.isEmpty else { return (fallback, fallback) }
         let firsts = others.map { $0.split(separator: " ").first.map(String.init) ?? $0 }
         let short = firsts.prefix(2).joined(separator: ", ") + (firsts.count > 2 ? " +\(firsts.count - 2)" : "")
         return (short, others.joined(separator: ", "))
+    }
+
+    /// Names minus your own (first word matched, case-insensitive).
+    public static func others(_ names: [String], userName: String) -> [String] {
+        let me = userName.split(separator: " ").first.map { $0.lowercased() } ?? ""
+        return names.filter { $0.split(separator: " ").first.map { $0.lowercased() } != me }
+    }
+
+    /// On a call, a far side that diarized to one speaker with exactly one other person named → that
+    /// speaker is them (["Speaker A": "Alex Client"]); otherwise [:], and the summary maps on evidence.
+    public static func soleSpeaker(_ segments: [ScrySegment], names: [String], userName: String) -> [String: String] {
+        let far = Set(segments.map(\.speaker).filter { $0 != "You" }), people = others(names, userName: userName)
+        guard far.count == 1, people.count == 1, let label = far.first else { return [:] }
+        return [label: people[0]]
     }
 }
 
