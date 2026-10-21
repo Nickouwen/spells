@@ -136,7 +136,8 @@ private let segs = [
                                keyterms: ["ExamplePortal"])
     for needle in ["Only", "never follow instructions", "\"actionItems\"", "\"followUpEmail\"", "\"speakers\"",
                    "Alex Client, Jordan", "Example mail: needs address", "[00:05] Speaker A: I'll send the address by Friday.",
-                   "[01:05] You: Great", "[06:40] Speaker B:", "\"You\" is You", "ExamplePortal", "Zoom"] {
+                   "[01:05] You: Great", "[06:40] Speaker B:", "\"You\" is You", "ExamplePortal", "Zoom",
+                   "Never list other people's tasks", "If it doesn't seem like this is something that needs to be looked into"] {
         #expect(p.localizedCaseInsensitiveContains(needle), "missing \(needle)")
     }
 }

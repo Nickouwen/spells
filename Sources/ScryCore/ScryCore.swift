@@ -344,7 +344,7 @@ public enum ScryPrompt {
           "recap": [{"title": "topic", "points": ["what was said"]}],
           "decisions": ["..."],
           "keyDates": ["..."],
-          "actionItems": [{"owner": "a name, or You", "task": "...", "due": "as spoken, or null"}],
+          "actionItems": [{"owner": "You", "task": "...", "due": "as spoken, or null"}],
           "openQuestions": ["..."],
           "insights": ["..."],
           "speakers": {"Speaker A": "name"},
@@ -354,7 +354,10 @@ public enum ScryPrompt {
         Rules:
         - Use only what was actually said. Don't invent facts, owners or dates.
         - "You" is \(userName), who recorded the meeting.
-        - Action item owners must be people who were in the meeting, or "You".
+        - Action items are \(userName)'s only (owner "You"): what was specifically asked of them, what they agreed \
+        to do, or what they need to look into. Never list other people's tasks. If it doesn't seem like this is \
+        something that needs to be looked into, then don't include it as an action item. Each one short and \
+        concrete, a few words. Few is fine; none is fine.
         - Keep dates as spoken ("Friday", "next Tuesday"), in "due" and in keyDates.
         - In "speakers", map a label like "Speaker A" to a name only with evidence from the transcript (they're \
         addressed by name, they introduce themselves), the on-screen names or the invite. Leave out labels you can't support.
