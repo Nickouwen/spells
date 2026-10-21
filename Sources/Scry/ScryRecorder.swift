@@ -13,8 +13,11 @@ final class ScryRecorder: @unchecked Sendable {
     struct TapFailed: Error, CustomStringConvertible { var step: String; var status: OSStatus
                                                       var description: String { "\(step) failed (\(status))" } }
 
-    var onMic: (@Sendable (Data) -> Void)?
-    var onSystem: (@Sendable (Data) -> Void)?
+    // On `q` (read per chunk); set with `feed`, which may run mid-recording.
+    private var onMic: (@Sendable (Data) -> Void)?, onSystem: (@Sendable (Data) -> Void)?
+    func feed(mic: (@Sendable (Data) -> Void)?, system: (@Sendable (Data) -> Void)?) {
+        q.async { self.onMic = mic; self.onSystem = system }
+    }
 
     private let q = DispatchQueue(label: "dev.nic.spells.scry.recorder")
     private let engine = AVAudioEngine()

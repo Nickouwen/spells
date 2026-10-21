@@ -6,30 +6,40 @@ import SwiftUI
 
 /// The live side of a recording (when `settings.live`): two Scribe v2 Realtime sockets (your mic → "You",
 /// system audio → "Them") committing on pauses, a notes area (→ `ScryCapture.userNotes`), and "What did
-/// I miss?" through Cerebras. The sockets run for the whole recording; the panel opens from the menu.
+/// I miss?" through Cerebras. The sockets start the first time the panel opens (the note comes from the
+/// batch pass either way, so an unopened panel costs nothing) and run until the recording stops.
 @MainActor final class ScryLive {
     let model = ScryLiveModel()
     private var sockets: [ScryLiveSocket] = []
     private var panel: NSPanel?
     private let started = Date()
+    private let recorder: ScryRecorder, keyterms: [String], systemAudio: Bool
 
     init(recorder: ScryRecorder, keyterms: [String], systemAudio: Bool) {
+        self.recorder = recorder; self.keyterms = keyterms; self.systemAudio = systemAudio
+    }
+
+    private func startSockets() {
+        guard sockets.isEmpty, model.status == nil else { return }
         guard let key = SupportKeychain.read(SupportKeychain.elevenLabs) else {
             model.status = "No ElevenLabs key — live transcript off"
             return
         }
-        let you = ScryLiveSocket(apiKey: key, keyterms: keyterms) { [weak self] text in
+        let fatal: @Sendable (String) -> Void = { [weak self] m in Task { @MainActor in self?.model.status = m } }
+        let you = ScryLiveSocket(apiKey: key, keyterms: keyterms, onFatal: fatal) { [weak self] text in
             Task { @MainActor in self?.add("You", text) }
         }
-        recorder.onMic = { you.send($0) }
         sockets = [you]
+        var system: (@Sendable (Data) -> Void)?
         if systemAudio {
-            let them = ScryLiveSocket(apiKey: key, keyterms: keyterms) { [weak self] text in
+            let them = ScryLiveSocket(apiKey: key, keyterms: keyterms, onFatal: fatal) { [weak self] text in
                 Task { @MainActor in self?.add("Them", text) }
             }
-            recorder.onSystem = { them.send($0) }
             sockets.append(them)
+            system = { them.send($0) }
         }
+        recorder.feed(mic: { you.send($0) }, system: system)
+        model.status = "Live from \(Date().formatted(date: .omitted, time: .shortened)); the note covers the whole call"
     }
 
     private func add(_ speaker: String, _ text: String) {
@@ -39,6 +49,7 @@ import SwiftUI
     }
 
     func show() {
+        startSockets()
         if panel == nil {
             let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 520),
                             styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: true)
@@ -114,15 +125,17 @@ struct ScryLiveView: View {
 
 /// One continuous Scribe v2 Realtime socket (VAD commits). Audio is sent in ~100 ms chunks; chunks sent
 /// before `session_started` are queued (up to ~30 s). A dropped connection reconnects after 2 s while
-/// running. Never logs text — only event types.
+/// running, except after `quota_exceeded`, which stops it and reports through `onFatal`. Never logs text —
+/// only event types.
 final class ScryLiveSocket: @unchecked Sendable {
-    private let apiKey: String, keyterms: [String], onCommitted: @Sendable (String) -> Void
+    private let apiKey: String, keyterms: [String], onFatal: @Sendable (String) -> Void, onCommitted: @Sendable (String) -> Void
     private let lock = NSLock()
     // Guarded by `lock`.
     private var ws: URLSessionWebSocketTask?, open = false, running = true, pending = Data(), queued: [String] = []
 
-    init(apiKey: String, keyterms: [String], onCommitted: @escaping @Sendable (String) -> Void) {
-        self.apiKey = apiKey; self.keyterms = keyterms; self.onCommitted = onCommitted
+    init(apiKey: String, keyterms: [String], onFatal: @escaping @Sendable (String) -> Void,
+         onCommitted: @escaping @Sendable (String) -> Void) {
+        self.apiKey = apiKey; self.keyterms = keyterms; self.onFatal = onFatal; self.onCommitted = onCommitted
         connect()
     }
 
@@ -184,6 +197,11 @@ final class ScryLiveSocket: @unchecked Sendable {
                     onCommitted(text)
                 case .error(let type, _):
                     SupportLog.scry.error("live Scribe: \(type, privacy: .public)")
+                    if type == "quota_exceeded" {
+                        stop()
+                        onFatal("Out of ElevenLabs credits — live transcript off")
+                        return
+                    }
                 default:
                     break
                 }
