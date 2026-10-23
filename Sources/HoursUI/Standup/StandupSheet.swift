@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 import HoursCore
 
-/// EOD standup for one day (W20): editable text, Copy (plain text), Regenerate, Save.
+/// EOD standup for one day (W20): editable text, Copy (plain text), Regenerate, Save. "Covers" makes one
+/// combined standup since an earlier day; Revise regenerates with a typed correction, which sticks.
 /// Regenerate runs `StandupGenerator` in-process on a global queue (it blocks up to ~2 min on
 /// `claude -p`), so the main actor only flips the progress state.
 struct StandupSheet: View {
@@ -19,11 +20,15 @@ struct StandupSheet: View {
     @State private var error: String?
     @State private var copied = false
     @State private var confirmReplace = false
+    /// First day covered; `date` = just this day.
+    @State private var from: LocalDate
+    @State private var fix = ""
     /// Bumped only by a successful generate; keys the editor so new text fades in (saving never re-keys it).
     @State private var generation = 0
 
     init(db: HoursDB, date: LocalDate, timeZone: TimeZone = .current) {
         self.db = db; self.date = date; self.timeZone = timeZone
+        _from = State(initialValue: date)
     }
 
     /// Render/preview entry point: state preloaded, no DB read on appear.
@@ -32,6 +37,7 @@ struct StandupSheet: View {
         _stored = State(initialValue: preloaded)
         _text = State(initialValue: preloaded?.body ?? "")
         _loaded = State(initialValue: true)
+        _from = State(initialValue: preloaded?.fromDate ?? date)
     }
 
     private var dirty: Bool { stored.map { $0.body != text } ?? !text.isEmpty }
@@ -40,6 +46,7 @@ struct StandupSheet: View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
             header
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
+            if stored != nil { revision }
             if let error {
                 Text(error).textRole(.label, Theme.StateLayer.distraction)
                     .lineLimit(3).textSelection(.enabled)
@@ -51,9 +58,9 @@ struct StandupSheet: View {
         .background(Theme.canvas)
         .task { await load() }
         .confirmationDialog("Replace your edited standup?", isPresented: $confirmReplace) {
-            Button("Regenerate", role: .destructive) { generate() }
+            Button("Regenerate", role: .destructive) { generate(.clear) }
         } message: {
-            Text("Regenerating overwrites the text you edited for this day.")
+            Text("Regenerating starts over: it replaces the text and drops your corrections. Revise keeps them.")
         }
     }
 
@@ -64,7 +71,38 @@ struct StandupSheet: View {
                 Text(title).textRole(.title)
             }
             Spacer()
-            Text(provenance).textRole(.label, Theme.inkSecondary)
+            VStack(alignment: .trailing, spacing: Theme.Space.xxs) {
+                Text(provenance).textRole(.label, Theme.inkSecondary)
+                Picker("Covers", selection: $from) {
+                    ForEach(0..<10, id: \.self) { n in
+                        let d = shifted(-n)
+                        Text(n == 0 ? "This day only" : "Since \(label(d))").tag(d)
+                    }
+                }
+                .pickerStyle(.menu).fixedSize()
+                .disabled(generating)
+                .help("One combined standup since an earlier day; applies when you generate, regenerate or revise")
+            }
+        }
+    }
+
+    /// Correction box: Revise regenerates with it on top of the corrections already kept.
+    private var revision: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            HStack(spacing: Theme.Space.m) {
+                TextField("Correction, e.g. \"drop the Spells item, mention the client demo\"", text: $fix)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(generating)
+                    .onSubmit(revise)
+                Button("Revise", action: revise)
+                    .buttonStyle(HoursButtonStyle())
+                    .settingsDimsWhenDisabled()
+                    .disabled(fix.trimmingCharacters(in: .whitespaces).isEmpty || generating)
+            }
+            if let kept = stored?.corrections, !kept.isEmpty {
+                Text("Kept on regenerate: " + kept.joined(separator: " · "))
+                    .textRole(.label, Theme.inkSecondary).lineLimit(2).textSelection(.enabled)
+            }
         }
     }
 
@@ -74,7 +112,7 @@ struct StandupSheet: View {
         } else if stored == nil && !generating {
             EmptyState(symbol: "text.bubble", title: "No standup yet",
                        detail: "Generate one from this day's Claude Code sessions and tracked time.",
-                       action: .init("Generate") { generate() })
+                       action: .init("Generate") { generate(.clear) })
                 .hoursCard(padding: Theme.Space.l, radius: Theme.Radius.panel)
         } else {
             ZStack {
@@ -103,7 +141,7 @@ struct StandupSheet: View {
         HStack(spacing: Theme.Space.m) {
             if stored != nil {   // the empty state carries its own Generate
                 Button("Regenerate") {
-                    if stored?.editedMs != nil || dirty { confirmReplace = true } else { generate() }
+                    if stored?.editedMs != nil || dirty || !(stored?.corrections.isEmpty ?? true) { confirmReplace = true } else { generate(.clear) }
                 }
                 .buttonStyle(HoursButtonStyle())
                 .settingsDimsWhenDisabled()
@@ -130,9 +168,23 @@ struct StandupSheet: View {
     }
 
     private var title: String {
-        var cal = Calendar(identifier: .gregorian); cal.timeZone = timeZone
-        let d = cal.date(from: DateComponents(year: date.year, month: date.month, day: date.day, hour: 12))!
-        return d.formatted(Date.FormatStyle(locale: Locale(identifier: "en_GB"), timeZone: timeZone).weekday(.wide).day().month(.wide))
+        let full = Date.FormatStyle(locale: Locale(identifier: "en_GB"), timeZone: timeZone).weekday(.wide).day().month(.wide)
+        let day = noon(date).formatted(full)
+        return from < date ? "\(label(from)) – \(day)" : day
+    }
+
+    private var calendar: Calendar { var c = Calendar(identifier: .gregorian); c.timeZone = timeZone; return c }
+
+    private func noon(_ d: LocalDate) -> Date { calendar.date(from: DateComponents(year: d.year, month: d.month, day: d.day, hour: 12))! }
+
+    private func shifted(_ days: Int) -> LocalDate {
+        let c = calendar.dateComponents([.year, .month, .day], from: calendar.date(byAdding: .day, value: days, to: noon(date))!)
+        return LocalDate(year: c.year!, month: c.month!, day: c.day!)
+    }
+
+    /// "Mon 20 Oct"
+    private func label(_ d: LocalDate) -> String {
+        noon(d).formatted(Date.FormatStyle(locale: Locale(identifier: "en_GB"), timeZone: timeZone).weekday(.abbreviated).day().month(.abbreviated))
     }
 
     private var provenance: String {
@@ -150,23 +202,35 @@ struct StandupSheet: View {
         let s = try? await Task.detached(priority: .userInitiated) { try StandupStore(db).get(date) }.value
         stored = s
         text = s?.body ?? ""
+        from = s?.fromDate ?? date
         loaded = true
     }
 
-    private func generate() {
+    private func revise() {
+        let f = fix.trimmingCharacters(in: .whitespaces)
+        guard !f.isEmpty, !generating else { return }
+        // Revise works on the text on screen: an unsaved edit is saved first so Claude revises it.
+        if dirty, !text.isEmpty {
+            try? StandupStore(db).saveEdit(date, body: text, editedMs: Int64(Date().timeIntervalSince1970 * 1000))
+        }
+        generate(.add(f))
+    }
+
+    private func generate(_ corrections: StandupGenerator.Corrections) {
         generating = true
         error = nil
-        let db = db, date = date
+        let db = db, date = date, from = from
         Task {
             do {
                 let outcome = try await withCheckedThrowingContinuation { (c: CheckedContinuation<StandupGenerator.Outcome, Error>) in
                     DispatchQueue.global(qos: .userInitiated).async {
-                        c.resume(with: Result { try StandupGenerator.run(db: db, date: date, regenerate: true) })
+                        c.resume(with: Result { try StandupGenerator.run(db: db, date: date, from: from, regenerate: true, corrections: corrections) })
                     }
                 }
                 if case .generated(let s) = outcome {
                     withAnimation(Theme.Motion.animation(Theme.Motion.swap, reduceMotion: reduceMotion)) {
                         stored = s; text = s.body; generating = false; generation += 1
+                        if case .add = corrections { fix = "" }
                     }
                 }
             } catch {

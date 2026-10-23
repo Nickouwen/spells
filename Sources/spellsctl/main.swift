@@ -15,8 +15,10 @@ usage: spellsctl export  [--period current|previous|YYYY-MM-DD..YYYY-MM-DD] [--m
                         (api: needs RIZE_API_KEY; saves a snapshot under $SPELLS_HOME/imports, then imports it)
        spellsctl add     --date YYYY-MM-DD --start HH:MM --hours H [--label L] [--category ID] [--note TEXT] [--dry-run]
                         (manual time the tracker didn't see; same chained, undoable edit as the app's add-time)
-       spellsctl standup [--date YYYY-MM-DD] [--regenerate] [--print]
+       spellsctl standup [--date YYYY-MM-DD] [--from YYYY-MM-DD] [--fix TEXT] [--clear-fixes] [--regenerate] [--print]
                         (EOD standup from that calendar day's Claude Code transcripts via claude -p;
+                         --from makes one combined standup for the span, stored under --date;
+                         --fix revises it with a correction, kept for later regenerations;
                          --print shows the stored text without generating)
        spellsctl classify [--since YYYY-MM-DD] [--dry-run]
                         (Jev backfill for windows no rule matches; default since = 30 days ago;
@@ -47,7 +49,7 @@ let (options, flags, positional) = { () -> ([String: String], Set<String>, [Stri
             if argv[0] == "scry" { positional.append(a); i += 1; continue }
             die("unexpected argument '\(a)'\n\n\(usage)")
         }
-        if ["--force", "--dry-run", "--regenerate", "--print", "--keep"].contains(a) { flags.insert(a); i += 1; continue }
+        if ["--force", "--dry-run", "--regenerate", "--print", "--keep", "--clear-fixes"].contains(a) { flags.insert(a); i += 1; continue }
         guard i + 1 < argv.count else { die("\(a) needs a value") }
         options[a] = argv[i + 1]
         i += 2
@@ -179,7 +181,7 @@ do {
         try addTime()
 
     case "standup":
-        allow("--date", "--regenerate", "--print")
+        allow("--date", "--from", "--fix", "--clear-fixes", "--regenerate", "--print")
         try standup()
 
     case "classify":

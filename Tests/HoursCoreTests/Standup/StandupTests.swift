@@ -355,6 +355,46 @@ import ScryCore
         #expect(StandupGenerator.Runner.live.scryRoot([ScrySettings.rootKey: root.path])?.path == root.path)
     }
 
+    /// A combined standup spans days (empty ones left out), is stored under the last day, and keeps its
+    /// span and corrections through a plain regenerate; Revise adds one and sends the current text.
+    @Test func combinedSpanAndCorrectionsStick() throws {
+        let db = try storeTempDB(role: .app)
+        let mon = LocalDate(year: 2026, month: 10, day: 5), tue = LocalDate(year: 2026, month: 10, day: 6),
+            wed = LocalDate(year: 2026, month: 10, day: 7)
+        try StandupStore(db).saveEdit(LocalDate(year: 2026, month: 10, day: 2), body: "Carry-Forward:\nFriday thing", editedMs: 1)
+        try StandupStore(db).saveEdit(tue, body: "Carry-Forward:\nTuesday standup", editedMs: 1)
+        let c = Captured()
+        let r = StandupGenerator.Runner(dump: { _, d in d == tue ? "\n" : "[aaaaaaaa] USER: substantive work on day \(d.day) here" },
+                                        claude: { _, prompt in c.prompt = prompt; c.calls += 1; return (Self.reply, "m") })
+        _ = try StandupGenerator.run(db: db, date: wed, from: mon, regenerate: true, runner: r)
+        #expect(c.prompt.contains("combined end-of-day Slack standup covering 2026-10-05 to 2026-10-07"))
+        #expect(c.prompt.contains("First line exactly: Example User - EOD October 5–7"))
+        #expect(c.prompt.contains("3–6 Worked On items") && c.prompt.contains("where things stand at the end of 2026-10-07"))
+        #expect(c.prompt.contains("Day 2026-10-05:") && c.prompt.contains("day 5 here") && c.prompt.contains("day 7 here"))
+        #expect(!c.prompt.contains("Day 2026-10-06:"))   // no log that day
+        #expect(c.prompt.contains("Previous standup (2026-10-02)"))   // before the span, not inside it
+        #expect(try StandupStore(db).get(wed)?.fromDate == mon)
+
+        _ = try StandupGenerator.run(db: db, date: wed, corrections: .add("drop the  billing item\n"), runner: r)
+        #expect(c.prompt.contains("covering 2026-10-05") && c.prompt.contains("Corrections from Example User; they override the rules above:\n- drop the  billing item"))
+        #expect(c.prompt.contains("<draft>\nExample User - EOD October 5\nWorked On:"))
+        _ = try StandupGenerator.run(db: db, date: wed, corrections: .add("shorter"), runner: r)
+        _ = try StandupGenerator.run(db: db, date: wed, regenerate: true, runner: r)   // the hourly refresh
+        #expect(c.prompt.contains("- drop the  billing item\n- shorter") && !c.prompt.contains("<draft>"))
+        #expect(try StandupStore(db).get(wed)?.corrections == ["drop the  billing item", "shorter"])
+
+        _ = try StandupGenerator.run(db: db, date: wed, from: wed, regenerate: true, corrections: .clear, runner: r)
+        let s = try #require(try StandupStore(db).get(wed))
+        #expect(s.fromDate == nil && s.instructions == nil && !c.prompt.contains("Corrections from") && !c.prompt.contains("covering"))
+        #expect(c.calls == 5)
+    }
+
+    @Test func headingAcrossMonths() {
+        #expect(StandupPrompt.heading(from: LocalDate(year: 2026, month: 10, day: 30), to: LocalDate(year: 2026, month: 11, day: 2))
+                == "October 30 – November 2")
+        #expect(StandupPrompt.heading(from: LocalDate(year: 2026, month: 10, day: 5), to: LocalDate(year: 2026, month: 10, day: 5)) == "October 5")
+    }
+
     @Test func missingDumpScriptFailsClearly() {
         #expect {
             _ = try StandupGenerator.liveDump("/nonexistent/cc-day-dump.sh", LocalDate(year: 2026, month: 10, day: 5))

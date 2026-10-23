@@ -57,41 +57,79 @@ public enum StandupGenerator {
                                         scryRoot: { ScrySettings.load($0).rootURL })
     }
 
+    /// What a regeneration does with the stored corrections.
+    public enum Corrections: Sendable, Equatable {
+        case keep
+        /// Appends one and revises the current text with it (implies regenerate).
+        case add(String)
+        /// Starts over without them.
+        case clear
+    }
+
     /// Generates and stores the standup for `date` unless one exists (any stored row, edited or not)
-    /// and `regenerate` is false.
+    /// and `regenerate` is false. `from` before `date` makes a combined standup for the span, stored
+    /// under `date`; nil reuses the stored span. Both span and corrections stick to the row, so the
+    /// hourly refresh keeps them.
     @discardableResult
-    public static func run(db: HoursDB, date: LocalDate, regenerate: Bool = false,
+    public static func run(db: HoursDB, date: LocalDate, from: LocalDate? = nil, regenerate: Bool = false,
+                           corrections: Corrections = .keep,
                            nowMs: Int64 = Int64(Date().timeIntervalSince1970 * 1000), runner: Runner = .live) throws -> Outcome {
         let store = StandupStore(db)
-        if !regenerate, let existing = try store.get(date) { return .exists(existing) }
+        let existing = try store.get(date)
+        if case .add = corrections {} else if !regenerate, let existing { return .exists(existing) }
+        let start = min(from ?? existing?.fromDate ?? date, date)
+        var fixes = corrections == .clear ? [] : existing?.corrections ?? []
+        var draft: String?
+        if case .add(let fix) = corrections {
+            let line = fix.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+            if !line.isEmpty { fixes.append(line) }
+            draft = existing?.body
+        }
         let settings = StandupSettings.load(try SettingStore(db).all())
-        let prompt = try prompt(db: db, date: date, settings: settings, runner: runner)
+        let prompt = try prompt(db: db, from: start, to: date, settings: settings, runner: runner, corrections: fixes, draft: draft)
         let reply = try runner.claude(settings.claudePath, prompt)
         let body = try clean(reply.text, name: settings.name)
         let sha = SHA256.hash(data: Data(prompt.utf8)).map { String(format: "%02x", $0) }.joined()
-        try store.saveGenerated(date, body: body, generatedMs: nowMs, inputsSha256: sha, model: reply.model)
+        try store.saveGenerated(date, body: body, generatedMs: nowMs, inputsSha256: sha, model: reply.model,
+                                fromDate: start < date ? start : nil, instructions: fixes.isEmpty ? nil : fixes.joined(separator: "\n"))
         return .generated(try store.get(date)!)
     }
 
     /// The full `claude -p` stdin for `date` (redacted, capped).
     public static func prompt(db: HoursDB, date: LocalDate, settings: StandupSettings, runner: Runner) throws -> String {
-        let raw = try runner.dump(settings.dumpScript, date)
+        try prompt(db: db, from: date, to: date, settings: settings, runner: runner)
+    }
+
+    /// The `claude -p` stdin for `from`...`to`: each day's dump, condensed to an equal share of the cap.
+    /// Days with no log are left out; all empty throws `emptyDump`.
+    // ponytail: one dump-script run per day; fine for a week or two.
+    public static func prompt(db: HoursDB, from: LocalDate, to: LocalDate, settings: StandupSettings, runner: Runner,
+                              corrections: [String] = [], draft: String? = nil) throws -> String {
+        var dates = [from]
+        while dates.last! < to { dates.append(dates.last!.storeNextDay()) }
         let excludedSids = settings.excludeRepos.isEmpty ? [] : runner.excludedSessions(settings.excludeRepos)
-        let dump = StandupPrompt.condense(StandupRedact.redact(raw, allowEmails: settings.allowEmails), excluding: excludedSids)
-        if dump.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw Failure.emptyDump(date) }
         let config = try ExportConfig.load(db)
         let classifier = Classifier(categories: config.categories, rules: config.rules, projects: config.projects)
-        // ponytail: Hours' 04:00 store day vs the dump's calendar day — a 00:00–04:00 stretch lands on
-        // different days in the two inputs. Fine for effort weighting.
-        let spans = classifier.classifyAll(try Store(db).effectiveSpans(day: date))
-        let metrics = DayMetrics.compute(spans: spans, categories: config.categories)
-        let day = date.dayInterval(in: .current)
-        let meetings = (runner.scryRoot(try SettingStore(db).all()).map(scryNotes) ?? []).map(\.note)
-            .filter { day.contains(Int64($0.meta.startedAt.timeIntervalSince1970 * 1000)) }
-        return StandupPrompt.build(name: settings.name, date: date,
-                                   timeContext: StandupPrompt.timeContext(metrics, projects: config.projects),
-                                   previous: try StandupStore(db).previous(before: date), dump: dump,
-                                   excluded: settings.excludeRepos, meetings: StandupRedact.redact(StandupPrompt.meetingsContext(meetings), allowEmails: settings.allowEmails))
+        let notes = (runner.scryRoot(try SettingStore(db).all()).map(scryNotes) ?? []).map(\.note)
+        var days: [StandupPrompt.Day] = []
+        for date in dates {
+            let raw = try runner.dump(settings.dumpScript, date)
+            let dump = StandupPrompt.condense(StandupRedact.redact(raw, allowEmails: settings.allowEmails), excluding: excludedSids,
+                                              cap: StandupPrompt.dumpCap / dates.count)
+            if dump.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+            // ponytail: Hours' 04:00 store day vs the dump's calendar day — a 00:00–04:00 stretch lands on
+            // different days in the two inputs. Fine for effort weighting.
+            let spans = classifier.classifyAll(try Store(db).effectiveSpans(day: date))
+            let metrics = DayMetrics.compute(spans: spans, categories: config.categories)
+            let day = date.dayInterval(in: .current)
+            let meetings = notes.filter { day.contains(Int64($0.meta.startedAt.timeIntervalSince1970 * 1000)) }
+            days.append(.init(date: date, timeContext: StandupPrompt.timeContext(metrics, projects: config.projects),
+                              meetings: StandupRedact.redact(StandupPrompt.meetingsContext(meetings), allowEmails: settings.allowEmails),
+                              dump: dump))
+        }
+        if days.isEmpty { throw Failure.emptyDump(to) }
+        return StandupPrompt.build(name: settings.name, from: from, to: to, days: days, previous: try StandupStore(db).previous(before: from),
+                                   excluded: settings.excludeRepos, corrections: corrections, draft: draft)
     }
 
     /// Every Scry note under `root` (recursive `*.md` that parse as one), newest first. Also the Meetings

@@ -9,7 +9,7 @@ import GRDB
 /// busy_timeout, then sees the bumped version and does nothing.
 enum StoreSchema {
     /// Index i migrates user_version i → i+1. Never edit a shipped entry; append.
-    static let migrations: [@Sendable (Database) throws -> Void] = [v1, v2, v3]
+    static let migrations: [@Sendable (Database) throws -> Void] = [v1, v2, v3, v4]
 
     static var latestVersion: Int { migrations.count }
 
@@ -48,6 +48,15 @@ enum StoreSchema {
           retry_after_ms INTEGER) STRICT;
         CREATE INDEX jev_class_path ON jev_class(app, host, path_tpl);
         CREATE INDEX jev_class_host ON jev_class(app, host);
+        """)
+    }
+
+    /// Standups covering several days (`from_date`..`date`, NULL = just `date`) and the user's
+    /// corrections, reapplied on every regeneration (newline-separated, NULL = none).
+    private static func v4(_ db: Database) throws {
+        try db.execute(sql: """
+        ALTER TABLE standup ADD COLUMN from_date TEXT;
+        ALTER TABLE standup ADD COLUMN instructions TEXT;
         """)
     }
 

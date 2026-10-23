@@ -1,7 +1,7 @@
 import Foundation
 import HoursCore
 
-/// `spellsctl standup [--date YYYY-MM-DD] [--regenerate] [--print]`. The default date is the calendar
+/// `spellsctl standup [--date YYYY-MM-DD] [--from YYYY-MM-DD] [--fix TEXT] [--clear-fixes] [--regenerate] [--print]`. The default date is the calendar
 /// day (the transcript dump's boundary), not the 04:00 store day.
 @MainActor func standup() throws {
     let date: LocalDate
@@ -17,7 +17,15 @@ import HoursCore
         say(s.body)
         return
     }
-    switch try StandupGenerator.run(db: db, date: date, regenerate: flags.contains("--regenerate")) {
+    var from: LocalDate?
+    if let s = options["--from"] {
+        guard let d = LocalDate(iso: s), d <= date else { die("bad --from '\(s)' (YYYY-MM-DD, not after --date)") }
+        from = d
+    }
+    let corrections: StandupGenerator.Corrections = options["--fix"].map { .add($0) } ?? (flags.contains("--clear-fixes") ? .clear : .keep)
+    switch try StandupGenerator.run(db: db, date: date, from: from,
+                                    regenerate: flags.contains("--regenerate") || from != nil || corrections == .clear,
+                                    corrections: corrections) {
     case .exists(let s):
         say("already generated for \(date)\(s.editedMs != nil ? " (edited)" : "") — use --regenerate to replace it, --print to show it")
     case .generated(let s):

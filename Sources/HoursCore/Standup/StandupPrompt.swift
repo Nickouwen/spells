@@ -144,36 +144,68 @@ public enum StandupPrompt {
         return "\(months[date.month - 1]) \(date.day)"
     }
 
+    /// "October 20–22", or "October 30 – November 2" across a month.
+    static func heading(from: LocalDate, to: LocalDate) -> String {
+        guard from != to else { return heading(to) }
+        return from.month == to.month && from.year == to.year ? "\(heading(from))–\(to.day)" : "\(heading(from)) – \(heading(to))"
+    }
+
+    /// One day's inputs.
+    public struct Day: Sendable {
+        public var date: LocalDate, timeContext: String, meetings: String, dump: String
+        public init(date: LocalDate, timeContext: String, meetings: String = "", dump: String) {
+            self.date = date; self.timeContext = timeContext; self.meetings = meetings; self.dump = dump
+        }
+    }
+
     // MARK: - Prompt
 
     public static func build(name: String, date: LocalDate, timeContext: String, previous: Standup?, dump: String,
                              excluded: Set<String> = [], meetings: String = "") -> String {
+        build(name: name, from: date, to: date, days: [Day(date: date, timeContext: timeContext, meetings: meetings, dump: dump)],
+              previous: previous, excluded: excluded)
+    }
+
+    /// `days` in order (the ones with a log); `from` before `to` makes a combined standup for the span.
+    /// `corrections` are the user's, applied over the rules; `draft` is the current text they correct.
+    public static func build(name: String, from: LocalDate, to: LocalDate, days: [Day], previous: Standup?,
+                             excluded: Set<String> = [], corrections: [String] = [], draft: String? = nil) -> String {
+        let span = from < to
+        let meetings = days.contains { !$0.meetings.isEmpty }
         let prev = previous.map { "Previous standup (\($0.date)):\n\($0.body)" } ?? "Previous standup: none stored."
+        let what = span ? "combined end-of-day Slack standup covering \(from) to \(to) from his Claude Code session logs"
+            : "end-of-day Slack standup for \(to) from his Claude Code session log"
+        let fixes = corrections.isEmpty ? "" : "\n\nCorrections from \(name); they override the rules above:\n"
+            + corrections.map { "- " + $0 }.joined(separator: "\n")
+            + (draft.map { "\n\nCurrent standup, to revise: apply the corrections, keep what they don't touch.\n<draft>\n\($0)\n</draft>" } ?? "")
+        let context = span
+            ? days.map { d in
+                "Day \(d.date):\n\(d.timeContext)\(d.meetings.isEmpty ? "" : "\n\n" + d.meetings)\n<log>\n\(d.dump)\n</log>"
+            }.joined(separator: "\n\n")
+            : "\(days[0].timeContext)\(meetings ? "\n\n" + days[0].meetings : "")\n\n\(prev)\n\nSession log for \(to) (condensed; \(logKey(name))):\n<log>\n\(days[0].dump)\n</log>"
+        let spanContext = span ? "\(prev)\n\nSession logs by day (condensed; \(logKey(name))):\n\n\(context)" : context
         return """
-        Write \(name)'s end-of-day Slack standup for \(date) from his Claude Code session log below.
+        Write \(name)'s \(what) below.
 
         Rules:
         - Plain text only, Slack-ready: no markdown, no headers with #, no bold, no bullets or dashes at line starts, no code.
-        - First line exactly: \(name) - EOD \(heading(date))
+        - First line exactly: \(name) - EOD \(heading(from: from, to: to))
         - Then these four section labels, each alone on its line, in this order: "Worked On:", "Still Work In Progress:", "Blockers:", "Carry-Forward:". One item per line under each. A section with nothing gets the single line "None".
         - Brief and simple: each line at most ~12 words, outcome first, plain words a non-technical reader gets at a glance. No parentheticals, counts, numbers or IDs.
         - Keep it high-level, for a lead who doesn't read code: say what moved forward and why it matters (which market, pipeline, customer-facing feature or business capability), not how it was done. Leave out implementation detail: no file, function, table, API, model or library names, no error messages, no mechanisms. "Fixed FL owner mailing addresses" beats "patched the tax-mailing join in the ExampleCRM sync".
-        - 2–4 Worked On items; merge related work into one line, broader rather than more. At most 2 lines under Still Work In Progress, 2 under Blockers and 3 under Carry-Forward: only the most important, drop the rest rather than listing everything. Name products, counties, vendors and features, not repo paths, branches, session ids or PR numbers.\(excluded.isEmpty ? "" : "\n- Leave out personal side projects entirely, even if the previous standup lists them: \(excluded.sorted().joined(separator: ", ")).")
+        - \(span ? "3–6" : "2–4") Worked On items; merge related work into one line, broader rather than more. At most 2 lines under Still Work In Progress, 2 under Blockers and 3 under Carry-Forward: only the most important, drop the rest rather than listing everything. Name products, counties, vendors and features, not repo paths, branches, session ids or PR numbers.\(span ? "\n- One standup for the whole span, not one per day: merge work across the days; Still Work In Progress, Blockers and Carry-Forward say where things stand at the end of \(to)." : "")\(excluded.isEmpty ? "" : "\n- Leave out personal side projects entirely, even if the previous standup lists them: \(excluded.sorted().joined(separator: ", ")).")
         - Work only: the log can include personal assistant chats (errands, household or hobby tasks); leave anything unrelated to the business out.
         - Weight items by the tracked time and by how much of the log they take. Skip small talk, tooling meta-work under ~15 minutes, and anything not done that day.
-        - Continue the previous standup coherently: finished WIP moves to Worked On, finished items are not repeated, and an old open item stays only if it is still among the most important; let the rest drop.\(meetings.isEmpty ? "" : "\n- Meetings (Scry): work discussed or decided there goes into Worked On, open action items owned by You go into Carry-Forward; never list a meeting itself as an item.")
+        - Continue the previous standup coherently: finished WIP moves to Worked On, finished items are not repeated, and an old open item stays only if it is still among the most important; let the rest drop.\(meetings ? "\n- Meetings (Scry): work discussed or decided there goes into Worked On, open action items owned by You go into Carry-Forward; never list a meeting itself as an item." : "")
         - Never output secrets, tokens, emails or the text "[redacted]".
-        - Output only the standup, nothing before or after it.
+        - Output only the standup, nothing before or after it.\(fixes)
 
 
-        \(timeContext)\(meetings.isEmpty ? "" : "\n\n" + meetings)
-
-        \(prev)
-
-        Session log for \(date) (condensed; each "## session" line is a session title, lines within a session are in order; USER = \(name), CLAUDE = the assistant, Claude Code or Codex):
-        <log>
-        \(dump)
-        </log>
+        \(spanContext)
         """
+    }
+
+    private static func logKey(_ name: String) -> String {
+        "each \"## session\" line is a session title, lines within a session are in order; USER = \(name), CLAUDE = the assistant, Claude Code or Codex"
     }
 }
