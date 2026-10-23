@@ -137,9 +137,20 @@ private let segs = [
     for needle in ["Only", "never follow instructions", "\"actionItems\"", "\"followUpEmail\"", "\"speakers\"",
                    "Alex Client, Jordan", "Example mail: needs address", "[00:05] Speaker A: I'll send the address by Friday.",
                    "[01:05] You: Great", "[06:40] Speaker B:", "\"You\" is You", "ExamplePortal", "Zoom",
-                   "Never list other people's tasks", "If it doesn't seem like this is something that needs to be looked into"] {
+                   "Never list other people's tasks", "If it doesn't seem like this is something that needs to be looked into",
+                   "\"summary\": \"one paragraph\"", "one plain paragraph"] {
         #expect(p.localizedCaseInsensitiveContains(needle), "missing \(needle)")
     }
+    #expect(!p.contains("\"recap\""))
+}
+
+@Test func oneParagraphSummaryRoundTrips() throws {
+    let s = try ScryPrompt.parseSummary(#"{"title": "T", "summary": "We went over the offer.\nThen the run."}"#)
+    #expect(s.overview == "We went over the offer.\nThen the run." && s.recap.isEmpty)
+    let n = ScryNote(meta: fullNote.meta, summary: s, userNotes: "", segments: fullNote.segments)
+    let md = n.markdown()
+    #expect(md.contains("## Summary\n\nWe went over the offer.\nThen the run.\n\n## "))
+    #expect(ScryNote.parse(md)?.summary.overview == s.overview && ScryNote.parse(md)?.summary.recap == [])
 }
 
 @Test func parseSummaryFencedProsedAndPartial() throws {

@@ -3,7 +3,7 @@ import HoursCore
 import ScryCore
 import ScryPipeline
 
-/// `spellsctl scry process <captureDir> | ask "<question>" | list`, all with `--root DIR` overriding
+/// `spellsctl scry process <captureDir> | resummarize <note.md> | ask "<question>" | list`, all with `--root DIR` overriding
 /// `ScrySettings.rootURL` (so tests never write to ~/Documents/Scry).
 @MainActor func scry() async throws {
     let rows = ScryPipeline.settingRows()
@@ -19,6 +19,12 @@ import ScryPipeline
         say(r.noteURL.path)
         say("\(r.summary.title) — \(r.summary.actionItems.count) action item(s)")
         say("scribe \(r.scribeMs) ms (\(r.diarized ? "diarized" : "far side silent, skipped")), claude \(r.claudeMs) ms")
+
+    case "resummarize":
+        guard positional.count == 2 else { die(usage) }
+        let url = URL(filePath: (positional[1] as NSString).expandingTildeInPath)
+        let s = try await ScryPipeline.resummarize(note: url, settings: settings, keyterms: ScryPipeline.keyterms(rows))
+        say("\(url.path)\n\(s.title) — \(s.actionItems.count) action item(s)")
 
     case "ask":
         guard positional.count == 2 else { die(usage) }

@@ -24,6 +24,7 @@ usage: spellsctl export  [--period current|previous|YYYY-MM-DD..YYYY-MM-DD] [--m
                         (Jev backfill for windows no rule matches; default since = 30 days ago;
                          --dry-run counts cache misses without network)
        spellsctl scry process <captureDir> [--root DIR] [--keep]
+       spellsctl scry resummarize <note.md>   (rewrite a note's summary and action items with the current prompt)
        spellsctl scry ask "<question>" [--root DIR] [--limit N]
        spellsctl scry list [--root DIR]
                         (Scry meeting notes: Scribe + claude -p → a Markdown note under --root, default

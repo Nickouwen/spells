@@ -104,6 +104,24 @@ public enum ScryPipeline {
         return Result(noteURL: url, summary: summary, scribeMs: scribeMs, claudeMs: claudeMs, diarized: diarized)
     }
 
+    /// Re-summarizes a note from its own transcript with the current prompt and rewrites it in place: same
+    /// times, participants, transcript and your notes; new title, summary and action items (ticks are lost).
+    public static func resummarize(note url: URL, settings: ScrySettings, keyterms: [String]) async throws -> ScrySummary {
+        guard let note = ScryNote.parse(try String(contentsOf: url, encoding: .utf8)), !note.segments.isEmpty else {
+            throw Failure.claude("\(url.lastPathComponent) isn't a Scry note with a transcript")
+        }
+        let prompt = ScryPrompt.summary(segments: note.segments, participants: note.meta.participants, userNotes: note.userNotes,
+                                        userName: settings.userName, appName: note.meta.app, startedAt: note.meta.startedAt,
+                                        keyterms: keyterms)
+        let summary = try ScryPrompt.parseSummary(try await claude(prompt))
+        var meta = note.meta
+        meta.speakers = meta.speakers.merging(summary.speakers) { a, _ in a }
+        let out = ScryNote(meta: meta, summary: summary, userNotes: note.userNotes,
+                           segments: ScryTranscript.renamed(note.segments, summary.speakers))
+        try Data(out.markdown().utf8).write(to: url, options: .atomic)
+        return summary
+    }
+
     /// `x.md` → `x-2.md`, `x-3.md`… while the path exists.
     static func unique(_ url: URL) -> URL {
         let base = url.deletingPathExtension().path

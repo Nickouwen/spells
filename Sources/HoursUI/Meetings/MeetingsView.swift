@@ -175,7 +175,9 @@ struct MeetingsView: View {
                     }
                     if !n.speakers.isEmpty { speakers(n) }
                 }
-                if !s.recap.isEmpty {
+                if !s.overview.isEmpty {
+                    card("Summary") { Text(s.overview).textRole(.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+                } else if !s.recap.isEmpty {
                     card("Summary") {
                         ForEach(s.recap.indices, id: \.self) { i in
                             VStack(alignment: .leading, spacing: Theme.Space.xs) {
