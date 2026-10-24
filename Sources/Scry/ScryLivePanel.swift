@@ -5,7 +5,7 @@ import ScryCore
 import SwiftUI
 
 /// The live side of a recording (when `settings.live`): two Scribe v2 Realtime sockets (your mic → "You",
-/// system audio → "Them") committing on pauses, a notes area (→ `ScryCapture.userNotes`), and "What did
+/// system audio → "Them") streaming each utterance in grey and committing it on the pause, a notes area (→ `ScryCapture.userNotes`), and "What did
 /// I miss?" through Cerebras. The sockets start the first time the panel opens (the note comes from the
 /// batch pass either way, so an unopened panel costs nothing) and run until the recording stops.
 @MainActor final class ScryLive {
@@ -26,14 +26,14 @@ import SwiftUI
             return
         }
         let fatal: @Sendable (String) -> Void = { [weak self] m in Task { @MainActor in self?.model.status = m } }
-        let you = ScryLiveSocket(apiKey: key, keyterms: keyterms, onFatal: fatal) { [weak self] text in
-            Task { @MainActor in self?.add("You", text) }
+        let you = ScryLiveSocket(apiKey: key, keyterms: keyterms, onFatal: fatal) { [weak self] text, final in
+            Task { @MainActor in self?.add("You", text, final: final) }
         }
         sockets = [you]
         var system: (@Sendable (Data) -> Void)?
         if systemAudio {
-            let them = ScryLiveSocket(apiKey: key, keyterms: keyterms, onFatal: fatal) { [weak self] text in
-                Task { @MainActor in self?.add("Them", text) }
+            let them = ScryLiveSocket(apiKey: key, keyterms: keyterms, onFatal: fatal) { [weak self] text, final in
+                Task { @MainActor in self?.add("Them", text, final: final) }
             }
             sockets.append(them)
             system = { them.send($0) }
@@ -42,7 +42,10 @@ import SwiftUI
         model.status = "Live from \(Date().formatted(date: .omitted, time: .shortened)); the note covers the whole call"
     }
 
-    private func add(_ speaker: String, _ text: String) {
+    /// A partial replaces the speaker's in-progress line; the commit (on the pause) makes it a segment.
+    private func add(_ speaker: String, _ text: String, final: Bool) {
+        guard final else { model.partial[speaker] = text.trimmingCharacters(in: .whitespaces).isEmpty ? nil : text; return }
+        model.partial[speaker] = nil
         // ponytail: a VAD commit arrives at the end of the utterance, so start = end = commit time.
         let t = Date().timeIntervalSince(started)
         model.segments.append(ScrySegment(speaker: speaker, start: t, end: t, text: text))
@@ -85,6 +88,8 @@ import SwiftUI
 
 @Observable @MainActor final class ScryLiveModel {
     var segments: [ScrySegment] = []
+    /// Speaker → what they're saying right now, before the pause commits it.
+    var partial: [String: String] = [:]
     var notes = ""
     var catchUp = ""
     var busy = false
@@ -102,6 +107,9 @@ struct ScryLiveView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(model.segments.enumerated()), id: \.offset) { _, s in
                         Text("\(s.speaker): \(s.text)").textSelection(.enabled)
+                    }
+                    ForEach(model.partial.keys.sorted().reversed(), id: \.self) { k in   // You, then Them
+                        Text("\(k): \(model.partial[k] ?? "")").foregroundStyle(.secondary)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -128,14 +136,16 @@ struct ScryLiveView: View {
 /// running, except after `quota_exceeded`, which stops it and reports through `onFatal`. Never logs text —
 /// only event types.
 final class ScryLiveSocket: @unchecked Sendable {
-    private let apiKey: String, keyterms: [String], onFatal: @Sendable (String) -> Void, onCommitted: @Sendable (String) -> Void
+    private let apiKey: String, keyterms: [String], onFatal: @Sendable (String) -> Void
+    /// (text, final): partials as the utterance grows (final false), then its commit.
+    private let onText: @Sendable (String, Bool) -> Void
     private let lock = NSLock()
     // Guarded by `lock`.
     private var ws: URLSessionWebSocketTask?, open = false, running = true, pending = Data(), queued: [String] = []
 
     init(apiKey: String, keyterms: [String], onFatal: @escaping @Sendable (String) -> Void,
-         onCommitted: @escaping @Sendable (String) -> Void) {
-        self.apiKey = apiKey; self.keyterms = keyterms; self.onFatal = onFatal; self.onCommitted = onCommitted
+         onText: @escaping @Sendable (String, Bool) -> Void) {
+        self.apiKey = apiKey; self.keyterms = keyterms; self.onFatal = onFatal; self.onText = onText
         connect()
     }
 
@@ -193,8 +203,10 @@ final class ScryLiveSocket: @unchecked Sendable {
                         for m in queued { task.send(.string(m)) { _ in } }
                         queued = []
                     }
-                case .committed(let text) where !text.trimmingCharacters(in: .whitespaces).isEmpty:
-                    onCommitted(text)
+                case .partial(let text):
+                    onText(text, false)
+                case .committed(let text):
+                    onText(text, !text.trimmingCharacters(in: .whitespaces).isEmpty)   // empty: just clears the grey line
                 case .error(let type, _):
                     SupportLog.scry.error("live Scribe: \(type, privacy: .public)")
                     if type == "quota_exceeded" {
