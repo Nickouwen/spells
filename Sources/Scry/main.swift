@@ -1,8 +1,10 @@
 import AppKit
 import Darwin
-import HoursCore
+import SpellsKit
+import SpellsUI
 
-// Scry, the meeting-notes spell: a menu-bar accessory (login item of Spells.app, only while switched on).
+// Scry, the meeting-notes spell: a menu-bar accessory module, started from the Spells launcher (and at login
+// once it registered itself).
 // Offers to record when a call app takes the mic; after the call, ScryPipeline writes the note.
 
 // CLI test modes: no UI and no single-instance lock.
@@ -28,5 +30,7 @@ if lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) != 0 {   // no lock file: run u
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let scry = ScryApp()
+ModuleURLs.install(settings: .scry()) { verb, query in ScryWindows.handle(verb, query) }
+ModuleLoginItem.sync(.scry())
 SupportLog.scry.info("Scry started")
 app.run()

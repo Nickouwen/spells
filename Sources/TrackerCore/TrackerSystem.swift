@@ -1,7 +1,7 @@
 import AppKit
 import CoreGraphics
 import IOKit.pwr_mgt
-import HoursCore
+import RewindCore
 
 /// Thin OS readings: clocks, HID idle, display-sleep assertions, Automation permission.
 enum TrackerSystem {

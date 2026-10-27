@@ -1,6 +1,6 @@
 import Foundation
 import FoundationModels
-import HoursCore
+import SpellsKit
 import IncantCore
 
 /// One dictation's correction clients, made (and warmed) at `.start`: Cerebras primary, on-device

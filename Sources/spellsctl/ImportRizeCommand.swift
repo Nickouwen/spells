@@ -1,5 +1,5 @@
 import Foundation
-import HoursCore
+import RewindCore
 
 /// `spellsctl import-rize --source <snapshot.json|api> [--dry-run] [--since YYYY-MM-DD]`
 @MainActor func importRize() async throws {
@@ -41,13 +41,13 @@ import HoursCore
     say("Rize snapshot \(file.lastPathComponent)  sha256:\(sha.prefix(16))…  tz \(snap.timezone)  fetched \(snap.fetchedAt)")
     say("DB \(paths.db.path)")
     if let lo = plan.blocks.first?.loMs, let hi = plan.blocks.last?.hiMs {
-        say("range \(day(lo))..\(day(hi - 1)) (Hours days, \(Hours.defaultDayStartHour):00 boundary)")
+        say("range \(day(lo))..\(day(hi - 1)) (Hours days, \(RewindModule.defaultDayStartHour):00 boundary)")
     }
     say("\(plan.events) Rize events → \(plan.sourceBlocks) blocks, \(h(plan.sourceMs))\(since.map { " since \($0)" } ?? "")"
         + (plan.idleMs > 0 ? "  (idle dropped: \(h(plan.idleMs)))" : ""))
     say("to import: \(plan.blocks.count) blocks, \(h(plan.totalMs))")
     say("skipped: already imported \(plan.alreadyImportedBlocks) blocks / \(h(plan.alreadyImportedMs)); "
-        + "overlapping Hours-tracked \(plan.overlapBlocks) blocks / \(h(plan.overlapMs)); partly clipped \(plan.clippedBlocks)")
+        + "overlapping Rewind-tracked \(plan.overlapBlocks) blocks / \(h(plan.overlapMs)); partly clipped \(plan.clippedBlocks)")
 
     var month: [String: Int64] = [:], cat: [String: Int64] = [:], proj: [String: Int64] = [:]
     var rize: [String: Int64] = [:], unmapped: [String: Int64] = [:]
@@ -67,8 +67,8 @@ import HoursCore
     }
     func top(_ d: [String: Int64], _ n: Int = 12) -> [(String, Int64)] { d.sorted { $0.value > $1.value }.prefix(n).map { ($0.key, $0.value) } }
     say("per month:"); for (k, v) in month.sorted(by: { $0.key < $1.key }) { say("  \(k)  \(h(v))") }
-    say("Hours categories:"); for (k, v) in top(cat) { say("  \(k.padding(toLength: 18, withPad: " ", startingAt: 0)) \(h(v))") }
-    say("Rize → Hours:")
+    say("Rewind categories:"); for (k, v) in top(cat) { say("  \(k.padding(toLength: 18, withPad: " ", startingAt: 0)) \(h(v))") }
+    say("Rize → Rewind:")
     for (k, v) in top(rize, 40) {
         let to = RizeCategoryMap.map(k)
         say("  \((plan.rizeCategoryNames[k] ?? k).padding(toLength: 20, withPad: " ", startingAt: 0)) → \(to.mapped ? (to.categoryId.flatMap { names[$0] } ?? "Uncategorized") : "UNMAPPED → Uncategorized")  \(h(v))")
@@ -103,7 +103,7 @@ import HoursCore
         let spans = try Store(db).effectiveSpans(rangeFrom: try rizeMs(b.startTime), to: try rizeMs(b.endTime))
         let imported = spans.filter { $0.source == .manual && $0.label?.hasPrefix("Rize · ") == true }.reduce(0) { $0 + $1.durationMs }
         let all = spans.filter { $0.kind == .active }.reduce(0) { $0 + $1.durationMs }
-        say("check \(p.date): Rize \(h(p.rizeMs))  imported \(h(imported))  all Hours active \(h(all))")
+        say("check \(p.date): Rize \(h(p.rizeMs))  imported \(h(imported))  all Rewind active \(h(all))")
     }
 }
 

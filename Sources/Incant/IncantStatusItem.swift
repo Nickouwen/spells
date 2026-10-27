@@ -1,7 +1,8 @@
 import AppKit
-import HoursCore
+import SpellsKit
 
-/// Menu-bar mic: waveform = ready, waveform.circle.fill = listening, waveform.slash = a permission is missing. The menu lists both
+/// Menu-bar waveform glyph (Resources/Incant/MenuBar*.png): template = ready, painted green = listening,
+/// dimmed = a permission is missing. The menu lists both
 /// permissions (click a missing one to open its Settings pane). Switching Incant off is in Spells.
 @MainActor final class IncantStatusItem: NSObject, NSMenuDelegate {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -16,9 +17,12 @@ import HoursCore
     }
 
     func refresh() {
-        let (symbol, tip) = listening ? ("waveform.circle.fill", "Incant: listening")
-            : IncantPermissions.ready ? ("waveform", "Incant: ready") : ("waveform.slash", "Incant: permissions needed")
-        item.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
+        let ready = IncantPermissions.ready
+        let tip = listening ? "Incant: listening" : ready ? "Incant: ready" : "Incant: permissions needed"
+        let image = Bundle.main.image(forResource: listening ? "MenuBarColor" : "MenuBar")
+        image?.isTemplate = !listening
+        item.button?.image = image
+        item.button?.alphaValue = listening || ready ? 1 : 0.45
         item.button?.toolTip = tip
     }
 
@@ -29,6 +33,7 @@ import HoursCore
         menu.addItem(permission("Microphone", ok: IncantPermissions.microphone == .authorized, pane: "Privacy_Microphone"))
         menu.addItem(permission("Accessibility", ok: IncantPermissions.accessibility, pane: "Privacy_Accessibility"))
         menu.addItem(.separator())
+        menu.addItem(action("Settings…", #selector(openSettings)))
         menu.addItem(action("Open Spells", #selector(openSpells)))
         menu.addItem(action("Quit Incant", #selector(quit)))
     }
@@ -59,9 +64,10 @@ import HoursCore
     }
 
     @objc private func openSpells() {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Hours.bundlePrefix) else { return }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Spells.launcherBundleID) else { return }
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 
+    @objc private func openSettings() { IncantWindows.showSettings() }
     @objc private func quit() { NSApp.terminate(nil) }
 }

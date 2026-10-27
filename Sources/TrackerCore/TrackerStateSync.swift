@@ -1,9 +1,9 @@
 import Foundation
-import HoursCore
+import RewindCore
 import notify
 
 /// Two-way link between the running helper and the store's `setting` table (W16):
-/// - **in:** on every `Hours.dbChangedNotification` (notify_register_dispatch, no polling) re-read
+/// - **in:** on every `RewindModule.dbChangedNotification` (notify_register_dispatch, no polling) re-read
 ///   `idle_threshold_s` and `pause_until_ms` and apply them to the runtime live;
 /// - **out:** `report()` writes `tracker_state` when its value changed. Call it on start and from
 ///   `TrackerRuntime.onChange` (every event, incl. the 30 s tick).
@@ -23,7 +23,7 @@ import notify
     private var lastLiveStart: Int64?
     private var lastEventMs: Int64?
 
-    public init(db: HoursDB, runtime: TrackerRuntime, lastWriteFailed: @escaping () -> Bool,
+    public init(db: RewindDB, runtime: TrackerRuntime, lastWriteFailed: @escaping () -> Bool,
                 version: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev",
                 pid: Int32 = ProcessInfo.processInfo.processIdentifier) {
         self.settings = SettingStore(db); self.notifyName = db.notifyName; self.runtime = runtime

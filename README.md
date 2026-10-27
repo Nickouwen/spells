@@ -1,12 +1,18 @@
 # Spells
 
-Spells is a macOS productivity app built with SwiftUI and SwiftPM.
+Spells is a family of macOS productivity apps built with SwiftUI and SwiftPM: a small launcher plus
+standalone modules you install only if you want them.
 
-It includes:
+- **Spells** (the launcher): lists the modules installed in `~/Applications/Spells`, starts and stops them, opens their settings, and sets which ones start at login. It installs nothing by itself.
+- **Rewind**: local-first automatic time tracking with SQLite, classification rules, editing, reports, CSV/PDF exports, and tamper-evident proof bundles. Its tracker helper runs at login.
+- **Incant**: press-to-dictate. A menu-bar app with its own settings window.
+- **Scry**: meeting note capture and summarization, with a Meetings window for the notes. A menu-bar app.
 
-- **Hours**: local-first automatic time tracking with SQLite, classification rules, editing, reports, CSV/PDF exports, and tamper-evident proof bundles.
-- **Incant**: press-to-dictate helper.
-- **Scry**: meeting note capture and summarization helper.
+A module is an ordinary `.app` with a `SpellsModule` dictionary in its Info.plist (name, summary, symbol,
+URL scheme, whether it is a login item). The launcher talks to it over `<scheme>://settings`, `quit` and
+`login-item?on=1|0`; a module keeps its own settings in `~/Library/Application Support/Spells/<scheme>/settings.json`
+and never opens another module's data. Shared code lives in `SpellsKit` (identifiers, log, keychain, paths, settings
+files) and `SpellsUI` (design primitives, module windows and URL verbs).
 
 ## Privacy model
 
@@ -23,10 +29,12 @@ swift build
 swift test
 ```
 
-To assemble signed `.app` bundles locally:
+To assemble signed `.app` bundles locally and install them (launcher to `~/Applications`, modules to
+`~/Applications/Spells`):
 
 ```sh
 scripts/build.sh
+scripts/install.sh
 ```
 
 ## Repository note

@@ -1,8 +1,8 @@
 import AppKit
-import HoursCore
+import SpellsKit
 
 /// The listening indicator: a small black shape flush with the top of the screen, docked just left of
-/// the camera notch (or of HoursSpell's island, if its left ear is there), so it reads as part of the
+/// the camera notch (or of RewindTracker's island, if its left ear is there), so it reads as part of the
 /// notch. Monochrome: white level bars while listening, a dot for hands-free, pulsing dots while the
 /// correction runs, "!" on an error. No text. A non-activating panel that never takes focus, so the
 /// paste lands in the app you were typing in. Without a notch it sits at the top centre.
@@ -128,7 +128,7 @@ import HoursCore
     }
 
     /// Flush with the top, right edge `gap` left of the notch (or of the island's leftmost window when
-    /// HoursSpell shows a left ear there). No notch: top centre.
+    /// RewindTracker shows a left ear there). No notch: top centre.
     static func frame() -> NSRect {
         guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main else {
             return NSRect(origin: .zero, size: size)
@@ -145,9 +145,9 @@ import HoursCore
         return NSRect(x: anchor - gap - size.width, y: top - height, width: size.width, height: height)
     }
 
-    /// Left edge of HoursSpell's island windows at the top around the notch (window bounds need no permission).
+    /// Left edge of RewindTracker's island windows at the top around the notch (window bounds need no permission).
     private static func islandMinX(near notch: ClosedRange<CGFloat>) -> CGFloat? {
-        guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: Hours.trackerBundleID).first?.processIdentifier,
+        guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: Spells.trackerBundleID).first?.processIdentifier,
               let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
         else { return nil }
         let xs = list.compactMap { w -> CGFloat? in

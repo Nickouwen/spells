@@ -6,6 +6,8 @@
 	<string>en</string>
 	<key>CFBundleExecutable</key>
 	<string>Scry</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>dev.nic.spells.scry</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -18,6 +20,28 @@
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.nic.spells.scry</string>
+			<key>CFBundleURLSchemes</key>
+			<array><string>scry</string></array>
+		</dict>
+	</array>
+	<key>SpellsModule</key>
+	<dict>
+		<key>Name</key>
+		<string>Scry</string>
+		<key>Summary</key>
+		<string>Meeting notes: offers to record when a call starts, then writes a note with summary, decisions, action items and transcript.</string>
+		<key>Symbol</key>
+		<string>eye</string>
+		<key>Scheme</key>
+		<string>scry</string>
+		<key>LoginItem</key>
+		<true/>
+	</dict>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>LSUIElement</key>

@@ -1,8 +1,8 @@
 import AppKit
-import HoursCore
+import SpellsKit
 
 /// The "● Record <App>  ×" offer: a small black pill flush with the top of the screen, docked just right
-/// of the camera notch (or of HoursSpell's island, if its right ear is there) — Incant's indicator takes
+/// of the camera notch (or of RewindTracker's island, if its right ear is there) — Incant's indicator takes
 /// the left. Clickable without taking focus (a non-activating panel). Right-click → "Never for <App>".
 /// Drops down out of the top edge on show and retracts into it on hide. Without a notch: top centre.
 @MainActor final class ScryOfferPill {
@@ -178,7 +178,7 @@ import HoursCore
     }
 
     /// Flush with the top, left edge `gap` right of the notch (or of the island's rightmost window when
-    /// HoursSpell shows a right ear there). No notch: top centre.
+    /// RewindTracker shows a right ear there). No notch: top centre.
     static func frame(width: CGFloat) -> NSRect {
         guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main else {
             return NSRect(x: 0, y: 0, width: width, height: height)
@@ -195,9 +195,9 @@ import HoursCore
         return NSRect(x: anchor + gap, y: top - h, width: width, height: h)
     }
 
-    /// Right edge of HoursSpell's island windows at the top around the notch (window bounds need no permission).
+    /// Right edge of RewindTracker's island windows at the top around the notch (window bounds need no permission).
     private static func islandMaxX(near notch: ClosedRange<CGFloat>) -> CGFloat? {
-        guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: Hours.trackerBundleID).first?.processIdentifier,
+        guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: Spells.trackerBundleID).first?.processIdentifier,
               let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
         else { return nil }
         let xs = list.compactMap { w -> CGFloat? in

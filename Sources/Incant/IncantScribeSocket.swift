@@ -1,5 +1,5 @@
 import Foundation
-import HoursCore
+import SpellsKit
 import IncantCore
 
 /// One dictation's Scribe v2 Realtime socket. Opens on init; chunks sent before `session_started` are

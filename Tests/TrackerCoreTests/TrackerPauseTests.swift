@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import HoursCore
+import RewindCore
 @testable import TrackerCore
 
 // Pause (W15): the engine gate, plus `pause_until_ms` persistence across a simulated helper restart.
@@ -68,7 +68,7 @@ private func engineOnA() -> TrackerEngine {
 
     // Run 1: tracking A, then pause until 900 000 (what the status item does: persist, then pause).
     do {
-        let db = try HoursDB.open(at: url, role: .tracker, notifyName: notify)
+        let db = try RewindDB.open(at: url, role: .tracker, notifyName: notify)
         let sink = TrackerStoreSink(SpanWriter(db), nowMs: 0, timeZone: .gmt)
         var e = TrackerEngine(config: TrackerConfig(idleThresholdMs: T))
         sink.apply(e.handle(obs("A"), s(0)))
@@ -79,7 +79,7 @@ private func engineOnA() -> TrackerEngine {
     }
 
     // Run 2: a fresh process — reopen, load the setting, re-apply it before the first observation.
-    let db = try HoursDB.open(at: url, role: .tracker, notifyName: notify)
+    let db = try RewindDB.open(at: url, role: .tracker, notifyName: notify)
     let settings = SettingStore(db)
     #expect(try settings.get(TrackerPauseSetting.key) == "900000")
     let until = try #require(try TrackerPauseSetting.load(settings, nowMs: 120_000))

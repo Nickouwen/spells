@@ -6,6 +6,8 @@
 	<string>en</string>
 	<key>CFBundleExecutable</key>
 	<string>Incant</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>dev.nic.spells.incant</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -18,6 +20,28 @@
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.nic.spells.incant</string>
+			<key>CFBundleURLSchemes</key>
+			<array><string>incant</string></array>
+		</dict>
+	</array>
+	<key>SpellsModule</key>
+	<dict>
+		<key>Name</key>
+		<string>Incant</string>
+		<key>Summary</key>
+		<string>Dictation: hold Fn (or double-tap it for hands-free), speak, and the text lands wherever you're typing.</string>
+		<key>Symbol</key>
+		<string>waveform</string>
+		<key>Scheme</key>
+		<string>incant</string>
+		<key>LoginItem</key>
+		<true/>
+	</dict>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>LSUIElement</key>

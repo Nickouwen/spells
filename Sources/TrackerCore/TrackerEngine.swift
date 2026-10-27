@@ -1,4 +1,4 @@
-import HoursCore
+import RewindCore
 
 /// Pure activity state machine: `(state, event, sample) -> [output]`. Deterministic, no OS calls.
 ///

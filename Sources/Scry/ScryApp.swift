@@ -1,6 +1,6 @@
 import AppKit
 import AVFoundation
-import HoursCore
+import SpellsKit
 import IncantCore
 import ScryCore
 import ScryPipeline
@@ -41,9 +41,10 @@ import UserNotifications
         pill.onNever = { [weak self] in self?.never(self?.offered) }
         pill.onOpenLive = { [weak self] in self?.session?.live?.show() }
         pill.onStop = { [weak self] in self?.stop() }
-        pill.onOpenNote = { url in Self.openInSpells(url) }
+        pill.onOpenNote = { url in ScryWindows.showMeetings(url) }
         watch.onTick = { [weak self] stopsIn in self?.tickRecording(stopsIn) }
         watch.detector.never = Set(Self.loadSettings().settings.never)
+        ScryWindows.onSettingsChanged = { [weak self] in self?.watch.detector.never = Set(Self.loadSettings().settings.never) }
         watch.recording = { [weak self] in
             guard let s = self?.session else { return .none }
             return s.app.map { .call($0) } ?? .inPerson
@@ -100,13 +101,6 @@ import UserNotifications
     func notesReady(_ r: ScryPipeline.Result) {
         if session == nil { pill.showReady(title: r.summary.title, note: r.noteURL) }
         Task { await Self.notify("Meeting notes ready: \(r.summary.title)", open: r.noteURL) }
-    }
-
-    /// Opens Spells on that note (Meetings view) via its `spells://meeting?path=` URL.
-    static func openInSpells(_ note: URL) {
-        var c = URLComponents(); c.scheme = "spells"; c.host = "meeting"
-        c.queryItems = [URLQueryItem(name: "path", value: note.path)]
-        if let u = c.url { NSWorkspace.shared.open(u) }
     }
 
     private func tickRecording(_ stopsIn: Int64?) {
@@ -250,7 +244,7 @@ import UserNotifications
         guard let app else { return }
         var s = Self.loadSettings().settings
         if !s.never.contains(app) { s.never.append(app) }
-        do { try SettingStore(HoursDB.open(at: SupportPaths.current().db, role: .app)).set(ScrySettings.neverKey, s.rows[ScrySettings.neverKey]) } catch {
+        do { try SpellSettingsFile.scry().set(ScrySettings.neverKey, s.rows[ScrySettings.neverKey]) } catch {
             SupportLog.scry.error("couldn't save never-offer: \(error.localizedDescription, privacy: .public)")
         }
         watch.detector.never.insert(app)
@@ -258,12 +252,10 @@ import UserNotifications
 
     // MARK: Settings + notifications
 
+    /// Scry's own settings file, plus Incant's for the Scribe vocabulary (Incant's defaults when unset or not installed).
     static func loadSettings() -> (settings: ScrySettings, keyterms: [String]) {
-        var rows: [String: String] = [:]
-        do { rows = try SettingStore(HoursDB.open(at: SupportPaths.current().db, role: .app)).all() } catch {
-            SupportLog.scry.error("couldn't read settings, using defaults: \(error.localizedDescription, privacy: .public)")
-        }
-        return (ScrySettings.load(rows), IncantSettings.load(rows).keyterms)   // Incant's defaults when unset
+        let rows = ScryPipeline.settingRows()
+        return (ScrySettings.load(rows), ScryPipeline.keyterms(rows))
     }
 
     static func name(_ app: String) -> String { ScryCallApps.known[app] ?? app }
@@ -278,7 +270,7 @@ import UserNotifications
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         guard let path = response.notification.request.content.userInfo["path"] as? String else { return }
-        await MainActor.run { ScryApp.openInSpells(URL(filePath: path)) }
+        await MainActor.run { ScryWindows.showMeetings(URL(filePath: path)) }
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
@@ -289,9 +281,12 @@ import UserNotifications
     // MARK: Status menu
 
     private func refreshIcon() {
-        let (symbol, tip) = session == nil ? ("eye", "Scry") : ("record.circle.fill", "Scry: recording")
-        item.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
-        item.button?.toolTip = tip
+        // Eye glyph from Resources/Scry/MenuBar*.png: template when idle, painted purple while recording.
+        let recording = session != nil
+        let image = Bundle.main.image(forResource: recording ? "MenuBarColor" : "MenuBar")
+        image?.isTemplate = !recording
+        item.button?.image = image
+        item.button?.toolTip = recording ? "Scry: recording" : "Scry"
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -308,9 +303,10 @@ import UserNotifications
         } else {
             menu.addItem(action("Record call", #selector(recordCall)))
             menu.addItem(action("Record in person", #selector(recordInPerson)))
+            menu.addItem(action("Meetings", #selector(openMeetings)))
             menu.addItem(action("Open notes folder", #selector(openNotes)))
             menu.addItem(.separator())
-            menu.addItem(action("Settings…", #selector(openSpells)))
+            menu.addItem(action("Settings…", #selector(openSettings)))
             menu.addItem(action("Quit Scry", #selector(quit)))
         }
     }
@@ -331,10 +327,8 @@ import UserNotifications
         NSWorkspace.shared.open(root)
     }
 
-    @objc private func openSpells() {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Hours.bundlePrefix) else { return }
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
-    }
+    @objc private func openMeetings() { ScryWindows.showMeetings() }
+    @objc private func openSettings() { ScryWindows.showSettings() }
 
     @objc private func quit() { NSApp.terminate(nil) }
 }

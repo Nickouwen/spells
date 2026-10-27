@@ -1,8 +1,8 @@
 import Darwin
 import Foundation
-import HoursCore
+import SpellsKit
 
-/// Exits(0) if another Incant holds `<home>/incant.lock` (same flock pattern as HoursSpell's).
+/// Exits(0) if another Incant holds `<home>/incant.lock` (same flock pattern as RewindTracker's).
 enum IncantSingleInstance {
     static func exitIfAlreadyRunning(paths: SupportPaths = .current()) {
         try? FileManager.default.createDirectory(at: paths.home, withIntermediateDirectories: true)

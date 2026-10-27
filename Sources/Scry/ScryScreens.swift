@@ -1,5 +1,5 @@
 import Foundation
-import HoursCore
+import SpellsKit
 import ScreenCaptureKit
 import Vision
 

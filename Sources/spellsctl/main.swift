@@ -1,5 +1,5 @@
 import Foundation
-import HoursCore
+import RewindCore
 
 // spellsctl — export, verify, anchor, witness, seed-demo (item 9). Hand-rolled argument parsing.
 
@@ -65,8 +65,8 @@ let paths = SupportPaths.current()
 let tz = TimeZone.current
 let today = LocalDate.containing(ms: Int64(Date().timeIntervalSince1970 * 1000), in: tz)
 
-func openDB() -> HoursDB {
-    do { return try HoursDB.open(at: paths.db, role: .app) } catch { die("cannot open \(paths.db.path): \(error)", 1) }
+func openDB() -> RewindDB {
+    do { return try RewindDB.open(at: paths.db, role: .app) } catch { die("cannot open \(paths.db.path): \(error)", 1) }
 }
 func period() -> ExportPeriod {
     let s = options["--period"] ?? "previous"

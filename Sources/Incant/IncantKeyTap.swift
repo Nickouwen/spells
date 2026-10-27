@@ -1,5 +1,5 @@
 import AppKit
-import HoursCore
+import SpellsKit
 import IncantCore
 
 /// The Fn key tap: a session-level CGEventTap on flagsChanged + keyDown, reporting `IncantKeyEvent`s.

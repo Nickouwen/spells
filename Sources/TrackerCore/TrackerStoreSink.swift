@@ -1,5 +1,5 @@
 import Foundation
-import HoursCore
+import RewindCore
 
 /// `TrackerSink` → W1's `SpanWriter`. Every sink call is one IMMEDIATE transaction; the store
 /// posts the change notification itself (heartbeats excepted), so this never posts.

@@ -3,7 +3,7 @@
 # Samples physical footprint + CPU (proc_pid_rusage via footprint.swift) every BUDGET_INTERVAL_S (60)
 # for <hours> into <logs>/budget-<timestamp>.csv. Exits 1 if max footprint > BUDGET_MAX_MIB (20),
 # avg CPU > BUDGET_MAX_CPU_PCT (0.5), or the process died/restarted. RSS is logged, not gated.
-# No pid → follows `pgrep -x HoursSpell` (a new pid = restart = fail).
+# No pid → follows `pgrep -x RewindTracker` (a new pid = restart = fail).
 # Workday run: nohup scripts/budget.sh 8 &
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,9 +24,9 @@ mkdir -p "$LOGDIR"
 CSV="$LOGDIR/budget-$(date +%Y-%m-%dT%H%M%S).csv"
 echo "ts,pid,footprint_bytes,rss_bytes,cpu_ns,pkg_idle_wkups,interrupt_wkups,event" > "$CSV"
 
-find_pid() { if [[ -n "$FIXED_PID" ]]; then echo "$FIXED_PID"; else pgrep -x HoursSpell | head -1 || true; fi; }
+find_pid() { if [[ -n "$FIXED_PID" ]]; then echo "$FIXED_PID"; else pgrep -x RewindTracker | head -1 || true; fi; }
 PID="$(find_pid)"
-[[ -n "$PID" ]] || { echo "budget: no HoursSpell running; pass a pid" >&2; exit 2; }
+[[ -n "$PID" ]] || { echo "budget: no RewindTracker running; pass a pid" >&2; exit 2; }
 
 END=$(( $(date +%s) + $(awk -v h="$HOURS_ARG" 'BEGIN { printf "%d", h * 3600 }') ))
 N=0 MAX_FP=0 FAIL=""

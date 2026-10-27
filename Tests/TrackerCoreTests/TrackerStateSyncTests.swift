@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 import notify
-import HoursCore
+import RewindCore
 @testable import TrackerCore
 
 // W16: live settings into the running helper, tracker_state out. The runtime is never started
@@ -15,9 +15,9 @@ private final class NullSink: TrackerSink {
 }
 
 @MainActor
-private func fixture() throws -> (HoursDB, TrackerRuntime, TrackerStateSync) {
+private func fixture() throws -> (RewindDB, TrackerRuntime, TrackerStateSync) {
     let url = FileManager.default.temporaryDirectory.appending(path: "hours-sync-\(UUID().uuidString)/hours.db")
-    let db = try HoursDB.open(at: url, role: .tracker, notifyName: "dev.nic.spells.test.\(UUID().uuidString)")
+    let db = try RewindDB.open(at: url, role: .tracker, notifyName: "dev.nic.spells.test.\(UUID().uuidString)")
     let runtime = TrackerRuntime(sink: NullSink(), options: .init(promptForPermissions: false))
     let sync = TrackerStateSync(db: db, runtime: runtime, lastWriteFailed: { false }, version: "t", pid: 4242)
     return (db, runtime, sync)

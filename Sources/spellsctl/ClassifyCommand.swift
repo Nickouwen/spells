@@ -1,5 +1,5 @@
 import Foundation
-import HoursCore
+import RewindCore
 
 /// `spellsctl classify [--since YYYY-MM-DD] [--dry-run]`: Jev backfill of rule-unmatched windows since
 /// `--since` (default: 30 days ago). `--dry-run` counts misses without any network or keychain access.

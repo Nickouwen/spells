@@ -1,6 +1,6 @@
 import EventKit
 import Foundation
-import HoursCore
+import SpellsKit
 import ScryCore
 
 /// The calendar event behind a recording, via EventKit (whatever accounts macOS Calendar has — add Google

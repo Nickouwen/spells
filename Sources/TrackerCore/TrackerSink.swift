@@ -1,5 +1,5 @@
 import Foundation
-import HoursCore
+import RewindCore
 
 /// Where the engine's span lifecycle goes. The integration wave adapts W1's `SpanWriter` to this;
 /// `PrintSink` is the dry-run implementation. Live spans are `seq == 0`, `endMs == startMs`.

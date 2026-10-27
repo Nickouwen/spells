@@ -1,7 +1,7 @@
 import Foundation
 import SQLite3
 import Testing
-import HoursCore
+import RewindCore
 @testable import TrackerCore
 
 // TrackerSink → SpanWriter against a real temp DB (never ~/Library), unique notify name.
@@ -10,8 +10,8 @@ private func tempURL() -> URL {
     FileManager.default.temporaryDirectory.appending(path: "hours-sink-tests/\(UUID().uuidString)/hours.db")
 }
 
-private func openDB(_ url: URL) throws -> HoursDB {
-    try HoursDB.open(at: url, role: .tracker, notifyName: "dev.nic.spells.test.\(UUID().uuidString)")
+private func openDB(_ url: URL) throws -> RewindDB {
+    try RewindDB.open(at: url, role: .tracker, notifyName: "dev.nic.spells.test.\(UUID().uuidString)")
 }
 
 private func live(_ app: String, _ start: Int64, title: String? = nil) -> RawSpan {
@@ -20,7 +20,7 @@ private func live(_ app: String, _ start: Int64, title: String? = nil) -> RawSpa
 }
 
 /// (seq, start, end, app) of every chained span.
-private func chained(_ db: HoursDB) throws -> [[String]] {
+private func chained(_ db: RewindDB) throws -> [[String]] {
     try Store(db).rawSpans(from: .min, to: .max).map { ["\($0.seq)", "\($0.startMs)", "\($0.endMs)", $0.appName] }
 }
 
@@ -148,13 +148,13 @@ private let oct5noon: Int64 = 1_791_201_600_000   // 2026-10-05T12:00:00Z
     #expect(sink.pendingCount == 0 && !sink.lastWriteFailed)
 }
 
-/// Two-process check, run by hand while HoursSpell writes the same file:
+/// Two-process check, run by hand while RewindTracker writes the same file:
 /// `HOURS_LIVE_DB=$SPELLS_HOME/hours.db [HOURS_LIVE_EDITS=200 HOURS_LIVE_PACE_MS=0] swift test --filter TrackerStoreSinkLiveDB`.
 /// Interleaves edits (the app's writes) into the helper's chain, then verifies it.
 @Test(.enabled(if: ProcessInfo.processInfo.environment["HOURS_LIVE_DB"] != nil))
 func TrackerStoreSinkLiveDB() throws {
     let env = ProcessInfo.processInfo.environment
-    let db = try HoursDB.open(at: URL(filePath: env["HOURS_LIVE_DB"]!), role: .app,
+    let db = try RewindDB.open(at: URL(filePath: env["HOURS_LIVE_DB"]!), role: .app,
                               notifyName: "dev.nic.spells.test.\(UUID().uuidString)")
     let n = Int64(env["HOURS_LIVE_EDITS"] ?? "") ?? 200
     let paceMs = UInt32(env["HOURS_LIVE_PACE_MS"] ?? "") ?? 0  // spread edits across the helper's writes
@@ -169,13 +169,13 @@ func TrackerStoreSinkLiveDB() throws {
     print("live db: head \(try db.head().seq), verify \(result)")
 }
 
-/// Wedge-repro seed (review-1 #1), run by hand on a temp home before starting HoursSpell on it:
+/// Wedge-repro seed (review-1 #1), run by hand on a temp home before starting RewindTracker on it:
 /// `HOURS_SEED_FUTURE_DB=$SPELLS_HOME/hours.db [HOURS_SEED_AHEAD_S=90] swift test --filter TrackerStoreSinkSeedFuture`.
 /// Chains a span ending N s in the future, as if the clock went back after the last heartbeat.
 @Test(.enabled(if: ProcessInfo.processInfo.environment["HOURS_SEED_FUTURE_DB"] != nil))
 func TrackerStoreSinkSeedFuture() throws {
     let env = ProcessInfo.processInfo.environment
-    let db = try HoursDB.open(at: URL(filePath: env["HOURS_SEED_FUTURE_DB"]!), role: .app,
+    let db = try RewindDB.open(at: URL(filePath: env["HOURS_SEED_FUTURE_DB"]!), role: .app,
                               notifyName: "dev.nic.spells.test.\(UUID().uuidString)")
     let now = Int64(Date().timeIntervalSince1970 * 1000)
     let end = now + (Int64(env["HOURS_SEED_AHEAD_S"] ?? "") ?? 90) * 1000

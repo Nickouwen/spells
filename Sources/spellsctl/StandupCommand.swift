@@ -1,5 +1,5 @@
 import Foundation
-import HoursCore
+import RewindCore
 
 /// `spellsctl standup [--date YYYY-MM-DD] [--from YYYY-MM-DD] [--fix TEXT] [--clear-fixes] [--regenerate] [--print]`. The default date is the calendar
 /// day (the transcript dump's boundary), not the 04:00 store day.

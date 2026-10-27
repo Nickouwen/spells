@@ -1,5 +1,5 @@
 import Foundation
-import HoursCore
+import RewindCore
 
 /// `spellsctl add --date YYYY-MM-DD --start HH:MM --hours H [--label L] [--category ID] [--note TEXT] [--dry-run]`.
 /// Manual time for a stretch the tracker didn't see (e.g. before it was installed), written through the same

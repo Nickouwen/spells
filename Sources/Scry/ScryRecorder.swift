@@ -1,6 +1,6 @@
 import AVFoundation
 import CoreAudio
-import HoursCore
+import SpellsKit
 
 /// One recording: your mic (AVAudioEngine) and the system audio (a process tap that leaves this process
 /// out), both converted to 16 kHz mono s16le and stream-written as a 2-channel WAV (ch 0 mic, ch 1 system;

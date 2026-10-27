@@ -1,5 +1,5 @@
 import AVFoundation
-import HoursCore
+import SpellsKit
 
 /// The microphone as 16 kHz mono s16le chunks of ~100 ms (Scribe's pcm_16000), plus a 0…1 level for
 /// the overlay. The engine is prepared up front so `start()` at Fn-down is quick; a default-input change

@@ -1,5 +1,5 @@
 import AppKit
-import HoursCore
+import SpellsKit
 import IncantCore
 import ScryCore
 import SwiftUI

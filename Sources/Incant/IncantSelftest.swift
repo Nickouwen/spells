@@ -1,5 +1,5 @@
 import AVFoundation
-import HoursCore
+import SpellsKit
 import IncantCore
 
 /// `Incant --selftest <file.wav>`: streams a 16 kHz mono 16-bit recording at real-time pace through the
