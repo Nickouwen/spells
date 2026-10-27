@@ -11,10 +11,15 @@ import SpellsUI
 enum HubSection: Hashable {
     case modules
     case rewind(ShellView)
-    case rewindSettings
     case meetings
-    case scrySettings
-    case incantSettings
+    /// One Settings entry, pinned at the bottom; `HubModel.settingsModule` picks whose.
+    case settings
+}
+
+/// Whose settings the Settings section shows.
+enum SettingsModule: String, CaseIterable, Identifiable {
+    case rewind = "Rewind", scry = "Scry", incant = "Incant"
+    var id: String { rawValue }
 }
 
 /// The hub: the launcher plus each installed module's views, running or not — the data is on disk
@@ -23,6 +28,7 @@ enum HubSection: Hashable {
 @MainActor @Observable final class HubModel {
     let launcher = LauncherModel()
     var section: HubSection = .modules
+    var settingsModule: SettingsModule = .rewind
     /// Rewind's model over hours.db; nil until Rewind is installed. `rewindError`: the DB wouldn't open.
     private(set) var rewind: AppModel?
     private(set) var rewindError: String?
@@ -41,16 +47,26 @@ enum HubSection: Hashable {
         } else if rewind != nil || rewindError != nil {
             rewind?.setVisible(false)
             rewind = nil; rewindError = nil
-            if case .rewind = section { section = .modules } else if section == .rewindSettings { section = .modules }
+            if case .rewind = section { section = .modules }
         }
         if ids.contains(Spells.scryBundleID) {
             if meetings == nil { meetings = ScryMeetingsModel(root: Self.scryRoot()) }
         } else if meetings != nil {
             meetings = nil
-            if section == .meetings || section == .scrySettings { section = .modules }
+            if section == .meetings { section = .modules }
         }
         incantInstalled = ids.contains(Spells.incantBundleID)
-        if !incantInstalled, section == .incantSettings { section = .modules }
+        if !settingsModules.contains(settingsModule), let first = settingsModules.first { settingsModule = first }
+    }
+
+    /// The modules with settings to show, in sidebar order.
+    var settingsModules: [SettingsModule] {
+        [rewind != nil ? SettingsModule.rewind : nil, meetings != nil ? .scry : nil, incantInstalled ? .incant : nil].compactMap { $0 }
+    }
+
+    func showSettings(_ m: SettingsModule) {
+        settingsModule = m
+        section = .settings
     }
 
     private func openRewind() {
