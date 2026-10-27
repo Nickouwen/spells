@@ -112,7 +112,7 @@ struct WeekBlocksGrid: View {
             .frame(height: Self.headerH + Self.viewportHeight)
             .frame(minWidth: Self.gutter + 7 * 64 + 6 * Self.gap)
         }
-        .hoursCard()
+        .card()
         .onAppear { scroll.scrollTo(y: defaultOffset) }
         .onChange(of: data.monday) { scroll.scrollTo(y: defaultOffset) }
         .onChange(of: wb.windowMs) { scroll.scrollTo(y: defaultOffset) }

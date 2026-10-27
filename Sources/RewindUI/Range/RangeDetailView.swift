@@ -91,7 +91,7 @@ public struct RangeDetailView: View {
                 .chartPlotStyle { $0.background(.clear) }
                 .frame(height: 110)
             }
-            .hoursCard()
+            .card()
 
             HStack(alignment: .top, spacing: Theme.Space.gridGap) {
                 list("Top titles", d.titles, limit: 20)
@@ -137,7 +137,7 @@ public struct RangeDetailView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .hoursCard()
+        .card()
     }
 }
 

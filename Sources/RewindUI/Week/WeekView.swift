@@ -45,7 +45,7 @@ public struct WeekView: View {
                     WeekHeader(data: data, onNavigate: onNavigate, mode: mode)
                     emptyState
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .hoursCard(padding: Theme.Space.l, radius: Theme.Radius.panel)
+                        .card(padding: Theme.Space.l, radius: Theme.Radius.panel)
                 }
                 .padding(.horizontal, Theme.Space.gutter)
                 .padding(.vertical, Theme.Space.l)

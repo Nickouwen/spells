@@ -80,7 +80,7 @@ struct ShellBanner: View {
                 Button(action, action: perform).buttonStyle(RewindButtonStyle())
             }
         }
-        .hoursCard(padding: Theme.Space.m)
+        .card(padding: Theme.Space.m)
         .accessibilityElement(children: .contain)
     }
 }

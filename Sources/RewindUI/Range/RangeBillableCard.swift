@@ -46,7 +46,7 @@ struct RangeBillableCard: View {
             gaps
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .hoursCard()
+        .card()
     }
 
     @ViewBuilder private var gaps: some View {

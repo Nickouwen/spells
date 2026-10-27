@@ -135,7 +135,7 @@ public struct DayView: View {
             emptyState
                 .padding(.vertical, Theme.Space.xl)
         }
-        .hoursCard(padding: Theme.Space.l, radius: Theme.Radius.panel)
+        .card(padding: Theme.Space.l, radius: Theme.Radius.panel)
     }
 
     private var emptyState: EmptyState {

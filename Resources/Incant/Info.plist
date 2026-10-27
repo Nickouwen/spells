@@ -17,36 +17,38 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
-	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>0.1.1</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
 			<string>dev.nic.spells.incant</string>
 			<key>CFBundleURLSchemes</key>
-			<array><string>incant</string></array>
+			<array>
+				<string>incant</string>
+			</array>
 		</dict>
 	</array>
-	<key>SpellsModule</key>
-	<dict>
-		<key>Name</key>
-		<string>Incant</string>
-		<key>Summary</key>
-		<string>Dictation: hold Fn (or double-tap it for hands-free), speak, and the text lands wherever you're typing.</string>
-		<key>Symbol</key>
-		<string>waveform</string>
-		<key>Scheme</key>
-		<string>incant</string>
-		<key>LoginItem</key>
-		<true/>
-	</dict>
+	<key>CFBundleVersion</key>
+	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Incant listens only while you hold the dictation key, to turn your speech into text.</string>
+	<key>SpellsModule</key>
+	<dict>
+		<key>LoginItem</key>
+		<true/>
+		<key>Name</key>
+		<string>Incant</string>
+		<key>Scheme</key>
+		<string>incant</string>
+		<key>Summary</key>
+		<string>Dictation: hold Fn (or double-tap it for hands-free), speak, and the text lands wherever you're typing.</string>
+		<key>Symbol</key>
+		<string>waveform</string>
+	</dict>
 </dict>
 </plist>

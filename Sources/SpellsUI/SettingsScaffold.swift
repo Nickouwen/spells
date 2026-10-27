@@ -18,7 +18,7 @@ public struct SettingsSection<Content: View>: View {
             if let detail { Text(detail).textRole(.label, Theme.inkSecondary) }
             VStack(alignment: .leading, spacing: 0) { content }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .hoursCard(padding: Theme.Space.m)
+                .card(padding: Theme.Space.m)
         }
     }
 }

@@ -113,7 +113,7 @@ struct StandupSheet: View {
             EmptyState(symbol: "text.bubble", title: "No standup yet",
                        detail: "Generate one from this day's Claude Code sessions and tracked time.",
                        action: .init("Generate") { generate(.clear) })
-                .hoursCard(padding: Theme.Space.l, radius: Theme.Radius.panel)
+                .card(padding: Theme.Space.l, radius: Theme.Radius.panel)
         } else {
             ZStack {
                 TextEditor(text: $text)
@@ -133,7 +133,7 @@ struct StandupSheet: View {
                     }
                 }
             }
-            .hoursCard(padding: Theme.Space.m, radius: Theme.Radius.panel)
+            .card(padding: Theme.Space.m, radius: Theme.Radius.panel)
         }
     }
 

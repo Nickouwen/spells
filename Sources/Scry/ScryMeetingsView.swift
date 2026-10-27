@@ -62,7 +62,7 @@ struct MeetingsView: View {
         EmptyState(symbol: "person.2.wave.2", title: "No meeting notes yet",
                    detail: "Scry offers to record when a call starts and writes a note for each: summary, decisions, action items and the transcript. Notes are read from \((root.path as NSString).abbreviatingWithTildeInPath).",
                    action: .init("Open Settings") { ScryWindows.showSettings() })
-            .hoursCard()
+            .card()
             .padding(Theme.Space.gutter)
     }
 
@@ -96,7 +96,7 @@ struct MeetingsView: View {
                         ForEach(open, id: \.id) { o in actionRow(o.note, o.item, meeting: true) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .hoursCard()
+                    .card()
                 }
                 ForEach(Self.byDay(notes, timeZone: timeZone), id: \.day) { g in
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -104,7 +104,7 @@ struct MeetingsView: View {
                         VStack(spacing: 0) {
                             ForEach(g.notes) { n in row(n, selected: n.url == current) }
                         }
-                        .hoursCard(padding: Theme.Space.xs)
+                        .card(padding: Theme.Space.xs)
                     }
                 }
             }
@@ -271,7 +271,7 @@ struct MeetingsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .hoursCard()
+        .card()
     }
 
     private func card<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
@@ -280,7 +280,7 @@ struct MeetingsView: View {
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .hoursCard()
+        .card()
     }
 
     private func bullets(_ items: [String]) -> some View {
@@ -330,7 +330,7 @@ struct MeetingsView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .hoursCard(padding: Theme.Space.m)
+                .card(padding: Theme.Space.m)
             }
             if let askError { Text(askError).textRole(.label, Theme.StateLayer.distraction).lineLimit(2) }
             HStack(spacing: Theme.Space.s) {
@@ -401,7 +401,7 @@ struct MeetingsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .hoursCard()
+        .card()
     }
 
     private func retry(_ dir: URL) {

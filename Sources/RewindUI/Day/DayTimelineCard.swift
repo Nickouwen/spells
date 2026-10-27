@@ -38,7 +38,7 @@ struct DayTimelineCard: View {
                 }
             }
         }
-        .hoursCard(padding: Theme.Space.l, radius: Theme.Radius.panel)
+        .card(padding: Theme.Space.l, radius: Theme.Radius.panel)
         .dayTooltipOverlay()
     }
 

@@ -86,7 +86,7 @@ public struct StyleGallery: View {
                 }
             }
         }
-        .hoursCard()
+        .card()
     }
 
     private var spaceAndRadius: some View {
@@ -186,7 +186,7 @@ public struct StyleGallery: View {
             ctx.stroke(Path(ellipseIn: notch), with: .style(Theme.inkSecondary), lineWidth: 1)
         }
         .frame(height: 132)
-        .hoursCard()
+        .card()
     }
 
     static let week: [(day: String, category: String, slot: Int, hours: Double)] = {
@@ -217,7 +217,7 @@ public struct StyleGallery: View {
             .categoryScale(Self.legend)
             .chartLegend(.hidden)
             .frame(height: 180)
-            .hoursCard()
+            .card()
 
             Chart(Self.legend.indices, id: \.self) { i in
                 let total = Self.week.filter { $0.category == Self.legend[i].name }.reduce(0) { $0 + $1.hours }
@@ -231,7 +231,7 @@ public struct StyleGallery: View {
                 HeroNumber.text(Fmt.durationParts(ms: Int64(Self.week.reduce(0) { $0 + $1.hours } * 3_600_000)), value: .metric, unit: .metricUnit)
             }
             .frame(width: 180, height: 180)
-            .hoursCard()
+            .card()
 
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 ForEach(Self.legend.indices, id: \.self) { i in
@@ -245,17 +245,17 @@ public struct StyleGallery: View {
                 }
             }
             .frame(width: 260)
-            .hoursCard()
+            .card()
         }
     }
 
     private var emptyStates: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Theme.Space.gridGap), count: 2),
                   spacing: Theme.Space.gridGap) {
-            EmptyState.trackerNotRunning(start: .init("Start tracker") {}).hoursCard()
-            EmptyState.permissionMissing(openSettings: .init("Open System Settings") {}).hoursCard()
-            EmptyState.noData().hoursCard()
-            EmptyState.filteredToNothing(clear: .init("Clear filters") {}).hoursCard()
+            EmptyState.trackerNotRunning(start: .init("Start tracker") {}).card()
+            EmptyState.permissionMissing(openSettings: .init("Open System Settings") {}).card()
+            EmptyState.noData().card()
+            EmptyState.filteredToNothing(clear: .init("Clear filters") {}).card()
         }
     }
 }

@@ -122,7 +122,7 @@ struct WeekChart: View {
                 }
             }
         }
-        .hoursCard()
+        .card()
     }
 
     /// Hovered day's numbers, else a hint.

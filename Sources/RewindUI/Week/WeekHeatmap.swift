@@ -41,7 +41,7 @@ struct WeekHeatmap: View {
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .hoursCard()
+        .card()
     }
 
     /// Clock-hour labels every 4 h, under their columns.

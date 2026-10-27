@@ -84,7 +84,7 @@ struct BlocksCard: View {
                 legend
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .hoursCard(padding: Theme.Space.l, radius: Theme.Radius.panel)
+            .card(padding: Theme.Space.l, radius: Theme.Radius.panel)
 
             // As tall as the column card; longer details scroll inside it.
             ScrollView(.vertical) {
@@ -97,7 +97,7 @@ struct BlocksCard: View {
             }
             .scrollIndicators(.automatic)
             .frame(height: Self.headerH + Theme.Space.m + viewport + Theme.Space.m + Self.legendH)
-            .hoursCard(padding: Theme.Space.l, radius: Theme.Radius.panel)
+            .card(padding: Theme.Space.l, radius: Theme.Radius.panel)
         }
         .onAppear {
             sized = fillHeight != nil

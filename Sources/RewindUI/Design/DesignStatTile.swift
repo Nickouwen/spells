@@ -44,7 +44,7 @@ public struct StatTile: View {
             }
         }
         .frame(minWidth: Self.minWidth - 2 * Theme.Space.cardPadding, maxWidth: .infinity, minHeight: 92, maxHeight: .infinity, alignment: .topLeading)
-        .hoursCard()
+        .card()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(eyebrow.capitalized)
         .accessibilityValue(([spokenValue] + [comparator].compactMap { $0 }).joined(separator: ", "))

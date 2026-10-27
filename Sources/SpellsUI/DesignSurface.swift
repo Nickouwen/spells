@@ -2,7 +2,7 @@ import SwiftUI
 
 public extension View {
     /// Flat, opaque content surface: `surface` fill, hairline border, no shadow, no glass.
-    func hoursCard(padding: CGFloat = Theme.Space.cardPadding, radius: CGFloat = Theme.Radius.tile) -> some View {
+    func card(padding: CGFloat = Theme.Space.cardPadding, radius: CGFloat = Theme.Radius.tile) -> some View {
         self.padding(padding)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)

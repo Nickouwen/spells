@@ -3,7 +3,7 @@
 Spells is a family of macOS productivity apps built with SwiftUI and SwiftPM: a small launcher plus
 standalone modules you install only if you want them.
 
-- **Spells** (the launcher): lists the modules installed in `~/Applications/Spells`, starts and stops them, opens their settings, and sets which ones start at login. It installs nothing by itself.
+- **Spells** (the launcher): lists the modules installed in `~/Applications/Spells` and the ones in the catalog; installs, updates and removes them, starts and stops them, opens their settings, and sets which ones start at login. It ships with nothing installed.
 - **Rewind**: local-first automatic time tracking with SQLite, classification rules, editing, reports, CSV/PDF exports, and tamper-evident proof bundles. Its tracker helper runs at login.
 - **Incant**: press-to-dictate. A menu-bar app with its own settings window.
 - **Scry**: meeting note capture and summarization, with a Meetings window for the notes. A menu-bar app.
@@ -36,6 +36,24 @@ To assemble signed `.app` bundles locally and install them (launcher to `~/Appli
 scripts/build.sh
 scripts/install.sh
 ```
+
+## Releases and the catalog
+
+The launcher reads `catalog.json` from the newest GitHub release (one entry per module: its manifest
+fields, version, zip URL and SHA-256), downloads a module's zip, checks the hash, and only installs an
+app whose signature is Apple-issued for the Spells team. Updates replace the app in place (quit, old copy
+to the Trash, new copy in, relaunch); Remove quits it, turns its login item off and trashes it. Data under
+`~/Library/Application Support/Spells` is never touched.
+
+```sh
+scripts/build.sh
+scripts/release.sh --publish v0.2.0          # zips dist/*.app, writes catalog.json, creates the GitHub release
+scripts/release.sh --base-url "file://$PWD/dist/release"   # a local catalog for testing
+```
+
+To test against a local or forked catalog, put its URL in `~/Library/Application Support/Spells/spells/settings.json`
+as `catalog_url`. Modules are signed with an Apple Development certificate for now; a Developer ID
+certificate and notarization are needed before another Mac will run a downloaded module.
 
 ## Repository note
 

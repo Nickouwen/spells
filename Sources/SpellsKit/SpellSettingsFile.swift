@@ -11,6 +11,8 @@ public struct SpellSettingsFile: Sendable, Equatable {
     }
     public static func incant(_ paths: SupportPaths = .current()) -> SpellSettingsFile { .init(spell: "incant", paths: paths) }
     public static func scry(_ paths: SupportPaths = .current()) -> SpellSettingsFile { .init(spell: "scry", paths: paths) }
+    /// The launcher's own file (`catalog_url` override).
+    public static func launcher(_ paths: SupportPaths = .current()) -> SpellSettingsFile { .init(spell: "spells", paths: paths) }
 
     public var exists: Bool { FileManager.default.fileExists(atPath: url.path) }
 

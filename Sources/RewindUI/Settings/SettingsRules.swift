@@ -182,7 +182,7 @@ struct SettingsRuleEditor: View {
                     }
                 }
             }
-            .hoursCard(padding: Theme.Space.m)
+            .card(padding: Theme.Space.m)
             HStack {
                 if original.id > 0 {
                     Button("Delete Rule") { Task { await model.deleteRule(id: original.id); onDone() } }

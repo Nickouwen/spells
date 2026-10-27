@@ -28,7 +28,7 @@ public struct RangeView: View {
                     EmptyState(symbol: "calendar", title: "No tracked time in this period",
                                detail: "Nothing was recorded between \(RangePeriod.label(data.bounds)). Step back with ‹ to find earlier time.")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .hoursCard()
+                        .card()
                 }
                 .padding(Theme.Space.gutter)
             } else {
@@ -168,7 +168,7 @@ struct RangeDailyChart: View {
             RangeLegend(items: legend.map { ($0.name, $0.slot) })
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .hoursCard()
+        .card()
     }
 }
 

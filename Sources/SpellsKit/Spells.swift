@@ -16,6 +16,8 @@ public enum Spells {
     public static let manifestKey = "SpellsModule"
     /// Settings row a module keeps in step with its own login-item registration ("1"/"0").
     public static let loginItemKey = "login_item"
+    /// Apple team that signs every module; the launcher installs nothing signed by anyone else.
+    public static let teamID = "P9FVNJVGRB"
     public static let incantBundleID = "dev.nic.spells.incant"
     public static let scryBundleID = "dev.nic.spells.scry"
 }

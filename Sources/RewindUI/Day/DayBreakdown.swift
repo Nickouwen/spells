@@ -126,7 +126,7 @@ struct DayPanel<Content: View>: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .hoursCard(padding: Theme.Space.l, radius: Theme.Radius.panel)
+        .card(padding: Theme.Space.l, radius: Theme.Radius.panel)
     }
 }
 

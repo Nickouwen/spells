@@ -86,7 +86,7 @@ struct RangeTableCard: View {
             .onChange(of: detail) { _, d in if d == nil { selection = nil } }
             .onChange(of: group) { selection = nil }
         }
-        .hoursCard()
+        .card()
     }
 
     /// The table lives in the Range ScrollView, so it gets an explicit height: header + its rows,
