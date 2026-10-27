@@ -5,7 +5,7 @@ import os
 /// Never log window titles or URLs; if unavoidable, interpolate with `privacy: .private`.
 /// The CLI prints to stderr instead of using these.
 public enum SupportLog {
-    public static let subsystem = Hours.bundlePrefix
+    public static let subsystem = Spells.bundlePrefix
 
     public static let tracker = Logger(subsystem: subsystem, category: "tracker")
     public static let ax = Logger(subsystem: subsystem, category: "ax")

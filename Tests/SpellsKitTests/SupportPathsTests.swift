@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import HoursCore
+@testable import SpellsKit
 
 @Suite struct SupportPathsTests {
     @Test func hoursHomeRelocatesEverything() {

@@ -115,7 +115,7 @@ public struct IncantSettings: Equatable, Sendable {
     public static let defaultCues = ["no,", "actually", "i mean", "scratch that", "sorry", "wait"]
     public static let defaultModel = "qwen-3.8-27b"
     public static let defaultKeyterms = ["ExampleCRM", "ExampleData", "ExamplePortal", "Alex", "ExampleCo", "GHL", "Neon",
-                                         "Claude Code", "cmux", "Incant", "Spells"]
+                                         "Claude Code", "cmux", "Incant", "Rewind", "Scry", "Spells"]
     public var mode: IncantFixMode = .whenNeeded
     public var prompt: String = defaultPrompt
     public var cues: [String] = defaultCues
@@ -142,6 +142,20 @@ public struct IncantSettings: Equatable, Sendable {
     /// What the correction model is sent: the prompt plus the keyterms as a spelling vocabulary.
     public var instructions: String {
         keyterms.isEmpty ? prompt : prompt + "\n\nVocabulary (spell these exactly as written): " + keyterms.joined(separator: ", ")
+    }
+
+    /// The settings window's text fields → settings. Empty prompt/model fall back to the defaults; lists drop blank lines.
+    public static func edited(_ base: IncantSettings, prompt: String, cues: String, keyterms: String, model: String) -> IncantSettings {
+        func lines(_ t: String) -> [String] {
+            t.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
+        var s = base
+        let p = prompt.trimmingCharacters(in: .whitespacesAndNewlines), m = model.trimmingCharacters(in: .whitespaces)
+        s.prompt = p.isEmpty ? defaultPrompt : p
+        s.model = m.isEmpty ? defaultModel : m
+        s.cues = lines(cues)
+        s.keyterms = lines(keyterms)
+        return s
     }
 
     /// The rows to write for this value (inverse of `load`).

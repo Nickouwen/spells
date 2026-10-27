@@ -1,5 +1,5 @@
 import Foundation
-import HoursCore
+import SpellsKit
 import ScryCore
 
 /// The capture dirs under `<home>/scry/captures`: failure bookkeeping, retry selection, crash recovery and

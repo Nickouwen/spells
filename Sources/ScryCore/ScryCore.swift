@@ -178,6 +178,16 @@ public struct ScrySettings: Equatable, Sendable {
         if let v = value(nameKey) { s.userName = v }
         return s
     }
+    /// The settings window's text fields → settings. Blank folder/name fall back to the defaults; the app list drops blank lines.
+    public static func edited(_ base: ScrySettings, root: String, name: String, never: String) -> ScrySettings {
+        var s = base
+        let r = root.trimmingCharacters(in: .whitespacesAndNewlines), n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        s.root = r.isEmpty ? defaultRoot : r
+        s.userName = n.isEmpty ? ScrySettings().userName : n
+        s.never = never.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        return s
+    }
+
     public var rows: [String: String] {
         [Self.autoOfferKey: autoOffer ? "1" : "0", Self.autoRecordKey: autoRecord ? "1" : "0", Self.liveKey: live ? "1" : "0", Self.rootKey: root,
          Self.neverKey: never.joined(separator: "\n"), Self.nameKey: userName]

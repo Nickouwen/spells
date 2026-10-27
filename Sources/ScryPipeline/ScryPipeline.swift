@@ -1,5 +1,5 @@
 import Foundation
-import HoursCore
+import SpellsKit
 import IncantCore
 import ScryCore
 
@@ -222,21 +222,21 @@ public enum ScryPipeline {
     /// Scribe vocabulary: Incant's keyterms row, or its built-in defaults when none is saved.
     public static func keyterms(_ rows: [String: String]) -> [String] { IncantSettings.load(rows).keyterms }
 
-    /// The setting table's rows (empty if the DB can't be opened): the claude path, and ScrySettings for spellsctl.
+    /// Scry's settings file (ScrySettings, the claude path) over Incant's (keyterms); empty when neither exists.
     public static func settingRows() -> [String: String] {
-        (try? HoursDB.open(at: SupportPaths.current().db, role: .app)).flatMap { try? SettingStore($0).all() } ?? [:]
+        SpellSettingsFile.incant().all().merging(SpellSettingsFile.scry().all()) { _, scry in scry }
     }
 
     /// `claude -p` isolated like the standup's (`StandupGenerator.liveClaude`, which is internal to
-    /// HoursCore and carries the standup system prompt): no tools, MCP, hooks or transcript. → `result`.
+    /// RewindCore and carries the standup system prompt): no tools, MCP, hooks or transcript. → `result`.
     static func claude(_ prompt: String) async throws -> String {
-        let path = StandupSettings.load(settingRows()).claudePath
+        let path = SpellsClaude.path(settingRows())
         guard FileManager.default.isExecutableFile(atPath: path) else { throw Failure.claude("not found or not executable: \(path)") }
         let args = ["-p", "--model", "sonnet", "--output-format", "json", "--safe-mode", "--no-session-persistence",
                     "--tools", "", "--strict-mcp-config"]
-        let r = try await withCheckedThrowingContinuation { (c: CheckedContinuation<StandupProcess.Result, Error>) in
+        let r = try await withCheckedThrowingContinuation { (c: CheckedContinuation<SupportProcess.Result, Error>) in
             DispatchQueue.global().async {
-                c.resume(with: Swift.Result { try StandupProcess.run(URL(filePath: path), args, stdin: Data(prompt.utf8), timeout: 300) })
+                c.resume(with: Swift.Result { try SupportProcess.run(URL(filePath: path), args, stdin: Data(prompt.utf8), timeout: 300) })
             }
         }
         let json = (try? JSONSerialization.jsonObject(with: r.stdout)) as? [String: Any]

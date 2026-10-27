@@ -1,5 +1,5 @@
 import AppKit
-import HoursCore
+import SpellsKit
 import IncantCore
 
 /// Monotonic ms (the gesture's clock and the timings).
@@ -136,15 +136,7 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
         onListening(false)
     }
 
-    /// Current settings from the shared `setting` table (defaults if the DB can't be read). The DB is
-    /// opened on first use and retried on later key-downs if it didn't exist yet (Incant can start at
-    /// login before Spells has created it).
-    nonisolated static func loadSettings() -> IncantSettings {
-        dbLock.lock(); defer { dbLock.unlock() }
-        if db == nil { db = try? HoursDB.open(at: SupportPaths.current().db, role: .app) }
-        guard let db, let rows = try? SettingStore(db).all() else { return IncantSettings() }
-        return IncantSettings.load(rows)
-    }
-    private nonisolated(unsafe) static var db: HoursDB?   // guarded by dbLock
-    private nonisolated static let dbLock = NSLock()
+    /// Current settings from Incant's own file (defaults if it doesn't exist yet). Read at each key-down,
+    /// so an edit in the settings window applies to the next dictation.
+    nonisolated static func loadSettings() -> IncantSettings { IncantSettings.load(SpellSettingsFile.incant().all()) }
 }

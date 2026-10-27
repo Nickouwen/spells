@@ -4,7 +4,7 @@ import Foundation
 /// stdout/stderr go through temp files rather than pipes, so a 250 KB dump can't deadlock a full
 /// pipe buffer and no reader threads are needed. The files live in the per-user `$TMPDIR` and are
 /// removed before returning.
-public enum StandupProcess {
+public enum SupportProcess {
     public struct Result: Sendable {
         public var status: Int32
         public var stdout: Data
@@ -29,8 +29,8 @@ public enum StandupProcess {
     public static func run(_ executable: URL, _ args: [String], stdin: Data? = nil, timeout: TimeInterval) throws -> Result {
         let tmp = FileManager.default.temporaryDirectory
         let id = UUID().uuidString
-        let outURL = tmp.appending(path: "hours-standup-\(id).out"), errURL = tmp.appending(path: "hours-standup-\(id).err")
-        let inURL = tmp.appending(path: "hours-standup-\(id).in")
+        let outURL = tmp.appending(path: "spells-proc-\(id).out"), errURL = tmp.appending(path: "spells-proc-\(id).err")
+        let inURL = tmp.appending(path: "spells-proc-\(id).in")
         defer { for u in [outURL, errURL, inURL] { try? FileManager.default.removeItem(at: u) } }
         for u in [outURL, errURL] { FileManager.default.createFile(atPath: u.path, contents: nil, attributes: [.posixPermissions: 0o600]) }
 
