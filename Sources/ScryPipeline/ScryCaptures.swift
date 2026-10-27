@@ -57,7 +57,9 @@ public enum ScryCaptures {
             try? h.seek(toOffset: 40); try? h.write(contentsOf: le32(data))
             try? h.close()
             let start = (attrs[.creationDate] as? Date) ?? Date(), end = (attrs[.modificationDate] as? Date) ?? start
-            let capture = ScryCapture(audioFile: "audio.wav", startedAt: start, endedAt: end, app: nil, screenshotText: [], userNotes: "")
+            // The live panel saves your notes to notes.txt as you type; keep them.
+            let notes = (try? String(contentsOf: d.appending(path: "notes.txt"), encoding: .utf8)) ?? ""
+            let capture = ScryCapture(audioFile: "audio.wav", startedAt: start, endedAt: end, app: nil, screenshotText: [], userNotes: notes)
             try? capture.encoded().write(to: d.appending(path: "capture.json"))
             SupportLog.scry.info("recovered a crashed capture: \(d.lastPathComponent, privacy: .public)")
         }

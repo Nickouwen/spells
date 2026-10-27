@@ -134,7 +134,7 @@ import UserNotifications
             try recorder.startMic()
             // Only once the mic is up: a failed start must not leave live sockets reconnecting.
             if settings.live {
-                s.live = ScryLive(recorder: recorder, keyterms: keyterms, systemAudio: systemAudio, app: app.map(Self.name), startedAt: s.startedAt,
+                s.live = ScryLive(recorder: recorder, keyterms: keyterms, systemAudio: systemAudio, dir: dir, app: app.map(Self.name), startedAt: s.startedAt,
                                   onStop: { [weak self] in self?.stop() }, onDiscard: { [weak self] in self?.discard() })
             }
             if systemAudio {   // off main: the first run blocks on the System Audio Recording prompt

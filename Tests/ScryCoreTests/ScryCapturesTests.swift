@@ -13,9 +13,10 @@ import ScryPipeline
         var wav = Data("RIFF".utf8) + Data(count: 4) + Data("WAVEfmt ".utf8) + Data(count: 20) + Data("data".utf8) + Data(count: 4)
         wav += Data(count: 32_000)
         try wav.write(to: crashed.appending(path: "audio.wav"))
+        try "ask about the backfill".write(to: crashed.appending(path: "notes.txt"), atomically: true, encoding: .utf8)   // the live panel's notes
         ScryCaptures.recoverCrashed(root)
         let manifest = try ScryCapture.decode(Data(contentsOf: crashed.appending(path: "capture.json")))
-        #expect(manifest.app == nil && manifest.audioFile == "audio.wav")
+        #expect(manifest.app == nil && manifest.audioFile == "audio.wav" && manifest.userNotes == "ask about the backfill")
         let patched = try Data(contentsOf: crashed.appending(path: "audio.wav"))
         #expect(patched[40..<44].withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) } == 32_000)
         #expect(ScryCaptures.retryable(root).map { $0.resolvingSymlinksInPath() } == [crashed.resolvingSymlinksInPath()])

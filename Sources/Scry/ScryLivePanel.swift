@@ -16,13 +16,36 @@ import SwiftUI
     private let started: Date
     private let recorder: ScryRecorder, keyterms: [String], systemAudio: Bool
     private let onStop: () -> Void, onDiscard: () -> Void
+    /// The capture folder: your notes are saved there (`notes.txt`) as you type, so a crash or a quit
+    /// mid-meeting keeps them (`ScryCaptures.recoverCrashed` reads the file).
+    private let dir: URL
+    private var notesSave: Task<Void, Never>?
 
     /// `app`: the call app's display name (nil = in person). `onStop` / `onDiscard`: the menu's actions, for the panel's buttons.
-    init(recorder: ScryRecorder, keyterms: [String], systemAudio: Bool, app: String?, startedAt: Date,
+    init(recorder: ScryRecorder, keyterms: [String], systemAudio: Bool, dir: URL, app: String?, startedAt: Date,
          onStop: @escaping () -> Void, onDiscard: @escaping () -> Void) {
-        self.recorder = recorder; self.keyterms = keyterms; self.systemAudio = systemAudio
+        self.recorder = recorder; self.keyterms = keyterms; self.systemAudio = systemAudio; self.dir = dir
         started = startedAt; self.onStop = onStop; self.onDiscard = onDiscard
         model = ScryLiveModel(app: app, startedAt: startedAt)
+    }
+
+    static let notesFile = "notes.txt"
+
+    /// Debounced: the file catches up a second after the last keystroke.
+    func notesChanged() {
+        notesSave?.cancel()
+        notesSave = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            self?.saveNotes()
+        }
+    }
+
+    private func saveNotes() {
+        let url = dir.appending(path: Self.notesFile)
+        do { try model.notes.write(to: url, atomically: true, encoding: .utf8) } catch {
+            SupportLog.scry.error("live notes not saved: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func startSockets() {
@@ -73,16 +96,22 @@ import SwiftUI
             p.isReleasedWhenClosed = false
             p.minSize = NSSize(width: 340, height: 460)
             p.contentView = NSHostingView(rootView: ScryLiveView(model: model, onCatchUp: { [weak self] in self?.catchUp() },
+                                                                 onNotesChanged: { [weak self] in self?.notesChanged() },
                                                                  onStop: onStop, onDiscard: onDiscard))
             if let v = NSScreen.main?.visibleFrame { p.setFrameTopLeftPoint(NSPoint(x: v.maxX - 420, y: v.maxY - 20)) }
             panel = p
         }
         NSApp.activate()   // you type in it
+        // The panel, its transcript and your notes live as long as the recording: closing or minimising it
+        // only hides it, and "Show live panel" (or the pill) brings the same one back.
+        if panel?.isMiniaturized == true { panel?.deminiaturize(nil) }
         panel?.makeKeyAndOrderFront(nil)
     }
 
     func stop() {
         sockets.forEach { $0.stop() }
+        notesSave?.cancel()
+        if !model.notes.isEmpty { saveNotes() }
         panel?.close()
     }
 
@@ -123,6 +152,7 @@ import SwiftUI
 struct ScryLiveView: View {
     @Bindable var model: ScryLiveModel
     var onCatchUp: () -> Void
+    var onNotesChanged: () -> Void
     var onStop: () -> Void
     var onDiscard: () -> Void
     @State private var pulse = false
@@ -143,6 +173,7 @@ struct ScryLiveView: View {
         .background(Theme.canvas)
         .tint(Theme.ink)
         .onAppear { withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true } }
+        .onChange(of: model.notes) { _, _ in onNotesChanged() }
     }
 
     private var header: some View {
