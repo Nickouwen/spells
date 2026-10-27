@@ -5,6 +5,7 @@ import RewindUI
 import ScryUI
 import SpellsKit
 import SpellsUI
+import TransmuteUI
 
 /// Sidebar: Modules, then a group per installed module (Rewind: Day / Week / Range; Scry: Meetings), and
 /// one Settings entry pinned at the bottom (with Rewind's health pill) that switches between the installed
@@ -47,6 +48,11 @@ struct HubView: View {
             if hub.meetings != nil {
                 Section("Scry") {
                     Label("Meetings", systemImage: "person.2.wave.2").tag(HubSection.meetings)
+                }
+            }
+            if hub.transmute != nil {
+                Section("Transmute") {
+                    Label("Invoices", systemImage: "flask").tag(HubSection.invoices)
                 }
             }
         }
@@ -97,6 +103,7 @@ struct HubView: View {
                 case .rewind: if let m = hub.rewind { SettingsView.page(rewindTab, model: m).id(rewindTab) }
                 case .scry: ScrySettingsView(onSaved: { hub.scrySettingsSaved() })
                 case .incant: IncantSettingsView(permissions: nil)
+                case .transmute: TransmuteSettingsView(onSaved: { hub.transmute?.reloadSettings() })
                 }
             }
             .frame(maxWidth: 960, maxHeight: .infinity, alignment: .topLeading)   // readable line length; left-aligned with the tiles
@@ -111,6 +118,7 @@ struct HubView: View {
             case .rewind: ("clock.arrow.circlepath", "Time tracking")
             case .scry: ("eye", "Meeting notes")
             case .incant: ("waveform", "Dictation")
+            case .transmute: ("flask", "Invoices")
         }
         return Button { hub.settingsModule = m } label: {
             HStack(spacing: Theme.Space.s + 2) {
@@ -150,6 +158,10 @@ struct HubView: View {
         case .meetings:
             if let meetings = hub.meetings {
                 MeetingsView(model: meetings, openSettings: { hub.showSettings(.scry) }).navigationTitle("Meetings")
+            }
+        case .invoices:
+            if let t = hub.transmute {
+                InvoicesView(model: t, openSettings: { hub.showSettings(.transmute) }).navigationTitle("Invoices")
             }
         case .settings:
             settings

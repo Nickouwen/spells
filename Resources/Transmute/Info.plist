@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Transmute</string>
+	<key>CFBundleExecutable</key>
+	<string>Transmute</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>dev.nic.spells.transmute</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Transmute</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.nic.spells.transmute</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>transmute</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>SpellsModule</key>
+	<dict>
+		<key>LoginItem</key>
+		<false/>
+		<key>Name</key>
+		<string>Transmute</string>
+		<key>Scheme</key>
+		<string>transmute</string>
+		<key>Summary</key>
+		<string>Invoices from your hours: prices a period of Rewind's time at your rate and writes the PDF.</string>
+		<key>Symbol</key>
+		<string>flask</string>
+	</dict>
+</dict>
+</plist>

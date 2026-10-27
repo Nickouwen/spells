@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install.sh — copy dist/ to stable paths (TCC + login items key off path + signature):
 #   dist/Spells.app → ~/Applications/Spells.app (the launcher)
-#   dist/{Rewind,Incant,Scry}.app → ~/Applications/Spells/ (the modules; the launcher scans this folder)
+#   dist/{Rewind,Incant,Scry,Transmute}.app → ~/Applications/Spells/ (the modules; the launcher scans this folder)
 #   dist/spellsctl → ~/.local/bin/spellsctl
 # then starts Rewind (which registers its tracker), the menu-bar modules that were on, and the launcher.
 # This is the dev install for one Mac; other Macs will get modules from the launcher's catalog (next step).
@@ -10,7 +10,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_DIR="$HOME/Applications"
 MOD_DIR="$APP_DIR/Spells"
 BIN_DIR="$HOME/.local/bin"
-MODULES=(Rewind Incant Scry)
+MODULES=(Rewind Incant Scry Transmute)
 
 for a in Spells "${MODULES[@]}"; do [[ -d "$ROOT/dist/$a.app" ]] || { echo "install: dist/$a.app missing — run scripts/build.sh first" >&2; exit 1; }; done
 [[ -x "$ROOT/dist/spellsctl" ]] || { echo "install: run scripts/build.sh first" >&2; exit 1; }
@@ -19,7 +19,7 @@ for a in Spells "${MODULES[@]}"; do [[ -d "$ROOT/dist/$a.app" ]] || { echo "inst
 # helper silently loses its Accessibility grant (TCC keys off the signature).
 if security find-identity -v -p codesigning | grep -q '"Apple Development'; then
   for b in "$ROOT/dist/Spells.app" "$ROOT/dist/Rewind.app" "$ROOT/dist/Rewind.app/Contents/Library/LoginItems/RewindTracker.app" \
-           "$ROOT/dist/Incant.app" "$ROOT/dist/Scry.app"; do
+           "$ROOT/dist/Incant.app" "$ROOT/dist/Scry.app" "$ROOT/dist/Transmute.app"; do
     sig="$(codesign -dvv "$b" 2>&1)"   # not piped: grep -q + pipefail would SIGPIPE codesign into a false fail
     [[ "$sig" == *$'\n'"Authority=Apple Development"* ]] \
       || { echo "install: $b is not signed with Apple Development — rerun scripts/build.sh (keychain locked?)" >&2; exit 1; }
@@ -29,7 +29,7 @@ fi
 first_run=1; [[ -d "$MOD_DIR" ]] && first_run=0
 
 # Stop the old copies so the new binaries are what runs.
-for p in RewindTracker Incant Scry Rewind Spells; do pkill -x "$p" || true; done
+for p in RewindTracker Incant Scry Transmute Rewind Spells; do pkill -x "$p" || true; done
 # Login items launched by launchd run under their job label; pkill -x above can miss them. The old
 # Incant/Scry jobs (login items of the pre-split Spells.app) are gone for good: the modules register themselves now.
 for job in dev.nic.spells.hours dev.nic.spells.incant dev.nic.spells.scry; do
@@ -63,5 +63,5 @@ for m in Incant Scry; do
 done
 open "$APP_DIR/Spells.app"
 
-echo "installed $APP_DIR/Spells.app, $MOD_DIR/{Rewind,Incant,Scry}.app and $BIN_DIR/spellsctl"
+echo "installed $APP_DIR/Spells.app, $MOD_DIR/{Rewind,Incant,Scry,Transmute}.app and $BIN_DIR/spellsctl"
 case ":$PATH:" in *":$BIN_DIR:"*) ;; *) echo "note: $BIN_DIR is not on PATH" ;; esac

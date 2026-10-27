@@ -6,6 +6,7 @@ public struct RangeMetrics: Sendable, Hashable {
     public struct Day: Sendable, Hashable {
         public var date: LocalDate
         public var metrics: DayMetrics
+        public init(date: LocalDate, metrics: DayMetrics) { self.date = date; self.metrics = metrics }
     }
 
     /// Billable ms for one (day, project) — the unit item 9 rounds on.

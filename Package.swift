@@ -13,6 +13,7 @@ let package = Package(
         .executable(name: "spellsctl", targets: ["spellsctl"]),
         .executable(name: "Incant", targets: ["Incant"]),
         .executable(name: "Scry", targets: ["Scry"]),
+        .executable(name: "Transmute", targets: ["Transmute"]),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift", from: "7.0.0"),
@@ -35,7 +36,7 @@ let package = Package(
         // …and the after-call pipeline (Scribe batch → claude -p → note), shared by Scry.app and spellsctl.
         .target(name: "ScryPipeline", dependencies: ["ScryCore", "SpellsKit", "IncantCore"]),
         // The launcher: finds module apps in ~/Applications/Spells and starts, stops and opens them. Installs nothing.
-        .executableTarget(name: "Spells", dependencies: ["SpellsKit", "SpellsUI", "RewindUI", "RewindCore", "ScryUI", "ScryCore", "IncantUI"]),
+        .executableTarget(name: "Spells", dependencies: ["SpellsKit", "SpellsUI", "RewindUI", "RewindCore", "ScryUI", "ScryCore", "IncantUI", "TransmuteUI", "TransmuteCore"]),
         // Rewind, the time-tracking module: the former hub window plus RewindTracker as its login item.
         .executableTarget(name: "Rewind", dependencies: ["RewindUI", "RewindCore", "SpellsUI"]),
         .executableTarget(name: "RewindTracker", dependencies: ["TrackerCore", "RewindCore"]),
@@ -47,11 +48,16 @@ let package = Package(
         .executableTarget(name: "Incant", dependencies: ["SpellsKit", "SpellsUI", "IncantCore", "IncantUI"]),
         // Scry: meeting notes (a third login item, only while switched on).
         .executableTarget(name: "Scry", dependencies: ["SpellsKit", "SpellsUI", "ScryCore", "ScryPipeline", "IncantCore", "ScryUI"]),
+        // Transmute: invoices from Rewind's hours (pure model + PDF, then its views, then the windowed app).
+        .target(name: "TransmuteCore", dependencies: ["RewindCore"]),
+        .target(name: "TransmuteUI", dependencies: ["TransmuteCore", "RewindCore", "SpellsKit", "SpellsUI"]),
+        .executableTarget(name: "Transmute", dependencies: ["SpellsKit", "SpellsUI", "RewindCore", "TransmuteCore", "TransmuteUI"]),
         .testTarget(name: "SpellsKitTests", dependencies: ["SpellsKit"]),
         .testTarget(name: "RewindCoreTests", dependencies: ["RewindCore"]),
         .testTarget(name: "TrackerCoreTests", dependencies: ["TrackerCore"]),
         .testTarget(name: "RewindUITests", dependencies: ["RewindUI"]),
         .testTarget(name: "IncantCoreTests", dependencies: ["IncantCore"]),
         .testTarget(name: "ScryCoreTests", dependencies: ["ScryCore", "ScryPipeline"]),
+        .testTarget(name: "TransmuteCoreTests", dependencies: ["TransmuteCore"]),
     ]
 )

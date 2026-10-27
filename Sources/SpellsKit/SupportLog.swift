@@ -15,4 +15,5 @@ public enum SupportLog {
     public static let cli = Logger(subsystem: subsystem, category: "cli")
     public static let incant = Logger(subsystem: subsystem, category: "incant")
     public static let scry = Logger(subsystem: subsystem, category: "scry")
+    public static let transmute = Logger(subsystem: subsystem, category: "transmute")
 }
