@@ -32,5 +32,6 @@ app.setActivationPolicy(.accessory)
 let scry = ScryApp()
 ModuleURLs.install(settings: .scry()) { verb, query in ScryWindows.handle(verb, query) }
 ModuleLoginItem.sync(.scry())
+ModuleUpdater.start(settings: .scry()) { scry.isRecording }
 SupportLog.scry.info("Scry started")
 app.run()

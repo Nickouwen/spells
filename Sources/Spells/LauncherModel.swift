@@ -18,6 +18,9 @@ struct InstalledModule: Identifiable, Equatable {
     /// The module's own `login_item` row (it mirrors its registration there).
     var atLogin: Bool
     var id: String { bundleID }
+    var forInstaller: ModuleInstaller.Installed {
+        .init(url: url, bundleID: bundleID, name: name, scheme: scheme, loginItem: loginItem, atLogin: atLogin)
+    }
 
     init?(url: URL) {
         guard let b = Bundle(url: url), let id = b.bundleIdentifier,
@@ -103,14 +106,14 @@ struct LauncherRow: Identifiable, Equatable {
     func install(_ entry: ModuleCatalog.Entry) {
         run(entry.bundleID) { status in
             let installed = self.modules.first { $0.bundleID == entry.bundleID }
-            _ = try await ModuleInstaller.install(entry, replacing: installed, status: status)
+            _ = try await ModuleInstaller.install(entry, replacing: installed?.forInstaller, status: status)
             SupportLog.app.info("installed \(entry.name, privacy: .public) \(entry.version, privacy: .public)")
         }
     }
 
     func remove(_ m: InstalledModule) {
         run(m.bundleID) { status in
-            try await ModuleInstaller.remove(m, status: status)
+            try await ModuleInstaller.remove(m.forInstaller, status: status)
             SupportLog.app.info("removed \(m.name, privacy: .public)")
         }
     }

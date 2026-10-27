@@ -26,6 +26,7 @@ struct RewindApp: App {
                         Self.applyDebugEnvironment(model)
                         await model.checkTracker()
                         await AppHelperLifecycle.dropLegacySpellLoginItems()
+                        ModuleUpdater.start(settings: .rewind())
                     }
             case .failure(let error):
                 EmptyState(symbol: "exclamationmark.triangle", title: "Couldn't open the database",

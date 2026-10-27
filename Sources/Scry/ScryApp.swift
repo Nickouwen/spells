@@ -24,6 +24,8 @@ import UserNotifications
     private let watch = ScryMicWatch()
     private var offered: String?
     private var session: Session?
+    /// A recording is in progress (an update must wait).
+    var isRecording: Bool { session != nil }
     private var sigterm: (any DispatchSourceSignal)?
     nonisolated private static let canNotify = Bundle.main.bundleIdentifier != nil   // UNUserNotificationCenter traps outside a bundle
 

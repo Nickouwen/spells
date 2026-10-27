@@ -4,7 +4,8 @@ import SpellsUI
 
 /// Spells, the launcher: a window listing every module — installed ones (from ~/Applications/Spells)
 /// with Open, Settings, Quit, Start-at-login and Remove; catalog ones with Install; both with Update
-/// when the catalog is newer. It ships with nothing installed.
+/// when the catalog is newer. It ships with nothing installed. Like every module it updates itself
+/// (`ModuleUpdater`).
 @main
 struct SpellsApp: App {
     @State private var model = LauncherModel()
@@ -12,7 +13,7 @@ struct SpellsApp: App {
     var body: some Scene {
         Window("Spells", id: "main") {
             LauncherView(model: model)
-                .onAppear { model.start() }
+                .onAppear { model.start(); ModuleUpdater.start(settings: .launcher()) }
         }
         .defaultSize(width: 720, height: 560)
         .windowResizability(.contentMinSize)

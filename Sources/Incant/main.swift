@@ -20,6 +20,7 @@ ModuleURLs.install(settings: .incant()) { verb, query in IncantWindows.handle(ve
 ModuleLoginItem.sync(.incant())
 let session = IncantSession()
 session.onListening = { statusItem.listening = $0 }
+ModuleUpdater.start(settings: .incant()) { session.isListening }
 let keyTap = IncantKeyTap(onEvent: { session.handle($0) }, isListening: { session.isListening })
 IncantPermissions.request {
     statusItem.refresh()

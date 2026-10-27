@@ -24,7 +24,14 @@ public struct ModuleCatalog: Codable, Sendable, Equatable {
     }
 
     public var modules: [Entry]
-    public init(modules: [Entry]) { self.modules = modules }
+    /// The launcher's own entry (it updates itself the same way); absent in a catalog that predates it.
+    public var launcher: Entry?
+    public init(modules: [Entry], launcher: Entry? = nil) { self.modules = modules; self.launcher = launcher }
+
+    /// The entry for a running app, module or launcher.
+    public func entry(for bundleID: String) -> Entry? {
+        launcher?.bundleID == bundleID ? launcher : modules.first { $0.bundleID == bundleID }
+    }
 
     public static let defaultURL = URL(string: "https://github.com/Nickouwen/spells/releases/latest/download/catalog.json")!
     /// Row in the launcher's settings file that points somewhere else (a local build, a fork).

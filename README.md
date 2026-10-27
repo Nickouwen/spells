@@ -51,6 +51,10 @@ scripts/release.sh --publish v0.2.0          # zips dist/*.app, writes catalog.j
 scripts/release.sh --base-url "file://$PWD/dist/release"   # a local catalog for testing
 ```
 
+Every app, the launcher included, also checks the catalog for itself 30 s after launch and every six
+hours. When its entry is newer it asks "Update / Later" (Later snoozes a day; a Scry recording or an
+Incant dictation defers the question). Update downloads, verifies, swaps its own bundle and relaunches.
+
 To test against a local or forked catalog, put its URL in `~/Library/Application Support/Spells/spells/settings.json`
 as `catalog_url`. Modules are signed with an Apple Development certificate for now; a Developer ID
 certificate and notarization are needed before another Mac will run a downloaded module.

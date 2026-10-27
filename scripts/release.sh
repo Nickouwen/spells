@@ -26,7 +26,7 @@ rm -rf "${OUT:?}"; mkdir -p "$OUT"
 plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1/Contents/Info.plist" 2>/dev/null; }
 json_str() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
 
-entries=()
+entries=(); launcher=""
 for app in "$DIST"/*.app; do
   name="$(basename "$app" .app)"
   version="$(plist "$app" CFBundleShortVersionString)"
@@ -34,7 +34,14 @@ for app in "$DIST"/*.app; do
   ditto -c -k --keepParent "$app" "$zip"   # keeps signatures, symlinks and resource forks intact
   sha="$(shasum -a 256 "$zip" | awk '{print $1}')"
   echo "$name $version  $(du -h "$zip" | cut -f1)  $sha"
-  [[ -n "$(plist "$app" SpellsModule:Name)" ]] || continue   # the launcher itself isn't a module
+  if [[ -z "$(plist "$app" SpellsModule:Name)" ]]; then   # the launcher: its own entry, so it can update itself
+    launcher="$(cat <<JSON
+    {"bundleID": $(json_str "$(plist "$app" CFBundleIdentifier)"), "name": $(json_str "$name"), "summary": "", "symbol": "book.closed.fill",
+     "scheme": "spells", "loginItem": false, "version": $(json_str "$version"), "url": $(json_str "$BASE/$name-$version.zip"), "sha256": $(json_str "$sha")}
+JSON
+)"
+    continue
+  fi
   login="$(plist "$app" SpellsModule:LoginItem)"
   entries+=("$(cat <<JSON
     {"bundleID": $(json_str "$(plist "$app" CFBundleIdentifier)"),
@@ -49,8 +56,9 @@ for app in "$DIST"/*.app; do
 JSON
 )")
 done
-{ echo '{"modules": ['; (IFS=,; echo "${entries[*]}"); echo ']}'; } | python3 -m json.tool > "$OUT/catalog.json"
-echo "wrote $OUT/catalog.json ($(( ${#entries[@]} )) modules, zips served from $BASE)"
+{ echo '{"modules": ['; (IFS=,; echo "${entries[*]}"); echo ']'; [[ -n "$launcher" ]] && echo ", \"launcher\": $launcher"; echo '}'; } \
+  | python3 -m json.tool > "$OUT/catalog.json"
+echo "wrote $OUT/catalog.json ($(( ${#entries[@]} )) modules + launcher, zips served from $BASE)"
 
 if [[ -n "$TAG" ]]; then
   gh release create "$TAG" "$OUT"/*.zip "$OUT/catalog.json" --title "Spells $TAG" --generate-notes

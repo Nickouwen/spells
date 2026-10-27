@@ -17,40 +17,42 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
-	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>0.1.1</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
 			<string>dev.nic.spells.scry</string>
 			<key>CFBundleURLSchemes</key>
-			<array><string>scry</string></array>
+			<array>
+				<string>scry</string>
+			</array>
 		</dict>
 	</array>
-	<key>SpellsModule</key>
-	<dict>
-		<key>Name</key>
-		<string>Scry</string>
-		<key>Summary</key>
-		<string>Meeting notes: offers to record when a call starts, then writes a note with summary, decisions, action items and transcript.</string>
-		<key>Symbol</key>
-		<string>eye</string>
-		<key>Scheme</key>
-		<string>scry</string>
-		<key>LoginItem</key>
-		<true/>
-	</dict>
+	<key>CFBundleVersion</key>
+	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Scry records the other side of a call (system audio) only while you're recording a meeting.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Scry reads the calendar event for a meeting you record, to name who was invited.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Scry records your side of a meeting only while you're recording it.</string>
-	<key>NSAudioCaptureUsageDescription</key>
-	<string>Scry records the other side of a call (system audio) only while you're recording a meeting.</string>
+	<key>SpellsModule</key>
+	<dict>
+		<key>LoginItem</key>
+		<true/>
+		<key>Name</key>
+		<string>Scry</string>
+		<key>Scheme</key>
+		<string>scry</string>
+		<key>Summary</key>
+		<string>Meeting notes: offers to record when a call starts, then writes a note with summary, decisions, action items and transcript.</string>
+		<key>Symbol</key>
+		<string>eye</string>
+	</dict>
 </dict>
 </plist>

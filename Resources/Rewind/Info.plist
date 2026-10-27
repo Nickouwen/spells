@@ -19,7 +19,18 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>0.1.1</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.nic.spells.rewind</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>rewind</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSApplicationCategoryType</key>
@@ -32,27 +43,18 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLName</key>
-			<string>dev.nic.spells.rewind</string>
-			<key>CFBundleURLSchemes</key>
-			<array><string>rewind</string></array>
-		</dict>
-	</array>
 	<key>SpellsModule</key>
 	<dict>
+		<key>LoginItem</key>
+		<false/>
 		<key>Name</key>
 		<string>Rewind</string>
+		<key>Scheme</key>
+		<string>rewind</string>
 		<key>Summary</key>
 		<string>Automatic time tracking: your day as blocks, reports, exports and the EOD standup. Its tracker runs at login.</string>
 		<key>Symbol</key>
 		<string>clock.arrow.circlepath</string>
-		<key>Scheme</key>
-		<string>rewind</string>
-		<key>LoginItem</key>
-		<false/>
 	</dict>
 </dict>
 </plist>
