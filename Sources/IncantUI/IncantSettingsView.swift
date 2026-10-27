@@ -6,7 +6,15 @@ import IncantCore
 
 /// Incant's settings window: correction mode, prompt, cue words, keyterms, model, the two API keys and
 /// the permission status. Writes Incant's own settings file; the key tap re-reads it at each key-down.
-struct IncantSettingsView: View {
+public struct IncantSettingsView: View {
+    /// What Incant itself can see about its grants; nil (the Spells hub) shows a pointer to Incant instead.
+    public struct Permissions: Sendable, Equatable {
+        public var microphone: Bool, accessibility: Bool
+        public init(microphone: Bool, accessibility: Bool) { self.microphone = microphone; self.accessibility = accessibility }
+    }
+    var permissions: Permissions?
+    public init(permissions: Permissions?) { self.permissions = permissions }
+
     @State private var saved = IncantSettings()
     @State private var prompt = ""
     @State private var cues = ""
@@ -19,12 +27,21 @@ struct IncantSettingsView: View {
     @State private var error: String?
     @Environment(\.openURL) private var openURL
 
-    var body: some View {
+    public var body: some View {
         SettingsPage {
             SettingsSection("Dictation", detail: "Hold Fn (or double-tap it for hands-free), speak, and the text lands wherever you're typing.") {
-                permission("Microphone", ok: IncantPermissions.microphone == .authorized, pane: "Privacy_Microphone")
-                SettingsDivider()
-                permission("Accessibility", ok: IncantPermissions.accessibility, pane: "Privacy_Accessibility")
+                if let p = permissions {
+                    permission("Microphone", ok: p.microphone, pane: "Privacy_Microphone")
+                    SettingsDivider()
+                    permission("Accessibility", ok: p.accessibility, pane: "Privacy_Accessibility")
+                } else {
+                    HStack(spacing: Theme.Space.s) {
+                        Text("Microphone and Accessibility are granted to Incant itself.").textRole(.body, Theme.inkSecondary)
+                        Spacer()
+                        Button("Open Incant Settings") { _ = ModuleURLs.send(Spells.incantBundleID, scheme: "incant", verb: "settings") }
+                            .buttonStyle(RewindButtonStyle())
+                    }
+                }
             }
             SettingsSection("Correction", detail: "After you speak, a fast model applies spoken self-corrections (\"three, no, four\" → \"four\"). \"When needed\" runs it only when it hears a cue word.") {
                 HStack {
@@ -68,7 +85,7 @@ struct IncantSettingsView: View {
         }
         .frame(minWidth: 560, minHeight: 400)
         .tint(Theme.ink)
-        .onAppear { show(IncantSession.loadSettings()) }
+        .onAppear { show(IncantSettings.load(SpellSettingsFile.incant().all())) }
     }
 
     private var edited: IncantSettings { IncantSettings.edited(saved, prompt: prompt, cues: cues, keyterms: keyterms, model: fixModel) }
@@ -140,24 +157,6 @@ struct IncantSettingsView: View {
                 .frame(height: CGFloat(lines) * 17 + 2 * Theme.Space.xs)   // ponytail: ~17 pt per body line
                 .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
                 .accessibilityLabel(title)
-        }
-    }
-}
-
-/// Incant's one window and its URL verbs (`incant://settings`; `quit` is answered by ModuleURLs).
-@MainActor enum IncantWindows {
-    private static let settings = ModuleWindow()
-
-    static func showSettings() {
-        settings.show(title: "Incant Settings", size: NSSize(width: 680, height: 720), minSize: NSSize(width: 560, height: 400)) {
-            IncantSettingsView()
-        }
-    }
-
-    static func handle(_ verb: String, _ query: [String: String]) {
-        switch verb {
-        case "settings": showSettings()
-        default: SupportLog.incant.info("unknown URL verb \(verb, privacy: .public)")
         }
     }
 }

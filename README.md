@@ -3,7 +3,7 @@
 Spells is a family of macOS productivity apps built with SwiftUI and SwiftPM: a small launcher plus
 standalone modules you install only if you want them.
 
-- **Spells** (the launcher): lists the modules installed in `~/Applications/Spells` and the ones in the catalog; installs, updates and removes them, starts and stops them, opens their settings, and sets which ones start at login. It ships with nothing installed.
+- **Spells** (the hub): lists the modules installed in `~/Applications/Spells` and the ones in the catalog; installs, updates and removes them, starts and stops them, and sets which ones start at login. Its sidebar also carries every installed module's own views — Rewind's Day / Week / Range and settings, Scry's Meetings and settings, Incant's settings — read straight from their data whether or not the module is running. It ships with nothing installed.
 - **Rewind**: local-first automatic time tracking with SQLite, classification rules, editing, reports, CSV/PDF exports, and tamper-evident proof bundles. Its tracker helper runs at login.
 - **Incant**: press-to-dictate. A menu-bar app with its own settings window.
 - **Scry**: meeting note capture and summarization, with a Meetings window for the notes. A menu-bar app.
@@ -12,7 +12,8 @@ A module is an ordinary `.app` with a `SpellsModule` dictionary in its Info.plis
 URL scheme, whether it is a login item). The launcher talks to it over `<scheme>://settings`, `quit` and
 `login-item?on=1|0`; a module keeps its own settings in `~/Library/Application Support/Spells/<scheme>/settings.json`
 and never opens another module's data. Shared code lives in `SpellsKit` (identifiers, log, keychain, paths, settings
-files) and `SpellsUI` (design primitives, module windows and URL verbs).
+files) and `SpellsUI` (design primitives, module windows and URL verbs); each module's views are a library
+(`RewindUI`, `ScryUI`, `IncantUI`) used by both the module's app and the hub.
 
 ## Privacy model
 

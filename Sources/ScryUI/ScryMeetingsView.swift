@@ -7,17 +7,19 @@ import ScryCore
 import ScryPipeline
 
 /// The Meetings window's state: the notes folder (re-read from settings on each show) and the selected note.
-@MainActor @Observable final class ScryMeetingsModel {
-    var root: URL
-    var selection: URL?
-    init(root: URL, selection: URL? = nil) { self.root = root; self.selection = selection }
+@MainActor @Observable public final class ScryMeetingsModel {
+    public var root: URL
+    public var selection: URL?
+    public init(root: URL, selection: URL? = nil) { self.root = root; self.selection = selection }
 }
 
 /// Scry's meeting notes: open action items across meetings and the notes by day (left), the selected
 /// note (right), and Ask Scry along the bottom. Reads the Markdown files under `root`; action-item
 /// toggles and speaker renames write them back. (Lived in Spells' window until the module split, 2026-10.)
-struct MeetingsView: View {
+public struct MeetingsView: View {
     @Bindable var model: ScryMeetingsModel
+    /// Opens Scry's settings (the empty state's button); nil hides it.
+    var openSettings: (() -> Void)?
     private var root: URL { model.root }
     private var selection: URL? {
         get { model.selection }
@@ -40,14 +42,14 @@ struct MeetingsView: View {
     @State private var newTask = ""
 
     /// `notes`: preloaded (previews); otherwise loaded from the folder on appear.
-    init(model: ScryMeetingsModel, notes: [ScryNoteFile]? = nil, timeZone: TimeZone = .current) {
-        self.model = model; self.timeZone = timeZone
+    public init(model: ScryMeetingsModel, notes: [ScryNoteFile]? = nil, timeZone: TimeZone = .current, openSettings: (() -> Void)? = nil) {
+        self.model = model; self.timeZone = timeZone; self.openSettings = openSettings
         _notes = State(initialValue: notes)
     }
 
     static let listWidth: CGFloat = 340
 
-    var body: some View {
+    public var body: some View {
         Group {
             if let notes {
                 if notes.isEmpty && failed.isEmpty { empty } else { content(notes) }
@@ -70,7 +72,7 @@ struct MeetingsView: View {
     private var empty: some View {
         EmptyState(symbol: "person.2.wave.2", title: "No meeting notes yet",
                    detail: "Scry offers to record when a call starts and writes a note for each: summary, decisions, action items and the transcript. Notes are read from \((root.path as NSString).abbreviatingWithTildeInPath).",
-                   action: .init("Open Settings") { ScryWindows.showSettings() })
+                   action: openSettings.map { open in .init("Open Settings") { open() } })
             .card()
             .padding(Theme.Space.gutter)
     }

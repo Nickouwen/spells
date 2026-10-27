@@ -6,7 +6,11 @@ import ScryCore
 
 /// Scry's settings window: recording behaviour, the notes folder, your name, never-offer apps, the
 /// ElevenLabs key and the claude CLI path. Writes Scry's own settings file; Scry re-reads it per event.
-struct ScrySettingsView: View {
+public struct ScrySettingsView: View {
+    /// After a save (Scry re-reads its never-offer list; the hub re-reads the notes folder).
+    var onSaved: () -> Void
+    public init(onSaved: @escaping () -> Void = {}) { self.onSaved = onSaved }
+
     @State private var saved = ScrySettings()
     @State private var root = ""
     @State private var name = ""
@@ -19,7 +23,7 @@ struct ScrySettingsView: View {
 
     static let screenRecordingPane = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
 
-    var body: some View {
+    public var body: some View {
         SettingsPage {
             SettingsSection("Recording", detail: "When a call app takes the mic, Scry offers to record. After the call it transcribes, summarises and writes a Markdown note. Nothing joins the call.") {
                 Toggle("Offer to record when a call starts", isOn: Binding(get: { saved.autoOffer }, set: { v in
@@ -140,7 +144,7 @@ struct ScrySettingsView: View {
         do {
             try SpellSettingsFile.scry().merge(rows)
             error = nil
-            ScryWindows.settingsChanged()
+            onSaved()
         } catch {
             self.error = "Couldn't save: \(error.localizedDescription)"
             SupportLog.scry.error("settings not saved: \(String(describing: error), privacy: .public)")

@@ -1,6 +1,7 @@
 import AppKit
 import SpellsKit
 import SpellsUI
+import ScryUI
 
 /// Scry's two windows (Meetings, Settings) and its URL verbs. A menu-bar app: windows are made on first
 /// show and kept.
@@ -14,13 +15,13 @@ import SpellsUI
         meetingsModel.root = ScryApp.loadSettings().settings.rootURL
         if let note { meetingsModel.selection = note }
         meetings.show(title: "Meetings", size: NSSize(width: 1180, height: 760), minSize: NSSize(width: 900, height: 600)) {
-            MeetingsView(model: meetingsModel)
+            MeetingsView(model: meetingsModel, openSettings: { showSettings() })
         }
     }
 
     static func showSettings() {
         settings.show(title: "Scry Settings", size: NSSize(width: 680, height: 640), minSize: NSSize(width: 560, height: 400)) {
-            ScrySettingsView()
+            ScrySettingsView(onSaved: { settingsChanged() })
         }
     }
 

@@ -35,15 +35,18 @@ let package = Package(
         // …and the after-call pipeline (Scribe batch → claude -p → note), shared by Scry.app and spellsctl.
         .target(name: "ScryPipeline", dependencies: ["ScryCore", "SpellsKit", "IncantCore"]),
         // The launcher: finds module apps in ~/Applications/Spells and starts, stops and opens them. Installs nothing.
-        .executableTarget(name: "Spells", dependencies: ["SpellsKit", "SpellsUI"]),
+        .executableTarget(name: "Spells", dependencies: ["SpellsKit", "SpellsUI", "RewindUI", "RewindCore", "ScryUI", "ScryCore", "IncantUI"]),
         // Rewind, the time-tracking module: the former hub window plus RewindTracker as its login item.
         .executableTarget(name: "Rewind", dependencies: ["RewindUI", "RewindCore", "SpellsUI"]),
         .executableTarget(name: "RewindTracker", dependencies: ["TrackerCore", "RewindCore"]),
         .executableTarget(name: "spellsctl", dependencies: ["RewindCore", "ScryCore", "ScryPipeline"]),
         // Incant: the dictation spell (a second login item, only while switched on).
-        .executableTarget(name: "Incant", dependencies: ["SpellsKit", "SpellsUI", "IncantCore"]),
+        // Each module's windows as a library, so the Spells hub can show the same views.
+        .target(name: "IncantUI", dependencies: ["IncantCore", "SpellsKit", "SpellsUI"]),
+        .target(name: "ScryUI", dependencies: ["ScryCore", "ScryPipeline", "SpellsKit", "SpellsUI"]),
+        .executableTarget(name: "Incant", dependencies: ["SpellsKit", "SpellsUI", "IncantCore", "IncantUI"]),
         // Scry: meeting notes (a third login item, only while switched on).
-        .executableTarget(name: "Scry", dependencies: ["SpellsKit", "SpellsUI", "ScryCore", "ScryPipeline", "IncantCore"]),
+        .executableTarget(name: "Scry", dependencies: ["SpellsKit", "SpellsUI", "ScryCore", "ScryPipeline", "IncantCore", "ScryUI"]),
         .testTarget(name: "SpellsKitTests", dependencies: ["SpellsKit"]),
         .testTarget(name: "RewindCoreTests", dependencies: ["RewindCore"]),
         .testTarget(name: "TrackerCoreTests", dependencies: ["TrackerCore"]),

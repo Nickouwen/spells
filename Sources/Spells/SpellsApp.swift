@@ -1,25 +1,28 @@
 import SwiftUI
+import RewindUI
 import SpellsKit
 import SpellsUI
 
-/// Spells, the launcher: a window listing every module — installed ones (from ~/Applications/Spells)
-/// with Open, Settings, Quit, Start-at-login and Remove; catalog ones with Install; both with Update
-/// when the catalog is newer. It ships with nothing installed. Like every module it updates itself
-/// (`ModuleUpdater`).
+/// Spells, the hub: the module list and catalog (install, update, remove, start, stop, login) plus every
+/// installed module's own views — Rewind's Day / Week / Range and settings, Scry's Meetings and settings,
+/// Incant's settings — read straight from their data, whether or not the module runs. It ships with
+/// nothing installed and, like every module, updates itself (`ModuleUpdater`).
 @main
 struct SpellsApp: App {
-    @State private var model = LauncherModel()
+    @State private var hub = HubModel()
 
     var body: some Scene {
         Window("Spells", id: "main") {
-            LauncherView(model: model)
-                .onAppear { model.start(); ModuleUpdater.start(settings: .launcher()) }
+            HubView(hub: hub)
+                .onAppear { hub.start(); ModuleUpdater.start(settings: .launcher()) }
         }
-        .defaultSize(width: 720, height: 560)
+        .defaultSize(width: 1440, height: 900)
         .windowResizability(.contentMinSize)
+        .commands { ShellCommands() }
     }
 }
 
+/// The Modules section: installed and catalog modules with their actions.
 struct LauncherView: View {
     let model: LauncherModel
 
@@ -40,7 +43,6 @@ struct LauncherView: View {
             }
             footer
         }
-        .frame(minWidth: 620, minHeight: 360)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvas)
         .tint(Theme.ink)

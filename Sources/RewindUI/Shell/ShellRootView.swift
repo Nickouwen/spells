@@ -6,16 +6,9 @@ extension FocusedValues {
     @Entry var shellModel: AppModel?
 }
 
-/// Main window content: sidebar (Day / Week / Range / Meetings, Settings pinned bottom, health pill) + detail
-/// (tracker banner, the view slot) + toolbar date navigation.
+/// Rewind's main window: sidebar (Day / Week / Range, Settings pinned bottom, health pill) + `ShellDetailView`.
 public struct ShellRootView: View {
     @Bindable var model: AppModel
-    @Environment(\.openURL) private var openURL
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// The day whose EOD standup sheet is open (W20).
-    @State private var standupDay: LocalDate?
-    /// The block last opened from the Week's Blocks mode; Day → Blocks selects it on that day (W22).
-    @State private var openedBlock: WeekBlockRoute?
 
     public init(model: AppModel) { self.model = model }
 
@@ -23,43 +16,11 @@ public struct ShellRootView: View {
         NavigationSplitView {
             sidebar
         } detail: {
-            detail
-                .navigationTitle(model.view.title)
-                .navigationSubtitle(subtitle)
-                .toolbar { toolbar }
-                .environment(\.openStandup, { standupDay = $0 })
-                .environment(\.scryRoot, model.scryRoot)
-                .environment(\.openMeeting, model.openMeeting)
-                .sheet(isPresented: Binding(get: { standupDay != nil }, set: { if !$0 { standupDay = nil } })) {
-                    if let day = standupDay { StandupSheet(db: model.db, date: day, timeZone: model.timeZone) }
-                }
+            ShellDetailView(model: model)
         }
         // Minimum window 900 × 600: the title bar/toolbar adds 52 pt above the content.
         .frame(minWidth: 900, minHeight: 548)
         .tint(Theme.ink)
-        .background(ShellWindowObserver(onVisible: { model.setVisible($0) }, onActivate: { model.appDidActivate() }))
-        .focusedSceneValue(\.shellModel, model)
-        .onKeyPress(.leftArrow) { arrow(-1) }
-        .onKeyPress(.rightArrow) { arrow(1) }
-        // Bare T = Today (⌘T is the menu item). Text fields get the key first, so typing a "t" is safe.
-        .onKeyPress(keys: ["t"]) { press in
-            guard press.modifiers.subtracting([.shift, .capsLock]).isEmpty else { return .ignored }
-            model.goToday()
-            return .handled
-        }
-        .onDisappear { model.setVisible(false) }
-    }
-
-    private var subtitle: String {
-        // Day, Week and Range headers show their own date/period.
-        ""
-    }
-
-
-    private func arrow(_ days: Int) -> KeyPress.Result {
-        guard model.view != .range else { return .ignored }
-        model.step(days: model.view == .week ? 7 * days : days)
-        return .handled
     }
 
     // MARK: Sidebar
@@ -82,6 +43,56 @@ public struct ShellRootView: View {
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+/// The detail column for `model.view` (tracker banner, the view slot, toolbar date navigation, the
+/// standup sheet, arrow/T keys), hosted by Rewind's own window or the Spells hub.
+public struct ShellDetailView: View {
+    @Bindable var model: AppModel
+    @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The day whose EOD standup sheet is open (W20).
+    @State private var standupDay: LocalDate?
+    /// The block last opened from the Week's Blocks mode; Day → Blocks selects it on that day (W22).
+    @State private var openedBlock: WeekBlockRoute?
+
+    public init(model: AppModel) { self.model = model }
+
+    public var body: some View {
+        detail
+            .navigationTitle(model.view.title)
+            .navigationSubtitle(subtitle)
+            .toolbar { toolbar }
+            .environment(\.openStandup, { standupDay = $0 })
+            .environment(\.scryRoot, model.scryRoot)
+            .environment(\.openMeeting, model.openMeeting)
+            .sheet(isPresented: Binding(get: { standupDay != nil }, set: { if !$0 { standupDay = nil } })) {
+                if let day = standupDay { StandupSheet(db: model.db, date: day, timeZone: model.timeZone) }
+            }
+            .background(ShellWindowObserver(onVisible: { model.setVisible($0) }, onActivate: { model.appDidActivate() }))
+            .focusedSceneValue(\.shellModel, model)
+            .onKeyPress(.leftArrow) { arrow(-1) }
+            .onKeyPress(.rightArrow) { arrow(1) }
+            // Bare T = Today (⌘T is the menu item). Text fields get the key first, so typing a "t" is safe.
+            .onKeyPress(keys: ["t"]) { press in
+                guard press.modifiers.subtracting([.shift, .capsLock]).isEmpty else { return .ignored }
+                model.goToday()
+                return .handled
+            }
+            .onDisappear { model.setVisible(false) }
+    }
+
+    private var subtitle: String {
+        // Day, Week and Range headers show their own date/period.
+        ""
+    }
+
+
+    private func arrow(_ days: Int) -> KeyPress.Result {
+        guard model.view != .range else { return .ignored }
+        model.step(days: model.view == .week ? 7 * days : days)
+        return .handled
     }
 
     // MARK: Detail

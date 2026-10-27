@@ -5,10 +5,10 @@ import RewindCore
 public enum ShellView: String, CaseIterable, Identifiable, Sendable {
     case day, week, range
     public var id: String { rawValue }
-    var title: String {
+    public var title: String {
         switch self { case .day: "Day"; case .week: "Week"; case .range: "Range" }
     }
-    var symbol: String {
+    public var symbol: String {
         switch self {
         case .day: "sun.max"; case .week: "calendar"; case .range: "calendar.badge.clock"
         }

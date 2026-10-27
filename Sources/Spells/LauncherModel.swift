@@ -63,6 +63,8 @@ struct LauncherRow: Identifiable, Equatable {
     /// Module bundle id → the last failure, until the next attempt.
     private(set) var errors: [String: String] = [:]
     private var observers: [any NSObjectProtocol] = []
+    /// After every rescan (the hub adds or drops sections with it).
+    var onChange: (() -> Void)?
 
     var rows: [LauncherRow] {
         var byID: [String: LauncherRow] = [:]
@@ -87,6 +89,7 @@ struct LauncherRow: Identifiable, Equatable {
         let dir = Spells.modulesDirectory
         let apps = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         modules = apps.filter { $0.pathExtension == "app" }.compactMap(InstalledModule.init).sorted { $0.name < $1.name }
+        onChange?()
     }
 
     func loadCatalog() async {
