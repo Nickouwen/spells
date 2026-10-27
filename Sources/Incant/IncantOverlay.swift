@@ -6,12 +6,14 @@ import HoursCore
 /// notch. Monochrome: white level bars while listening, a dot for hands-free, pulsing dots while the
 /// correction runs, "!" on an error. No text. A non-activating panel that never takes focus, so the
 /// paste lands in the app you were typing in. Without a notch it sits at the top centre.
+/// The panel is rebuilt for every dictation: re-asserting all-Spaces on one long-lived window did not
+/// stop the window server pinning it to a single Space after enough order-out/in cycles (indicator
+/// never appearing; 2026-10-14, again 2026-10-26). A fresh window is always on its first order-in.
 @MainActor final class IncantOverlay {
     private static let size = NSSize(width: 64, height: 32)
     private static let gap: CGFloat = 6             // from the notch / the island's left edge
     static let everySpace: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-    private let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
-                                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+    private var panel: NSPanel?                      // the current showing's window; nil once hidden
     private let view = IncantIndicatorView(frame: NSRect(origin: .zero, size: size))
     private var generation = 0                       // bumped per show; a hide only acts on its own showing
     private var holdUntil = Date.distantPast         // keeps an error visible
@@ -28,7 +30,11 @@ import HoursCore
         }
     }
 
-    init() {
+    init() {}
+
+    private static func makePanel(_ view: NSView) -> NSPanel {
+        let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         panel.isFloatingPanel = true
         panel.level = .statusBar
         panel.isOpaque = false
@@ -36,8 +42,10 @@ import HoursCore
         panel.hasShadow = false
         panel.ignoresMouseEvents = true
         panel.hidesOnDeactivate = false
-        panel.collectionBehavior = Self.everySpace
+        panel.isReleasedWhenClosed = false
+        panel.collectionBehavior = everySpace
         panel.contentView = view
+        return panel
     }
 
     /// Shows the indicator for a new dictation and cancels any pending fade-out of the previous one.
@@ -48,13 +56,12 @@ import HoursCore
         view.reset()
         setFixing(false)
         let full = Self.frame()
-        // Re-assert all-Spaces on every show: after enough order-out/in cycles the window server had it
-        // pinned to one Space (seen 2026-10-14: indicator "showing", alpha 1, on Space 55 while you were on 1).
-        panel.collectionBehavior = Self.everySpace
-        if !panel.isVisible {   // drop down out of the top edge (from where it would retract to)
-            panel.alphaValue = 0
-            panel.setFrame(Self.retracted(full), display: false)
-        }
+        panel?.orderOut(nil)                         // a previous showing still fading out
+        let panel = Self.makePanel(view)
+        self.panel = panel
+        // Drop down out of the top edge (from where it would retract to).
+        panel.alphaValue = 0
+        panel.setFrame(Self.retracted(full), display: false)
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = reduceMotion ? 0 : 0.18
@@ -83,7 +90,7 @@ import HoursCore
         let wait = max(delay, holdUntil.timeIntervalSinceNow)
         Task {
             try? await Task.sleep(for: .seconds(wait))
-            guard mine == generation else { return }
+            guard mine == generation, let panel else { return }
             // Retract up into the top edge, narrowing toward the notch, as it fades.
             let target = Self.retracted(panel.frame)
             NSAnimationContext.runAnimationGroup({ ctx in
@@ -93,7 +100,10 @@ import HoursCore
                 panel.animator().alphaValue = 0
             }) {
                 MainActor.assumeIsolated {
-                    if mine == self.generation { self.panel.orderOut(nil); self.setFixing(false) }
+                    guard mine == self.generation else { return }
+                    panel.orderOut(nil)
+                    if self.panel === panel { self.panel = nil }
+                    self.setFixing(false)
                 }
             }
         }

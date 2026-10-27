@@ -26,7 +26,12 @@ enum AppHelperLifecycle {
                 SupportLog.app.error("login item register failed: \(error.localizedDescription, privacy: .public)")
                 return .failed(error.localizedDescription)
             }
-        case .requiresApproval, .enabled:
+        case .enabled:
+            // Re-register even when enabled: the record keeps the code requirement from when it was made, and a
+            // build signed differently (ad-hoc → Apple Development, 2026-10-26) fails launchd's launch constraint
+            // until the record is refreshed. Idempotent otherwise.
+            try? service.register()
+        case .requiresApproval:
             break
         @unknown default:
             break
