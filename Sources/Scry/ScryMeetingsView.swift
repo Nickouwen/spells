@@ -35,6 +35,9 @@ struct MeetingsView: View {
     @State private var failed: [ScryCaptures.Failed] = []
     @State private var retrying: Set<URL> = []
     @State private var newName = ""
+    /// The note a right-click asked to delete, until the alert answers.
+    @State private var deleting: ScryNoteFile?
+    @State private var newTask = ""
 
     /// `notes`: preloaded (previews); otherwise loaded from the folder on appear.
     init(model: ScryMeetingsModel, notes: [ScryNoteFile]? = nil, timeZone: TimeZone = .current) {
@@ -56,6 +59,12 @@ struct MeetingsView: View {
         .background(Theme.canvas)
         .tint(Theme.ink)
         .task(id: root) { await reload() }
+        .alert("Delete this note?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting) { n in
+            Button("Move to Trash", role: .destructive) { deleteNote(n) }
+            Button("Cancel", role: .cancel) {}
+        } message: { n in
+            Text("“\(n.note.summary.title)” goes to the Trash.")
+        }
     }
 
     private var empty: some View {
@@ -133,6 +142,12 @@ struct MeetingsView: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
+        .contextMenu {
+            Button("Open in Editor") { NSWorkspace.shared.open(n.url) }
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([n.url]) }
+            Divider()
+            Button("Delete Note…", role: .destructive) { deleting = n }
+        }
     }
 
     /// "09:30 · Zoom · 35m".
@@ -158,6 +173,26 @@ struct MeetingsView: View {
                     .buttonStyle(.plain)
                 }
             }
+            if !meeting {
+                Spacer(minLength: Theme.Space.s)
+                IconButton(symbol: "xmark", help: "Remove this action item") { removeAction(n, item) }
+            }
+        }
+    }
+
+    /// The note's action items with a remove button each, and a field to add one (owner "You").
+    private func actionsCard(_ n: ScryNoteFile) -> some View {
+        card("Action items") {
+            ForEach(n.actions, id: \.line) { actionRow(n, $0, meeting: false) }
+            HStack(spacing: Theme.Space.s) {
+                TextField("Add an action item", text: $newTask)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { addAction(n) }
+                Button("Add") { addAction(n) }
+                    .buttonStyle(RewindButtonStyle())
+                    .disabled(newTask.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(.top, n.actions.isEmpty ? 0 : Theme.Space.xs)
         }
     }
 
@@ -195,9 +230,7 @@ struct MeetingsView: View {
                 }
                 if !s.decisions.isEmpty { card("Decisions") { bullets(s.decisions) } }
                 if !s.keyDates.isEmpty { card("Key dates") { bullets(s.keyDates) } }
-                if !n.actions.isEmpty {
-                    card("Action items") { ForEach(n.actions, id: \.line) { actionRow(n, $0, meeting: false) } }
-                }
+                actionsCard(n)
                 if !s.openQuestions.isEmpty { card("Open questions") { bullets(s.openQuestions) } }
                 if !s.insights.isEmpty { card("Insights") { bullets(s.insights) } }
                 if !n.note.userNotes.isEmpty {
@@ -460,6 +493,32 @@ struct MeetingsView: View {
     private func toggle(_ n: ScryNoteFile, _ item: ScryActions.Item) {
         let url = n.url
         update(url) { try ScryNotes.toggle(url, line: item.line, owner: item.owner, task: item.task) }
+    }
+
+    private func addAction(_ n: ScryNoteFile) {
+        let url = n.url, task = newTask.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !task.isEmpty else { return }
+        newTask = ""
+        update(url) { try ScryNotes.addAction(url, owner: "You", task: task) }
+    }
+
+    private func removeAction(_ n: ScryNoteFile, _ item: ScryActions.Item) {
+        let url = n.url
+        update(url) { try ScryNotes.removeAction(url, line: item.line, owner: item.owner, task: item.task) }
+    }
+
+    /// To the Trash; the list and selection drop it straight away.
+    private func deleteNote(_ n: ScryNoteFile) {
+        let url = n.url
+        Task {
+            do {
+                try await Task.detached(priority: .userInitiated) { try ScryNotes.delete(url) }.value
+                notes?.removeAll { $0.url == url }
+                if selection == url { selection = nil }
+            } catch {
+                SupportLog.scry.error("scry note not deleted: \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     private func rename(_ n: ScryNoteFile, from: String, to: String) {

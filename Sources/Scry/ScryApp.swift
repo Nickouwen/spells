@@ -133,7 +133,10 @@ import UserNotifications
             let s = Session(dir: dir, app: app, recorder: recorder, settings: settings, keyterms: keyterms)
             try recorder.startMic()
             // Only once the mic is up: a failed start must not leave live sockets reconnecting.
-            if settings.live { s.live = ScryLive(recorder: recorder, keyterms: keyterms, systemAudio: systemAudio) }
+            if settings.live {
+                s.live = ScryLive(recorder: recorder, keyterms: keyterms, systemAudio: systemAudio, app: app.map(Self.name), startedAt: s.startedAt,
+                                  onStop: { [weak self] in self?.stop() }, onDiscard: { [weak self] in self?.discard() })
+            }
             if systemAudio {   // off main: the first run blocks on the System Audio Recording prompt
                 DispatchQueue.global().async {
                     do { try recorder.startSystem() } catch {
@@ -144,7 +147,7 @@ import UserNotifications
             session = s
             tickRecording(nil)   // the pill shows straight away, not at the next poll
             s.levels = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self, weak s] _ in
-                MainActor.assumeIsolated { if let s { self?.pill.pushLevel(s.recorder.level) } }
+                MainActor.assumeIsolated { if let s { let l = s.recorder.level; self?.pill.pushLevel(l); s.live?.pushLevel(l) } }
             }
             s.invite = ScryCalendar.invite(app: app, now: s.startedAt)
             if let i = s.invite { SupportLog.scry.info("calendar invite matched: \(i.invitees.count, privacy: .public) invitees") }

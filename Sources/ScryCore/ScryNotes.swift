@@ -66,6 +66,26 @@ public enum ScryNotes {
         return try write(ScryActions.toggled(fresh, line: target.line), to: url)
     }
 
+    /// Appends an action item (owner "You" for ones you add by hand) and re-reads the note.
+    public static func addAction(_ url: URL, owner: String, task: String) throws -> ScryNoteFile? {
+        try write(ScryActions.added(try String(contentsOf: url, encoding: .utf8), owner: owner, task: task), to: url)
+    }
+
+    /// Removes one action item, matched like `toggle`; gone already → nothing is written.
+    public static func removeAction(_ url: URL, line: Int, owner: String, task: String) throws -> ScryNoteFile? {
+        let fresh = try String(contentsOf: url, encoding: .utf8)
+        let items = ScryActions.items(in: fresh)
+        guard let target = items.first(where: { $0.line == line && $0.owner == owner && $0.task == task })
+                ?? items.first(where: { $0.owner == owner && $0.task == task })
+        else { return ScryNote.parse(fresh).map { ScryNoteFile(url: url, markdown: fresh, note: $0) } }
+        return try write(ScryActions.removed(fresh, line: target.line), to: url)
+    }
+
+    /// The note file to the Trash (recoverable). Its capture folder, if any, is untouched.
+    public static func delete(_ url: URL) throws {
+        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+    }
+
     /// Renames a speaker by text substitution only: transcript lines (`**[mm:ss] From:**`), action-item
     /// owners (`**From**:`) and the frontmatter `speakers` map. Everything else stays byte-identical.
     public static func rename(_ url: URL, from: String, to: String) throws -> ScryNoteFile? {

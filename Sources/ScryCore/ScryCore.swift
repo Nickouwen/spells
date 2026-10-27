@@ -715,6 +715,34 @@ public enum ScryActions {
         }
         return out
     }
+    /// The file with `- [ ] **owner**: task` added at the end of `## Action items` (the section is created
+    /// before Open questions / Insights / Your notes / Transcript, or at the end, when the note has none).
+    public static func added(_ markdown: String, owner: String, task: String) -> String {
+        let task = task.trimmingCharacters(in: .whitespacesAndNewlines), owner = owner.trimmingCharacters(in: .whitespaces)
+        guard !task.isEmpty else { return markdown }
+        let item = owner.isEmpty ? "- [ ] \(task)" : "- [ ] **\(owner)**: \(task)"
+        var lines = markdown.components(separatedBy: "\n")
+        let isHeader = { (l: String) in l.hasPrefix("# ") || l.hasPrefix("## ") }
+        if let h = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "## action items" }) {
+            var end = lines.indices.first { $0 > h && isHeader(lines[$0]) } ?? lines.count
+            while end > h + 1, lines[end - 1].trimmingCharacters(in: .whitespaces).isEmpty { end -= 1 }   // keep the blank line before the next header
+            lines.insert(item, at: end)
+        } else {
+            let later = ["## open questions", "## insights", "## your notes", "## transcript"]
+            let at = lines.indices.first { later.contains(lines[$0].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) } ?? lines.count
+            lines.insert(contentsOf: ["## Action items", "", item, ""], at: at)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// The file without that action line (nothing else touched; not an action line → unchanged).
+    public static func removed(_ markdown: String, line: Int) -> String {
+        var lines = markdown.components(separatedBy: "\n")
+        guard lines.indices.contains(line), lines[line].prefixMatch(of: /\s*[-*] \[[ xX]\][ ]/) != nil else { return markdown }
+        lines.remove(at: line)
+        return lines.joined(separator: "\n")
+    }
+
     /// The file with that line's checkbox flipped (other lines untouched).
     public static func toggled(_ markdown: String, line: Int) -> String {
         var lines = markdown.components(separatedBy: "\n")

@@ -48,6 +48,33 @@ func meetingsFixtureRoot() throws -> URL {
 }
 
 @Suite(.serialized) struct ScryNotesTests {
+    @Test func addAndRemoveActionLines() {
+        let md = "# T\n\n## Decisions\n\n- A\n\n## Action items\n\n- [ ] **You**: one\n\n## Open questions\n\n- Q?\n"
+        let added = ScryActions.added(md, owner: "You", task: "two")
+        #expect(ScryActions.items(in: added).map(\.task) == ["one", "two"])
+        #expect(added.contains("- [ ] **You**: one\n- [ ] **You**: two\n\n## Open questions"))
+        let removed = ScryActions.removed(added, line: ScryActions.items(in: added)[0].line)
+        #expect(ScryActions.items(in: removed).map(\.task) == ["two"])
+        #expect(ScryActions.removed(md, line: 0) == md)   // a header isn't an action line
+        let none = "# T\n\n## Summary\n\nx\n\n## Transcript\n\n**[0:00] You:** hi\n"
+        let created = ScryActions.added(none, owner: "", task: "call Alex")
+        #expect(ScryActions.items(in: created) == [.init(line: 8, owner: "", task: "call Alex", done: false)])
+        #expect(created.hasSuffix("x\n\n## Action items\n\n- [ ] call Alex\n\n## Transcript\n\n**[0:00] You:** hi\n"))
+        #expect(ScryActions.added(md, owner: "You", task: "  ") == md)
+    }
+
+    @Test func addRemoveDeleteOnDisk() throws {
+        let root = try meetingsFixtureRoot()
+        let weekly = ScryNotes.load(root).first { $0.note.summary.title == "Communications weekly" }!
+        let after = try ScryNotes.addAction(weekly.url, owner: "You", task: "Book the venue")!
+        #expect(after.actions.map(\.task) == ["Draft the Q4 communications plan", "Book the venue"] && after.note.summary.actionItems.count == 2)
+        let removed = try ScryNotes.removeAction(weekly.url, line: after.actions[0].line, owner: "You", task: "Draft the Q4 communications plan")!
+        #expect(removed.actions.map(\.task) == ["Book the venue"])
+        #expect(try ScryNotes.removeAction(weekly.url, line: 99, owner: "Nobody", task: "x")?.actions.count == 1)
+        try ScryNotes.delete(weekly.url)
+        #expect(!FileManager.default.fileExists(atPath: weekly.url.path) && ScryNotes.load(root).count == 1)
+    }
+
     @Test func renameUpdatesSpeakerMapAndSegments() {
         let note = ScryNote(meta: .init(startedAt: Date(timeIntervalSince1970: 0), endedAt: Date(timeIntervalSince1970: 60), app: nil,
                                         participants: [], speakers: ["Speaker A": "Alex"]),
