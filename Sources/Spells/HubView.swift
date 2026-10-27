@@ -11,6 +11,7 @@ import SpellsUI
 /// modules' settings. Detail: that module's own view, the same one its app shows.
 struct HubView: View {
     @Bindable var hub: HubModel
+    @State private var rewindTab: SettingsTab = .tracking
 
     var body: some View {
         NavigationSplitView {
@@ -72,26 +73,66 @@ struct HubView: View {
         }
     }
 
-    /// Settings: a picker across the installed modules, then that module's own settings view.
+    /// Settings: a tile per installed module across the top, then that module's own pages filling the
+    /// pane (Rewind's with its tab strip under the tiles).
     private var settings: some View {
-        VStack(spacing: 0) {
-            if hub.settingsModules.count > 1 {
-                Picker("Module", selection: $hub.settingsModule) {
-                    ForEach(hub.settingsModules) { Text($0.rawValue).tag($0) }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: Theme.Space.m) {
+                ForEach(hub.settingsModules) { m in moduleTile(m) }
+                Spacer()
+            }
+            .padding(.horizontal, Theme.Space.gutter)
+            .padding(.vertical, Theme.Space.l)
+            Rectangle().fill(Theme.hairline).frame(height: Theme.Stroke.hairline)
+            if hub.settingsModule == .rewind, hub.rewind != nil {
+                Picker("Section", selection: $rewindTab) {
+                    ForEach(SettingsTab.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
-                .padding(.top, Theme.Space.m)
+                .padding(.horizontal, Theme.Space.gutter)
+                .padding(.top, Theme.Space.l)
             }
             Group {
                 switch hub.settingsModule {
-                case .rewind: if let m = hub.rewind { SettingsView(model: m) }
+                case .rewind: if let m = hub.rewind { SettingsView.page(rewindTab, model: m).id(rewindTab) }
                 case .scry: ScrySettingsView(onSaved: { hub.scrySettingsSaved() })
                 case .incant: IncantSettingsView(permissions: nil)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: 960, maxHeight: .infinity, alignment: .topLeading)   // readable line length; left-aligned with the tiles
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .navigationTitle("\(hub.settingsModule.rawValue) Settings")
+    }
+
+    private func moduleTile(_ m: SettingsModule) -> some View {
+        let on = hub.settingsModule == m
+        let (symbol, tagline): (String, String) = switch m {
+            case .rewind: ("clock.arrow.circlepath", "Time tracking")
+            case .scry: ("eye", "Meeting notes")
+            case .incant: ("waveform", "Dictation")
+        }
+        return Button { hub.settingsModule = m } label: {
+            HStack(spacing: Theme.Space.s + 2) {
+                Image(systemName: symbol).font(.system(size: 18, weight: .regular)).foregroundStyle(Theme.ink)
+                    .frame(width: 34, height: 34)
+                    .background(on ? Theme.surface : Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(m.rawValue).textRole(.heading, on ? Theme.ink : Theme.inkSecondary)
+                    Text(tagline).textRole(.label, Theme.inkTertiary)
+                }
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, Theme.Space.s + 2)
+            .frame(minWidth: 180, alignment: .leading)
+            .background(on ? Theme.surfaceRaised : Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous)
+                .strokeBorder(on ? Theme.ink : Theme.hairline, lineWidth: on ? 1 : Theme.Stroke.hairline))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(m.rawValue) settings")
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     @ViewBuilder private var detail: some View {

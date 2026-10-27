@@ -4,8 +4,8 @@ import RewindCore
 public enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
     case categories, rules, classification, projects, goals, tracking, blocks, standup, data
     public var id: String { rawValue }
-    var title: String { rawValue.capitalized }
-    var symbol: String {
+    public var title: String { rawValue.capitalized }
+    public var symbol: String {
         switch self {
         case .categories: "square.grid.2x2"
         case .rules: "list.bullet.rectangle"
@@ -40,7 +40,8 @@ public struct SettingsView: View {
         .tint(Theme.ink)
     }
 
-    @ViewBuilder static func page(_ tab: SettingsTab, model: AppModel) -> some View {
+    /// One tab's page (a self-scrolling `SettingsPage`); the Spells hub hosts these with its own tab strip.
+    @ViewBuilder public static func page(_ tab: SettingsTab, model: AppModel) -> some View {
         switch tab {
         case .categories: SettingsCategoriesTab(model: model)
         case .rules: SettingsRulesTab(model: model)
