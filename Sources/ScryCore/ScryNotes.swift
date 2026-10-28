@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// One Scry note file: where it lives, its text (action-item line numbers index into it) and the parse.
 public struct ScryNoteFile: Identifiable, Equatable, Sendable {
@@ -26,15 +27,38 @@ public struct ScryNoteFile: Identifiable, Equatable, Sendable {
 /// The notes folder: file I/O and pure transforms shared by Scry's Meetings window, Rewind's Blocks
 /// (meetings during a block) and the standup. Reads/writes run off the main actor.
 public enum ScryNotes {
-    /// Every note under `root` (recursive `*.md` that parse as one), newest first.
-    /// ponytail: reads every note each call; an index when there are thousands.
+    /// Every note under `root` (recursive `*.md` that parse as one), newest first. A note is re-read only
+    /// when its size or modification date changed since the last load (the Meetings view loads on every
+    /// show and after every edit).
     public static func load(_ root: URL) -> [ScryNoteFile] {
-        let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)?
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey]
+        let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: Array(keys))?
             .compactMap { $0 as? URL }.filter { $0.pathExtension == "md" } ?? []
         return files.compactMap { url in
+            let v = try? url.resourceValues(forKeys: keys)
+            let stamp = Cached.Stamp(modified: v?.contentModificationDate ?? .distantPast, size: v?.fileSize ?? -1)
+            if let c = cache.withLock({ $0[url.path] }), c.stamp == stamp { return c.file }
             guard let md = try? String(contentsOf: url, encoding: .utf8), let note = ScryNote.parse(md) else { return nil }
-            return ScryNoteFile(url: url, markdown: md, note: note)
+            let file = ScryNoteFile(url: url, markdown: md, note: note)
+            cache.withLock { $0[url.path] = Cached(stamp: stamp, file: file) }
+            return file
         }.sorted { $0.note.meta.startedAt > $1.note.meta.startedAt }
+    }
+
+    private struct Cached {
+        struct Stamp: Equatable { var modified: Date, size: Int }
+        var stamp: Stamp, file: ScryNoteFile
+    }
+    private static let cache = Mutex<[String: Cached]>([:])
+
+    /// Rewrites a note's transcript with `ScryTranscript.tidiedMarkdown` (echo lines dropped, words joined
+    /// into turns). Nothing is written when the transcript already reads that way; returns whether it changed.
+    @discardableResult public static func tidy(_ url: URL) throws -> Bool {
+        let md = try String(contentsOf: url, encoding: .utf8)
+        let out = ScryTranscript.tidiedMarkdown(md)
+        guard out != md else { return false }
+        try out.write(to: url, atomically: true, encoding: .utf8)
+        return true
     }
 
     /// Notes whose [start, end] overlaps `r` (a work block), oldest first.

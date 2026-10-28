@@ -33,6 +33,16 @@ import ScryPipeline
         say(answer)
         if !sources.isEmpty { say("\nsources:"); sources.forEach { say("  \($0.path)") } }
 
+    case "tidy":
+        guard positional.count >= 2 else { die(usage) }
+        for p in positional.dropFirst() {
+            let url = URL(filePath: (p as NSString).expandingTildeInPath)
+            let before = ScryNote.parse(try String(contentsOf: url, encoding: .utf8))?.segments.count ?? 0
+            let changed = try ScryNotes.tidy(url)
+            let after = ScryNote.parse(try String(contentsOf: url, encoding: .utf8))?.segments.count ?? 0
+            say("\(url.lastPathComponent): \(changed ? "\(before) → \(after) lines" : "unchanged (\(after) lines)")")
+        }
+
     case "list":
         guard positional.count == 1 else { die(usage) }
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"

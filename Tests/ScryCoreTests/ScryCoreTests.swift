@@ -94,7 +94,7 @@ private func run(_ d: inout ScryDetector, _ steps: [(String?, ScryRecording, Int
         w("Sam.", 0.35, 0.7, ch: 1, spk: "speaker_0"), w("(laughs)", 0.8, 1.2, ch: 1, spk: "speaker_0", type: "audio_event"),
         w("Hi", 1.5, 1.8, ch: 0, spk: "speaker_0"), w("all.", 1.9, 2.2, ch: 0, spk: "speaker_0"),
         w("Morning.", 2.5, 3.0, ch: 1, spk: "speaker_1"),
-        w("Hello", 3.1, 3.5, ch: 1, spk: "speaker_0"), w("again.", 5.1, 5.5, ch: 1, spk: "speaker_0"), // 1.6 s gap
+        w("Hello", 3.1, 3.5, ch: 1, spk: "speaker_0"), w("again.", 7.1, 7.5, ch: 1, spk: "speaker_0"), // 3.6 s gap
     ]
     let segs = try ScryTranscript.segments(fromScribeJSON: Data(#"{"words":[\#(words.joined(separator: ","))]}"#.utf8))
     #expect(segs == [
@@ -102,7 +102,7 @@ private func run(_ d: inout ScryDetector, _ steps: [(String?, ScryRecording, Int
         ScrySegment(speaker: "You", start: 1.5, end: 2.2, text: "Hi all."),
         ScrySegment(speaker: "Speaker B", start: 2.5, end: 3.0, text: "Morning."),
         ScrySegment(speaker: "Speaker A", start: 3.1, end: 3.5, text: "Hello"),
-        ScrySegment(speaker: "Speaker A", start: 5.1, end: 5.5, text: "again."),
+        ScrySegment(speaker: "Speaker A", start: 7.1, end: 7.5, text: "again."),
     ])
     let talk = ScryTranscript.talkTime(segs)
     #expect(talk.map(\.speaker) == ["Speaker A", "You", "Speaker B"])
@@ -120,6 +120,97 @@ private func run(_ d: inout ScryDetector, _ steps: [(String?, ScryRecording, Int
         ScrySegment(speaker: "Speaker A", start: 0, end: 1, text: "One two."),
         ScrySegment(speaker: "Speaker B", start: 1.2, end: 1.8, text: "Three."),
     ])
+}
+
+@Test func echoedWordsAreDroppedAndWordsBecomeTurns() throws {
+    func w(_ text: String, _ start: Double, ch: Int) -> String {
+        #"{"text":"\#(text)","start":\#(start),"end":\#(start + 0.3),"type":"word","speaker_id":"speaker_0","channel_index":\#(ch)}"#
+    }
+    // The far side says "Let's see the pop-up." and it comes back through the mic 0.1 s later, word for word;
+    // you say "Yeah." in the middle and then go on; the far side interjects "Okay." inside your turn.
+    let words = [
+        w("Let's", 0, ch: 1), w("Let's", 0.1, ch: 0), w("see", 0.4, ch: 1), w("see.", 0.5, ch: 0),
+        w("Yeah.", 0.9, ch: 0),
+        w("the", 1.2, ch: 1), w("The", 1.3, ch: 0), w("pop-up.", 1.6, ch: 1), w("pop-up.", 1.7, ch: 0),
+        w("So", 2.5, ch: 0), w("I", 2.9, ch: 0), w("tried", 3.2, ch: 0), w("Okay.", 3.4, ch: 1), w("it.", 3.6, ch: 0),
+        w("Then", 8, ch: 0), w("more.", 8.4, ch: 0),   // 4.1 s after "it." → a new turn
+    ]
+    let segs = try ScryTranscript.segments(fromScribeJSON: Data(#"{"words":[\#(words.joined(separator: ","))]}"#.utf8))
+        .map { var s = $0; s.start = (s.start * 10).rounded() / 10; s.end = (s.end * 10).rounded() / 10; return s }
+    #expect(segs == [
+        ScrySegment(speaker: "Speaker A", start: 0, end: 1.9, text: "Let's see the pop-up."),
+        ScrySegment(speaker: "You", start: 0.9, end: 3.9, text: "Yeah. So I tried it."),   // "Yeah." 1.3 s before "So": one turn
+        ScrySegment(speaker: "Speaker A", start: 3.4, end: 3.7, text: "Okay."),
+        ScrySegment(speaker: "You", start: 8, end: 8.7, text: "Then more."),
+    ])
+    // Your own word at the same moment is kept when it isn't the same word.
+    let you = ScrySegment(speaker: "You", start: 1, end: 1.3, text: "No"), far = ScrySegment(speaker: "Speaker A", start: 1, end: 1.3, text: "Yes")
+    #expect(ScryTranscript.withoutEcho([far, you]) == [far, you])
+}
+
+@Test func tidiedMarkdownRebuildsOnlyTheTranscript() {
+    let md = """
+    ---
+    title: "Call"
+    start: 2026-10-27T10:49:00-07:00
+    end: 2026-10-27T10:50:00-07:00
+    ---
+
+    # Call
+
+    ## Summary
+
+    A call.
+
+    ## Transcript
+
+    **[00:25] Teagan Trapp:** Let's
+
+    **[00:25] You:** Let's
+
+    **[00:25] Teagan Trapp:** see.
+
+    **[00:25] You:** see.
+
+    **[00:27] You:** Yeah. So I've been trying to make it persistent.
+
+    **[00:28] Teagan Trapp:** Okay.
+
+    **[00:29] You:** It looks like it did that properly.
+
+    **[00:40] Teagan Trapp:** We need to figure out how you can make service accounts.
+
+    **[00:42] You:** figure out how you
+
+    **[00:50] You:** How you doing?
+
+    """
+    let out = ScryTranscript.tidiedMarkdown(md)
+    #expect(out.hasPrefix(String(md[..<md.range(of: "## Transcript")!.upperBound])))
+    #expect(out.components(separatedBy: "## Transcript")[1] == """
+
+
+    **[00:25] Teagan Trapp:** Let's see.
+
+    **[00:27] You:** Yeah. So I've been trying to make it persistent. It looks like it did that properly.
+
+    **[00:28] Teagan Trapp:** Okay.
+
+    **[00:40] Teagan Trapp:** We need to figure out how you can make service accounts.
+
+    **[00:50] You:** How you doing?
+
+    """)
+    #expect(ScryTranscript.tidiedMarkdown(out) == out)
+    #expect(ScryTranscript.tidiedMarkdown("# No transcript\n") == "# No transcript\n")
+}
+
+@Test func transcriptLinesParseByHand() {
+    #expect(ScryNote.transcriptLine("**[65:07] Alex Client:** Hi: there **bold**")! == ("Alex Client", 3907, "Hi: there **bold**"))
+    #expect(ScryNote.transcriptLine("**[00:01] You:**")! == ("You", 1, ""))
+    for bad in ["**[0:1] You:** x", "**[00:01]You:** x", "**[00:01] :** x", "[00:01] You: x", "**[a:bc] You:** x", ""] {
+        #expect(ScryNote.transcriptLine(bad) == nil, "\(bad)")
+    }
 }
 
 // MARK: - Prompts

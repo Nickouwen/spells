@@ -257,8 +257,8 @@ public enum ScryTranscript {
     /// ElevenLabs Scribe v2 batch JSON (multichannel, `multichannel_output_style=combined`, diarized):
     /// `words[]` with `text`, `start`, `end`, `type` ("word"/"spacing"/"audio_event"), `channel_index`,
     /// `speaker_id`. Channel 0 → "You"; channel 1 speakers → "Speaker A", "B"… in order of first word.
-    /// Consecutive words of one speaker merge; a gap > 1.5 s or a speaker change starts a new segment.
-    /// Audio events are dropped. Also accepts the non-multichannel shape (all one channel → speakers).
+    /// Mic-side words that echo the far side (`withoutEcho`) are dropped, then words become turns
+    /// (`turns`). Audio events are dropped. Also accepts the non-multichannel shape (all one channel → speakers).
     public static func segments(fromScribeJSON data: Data) throws -> [ScrySegment] {
         let d = JSONDecoder(); d.keyDecodingStrategy = .convertFromSnakeCase
         let r = try d.decode(Scribe.self, from: data)
@@ -276,14 +276,100 @@ public enum ScryTranscript {
                 if labels[key] == nil { labels[key] = "Speaker " + (n < 26 ? String(Character(UnicodeScalar(UInt8(65 + n)))) : "\(n + 1)") }
                 speaker = labels[key]!
             }
-            let start = w.start ?? out.last?.end ?? 0, end = w.end ?? start
-            if var last = out.last, last.speaker == speaker, start - last.end <= 1.5 {
-                last.end = end; last.text += " " + w.text; out[out.count - 1] = last
+            let start = w.start ?? out.last?.end ?? 0
+            out.append(ScrySegment(speaker: speaker, start: start, end: w.end ?? start, text: w.text))
+        }
+        return turns(multichannel ? withoutEcho(out) : out)
+    }
+
+    /// Drops "You" segments that repeat another speaker's words within `window` s: on a call, the far side
+    /// coming out of the speakers and back in through the mic, transcribed twice at the same instant. The
+    /// far side's channel is system audio, with no echo in it, so it is the reference. Text matches ignoring
+    /// case and punctuation; you would have to say the same word at the same moment to lose one of yours.
+    public static func withoutEcho(_ segments: [ScrySegment], window: Double = 0.4) -> [ScrySegment] {
+        var far: [String: [Double]] = [:]
+        for s in segments where s.speaker != "You" { far[normalized(s.text), default: []].append(s.start) }
+        return segments.filter { s in
+            guard s.speaker == "You" else { return true }
+            let key = normalized(s.text)
+            guard !key.isEmpty, let starts = far[key] else { return true }
+            return !starts.contains { abs($0 - s.start) <= window }
+        }
+    }
+
+    /// Words (or lines) → turns: consecutive segments of one speaker within `gap` s merge, and a short
+    /// interjection by someone else ("Yeah.", ≤ 3 words and ≤ 2 s) doesn't split a turn: the turn keeps
+    /// going and the interjection follows it, at its own time.
+    public static func turns(_ segments: [ScrySegment], gap: Double = 3) -> [ScrySegment] {
+        func isInterjection(_ s: ScrySegment) -> Bool {
+            s.end - s.start <= 2 && s.text.split(whereSeparator: \.isWhitespace).count <= 3
+        }
+        func join(_ i: Int, _ s: ScrySegment, into out: inout [ScrySegment]) {
+            out[i].end = max(out[i].end, s.end); out[i].text += " " + s.text
+        }
+        var out: [ScrySegment] = []
+        for s in segments {
+            if let i = out.indices.last, out[i].speaker == s.speaker, s.start - out[i].end <= gap {
+                join(i, s, into: &out)
+            } else if out.count >= 2, isInterjection(out[out.count - 1]), out[out.count - 2].speaker == s.speaker,
+                      s.start - max(out[out.count - 2].end, out[out.count - 1].end) <= gap {
+                join(out.count - 2, s, into: &out)
             } else {
-                out.append(ScrySegment(speaker: speaker, start: start, end: end, text: w.text))
+                out.append(s)
             }
         }
         return out
+    }
+
+    /// For old notes: a "You" line whose words all sit, in order, inside a far-side line spoken at the same
+    /// time ("figure out how you" in "We need to figure out how you…") is an echo the transcriber split
+    /// differently on the two channels. Only `tidiedMarkdown` uses it: the pipeline matches whole words.
+    static func withoutEchoFragments(_ segments: [ScrySegment], slack: Double = 1) -> [ScrySegment] {
+        func words(_ s: String) -> [String] { s.split(whereSeparator: \.isWhitespace).map { normalized(String($0)) }.filter { !$0.isEmpty } }
+        let far = segments.filter { $0.speaker != "You" }.map { (start: $0.start, end: $0.end, words: words($0.text)) }
+        var lo = 0
+        return segments.filter { s in
+            guard s.speaker == "You" else { return true }
+            let w = words(s.text)
+            guard !w.isEmpty else { return true }
+            while lo < far.count, far[lo].start < s.start - 120 { lo += 1 }   // both run in time order
+            for f in far[lo...] {
+                if f.start > s.start + slack { break }
+                guard f.end + slack >= s.start, f.words.count >= w.count else { continue }
+                if (0...(f.words.count - w.count)).contains(where: { f.words[$0..<$0 + w.count].elementsEqual(w) }) { return false }
+            }
+            return true
+        }
+    }
+
+    /// Lower-case letters and digits only ("- Yeah." → "yeah").
+    static func normalized(_ text: String) -> String {
+        String(text.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map(Character.init))
+    }
+
+    /// A note's text with its `## Transcript` section rebuilt by `withoutEcho` (a 1 s window: the lines
+    /// carry whole seconds) and `turns`; everything before the transcript stays byte-identical. Notes
+    /// written before 2026-10-27 interleaved the echo word by word. Lines only carry a start time, so a
+    /// line is taken to last 0.4 s per word, at most until the next line.
+    public static func tidiedMarkdown(_ markdown: String) -> String {
+        guard let r = markdown.range(of: "\n## Transcript\n") else { return markdown }
+        let head = markdown[..<r.upperBound]
+        var parsed: [ScrySegment] = [], tail = Substring("")
+        for line in markdown[r.upperBound...].split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("## ") { tail = markdown[line.startIndex...]; break }   // a later hand-added section
+            if let t = ScryNote.transcriptLine(String(line)) {
+                parsed.append(ScrySegment(speaker: t.speaker, start: t.start, end: t.start, text: t.text))
+            }
+        }
+        for i in parsed.indices {
+            let words = Double(parsed[i].text.split(whereSeparator: \.isWhitespace).count)
+            let next = i + 1 < parsed.count ? parsed[i + 1].start : .infinity
+            parsed[i].end = min(parsed[i].start + 0.4 * max(words, 1), max(next, parsed[i].start))
+        }
+        guard !parsed.isEmpty else { return markdown }
+        let segments = turns(withoutEchoFragments(withoutEcho(parsed, window: 1)))
+        let body = segments.map { "**[\(stamp($0.start))] \($0.speaker):** \($0.text)" }.joined(separator: "\n\n")
+        return head + "\n" + body + "\n" + (tail.isEmpty ? "" : "\n" + tail)
     }
     /// Seconds spoken per speaker, largest first.
     public static func talkTime(_ segments: [ScrySegment]) -> [(speaker: String, seconds: Double)] {
@@ -568,11 +654,9 @@ public struct ScryNote: Equatable, Sendable {
         }
         var segments: [ScrySegment] = []
         for l in sections["transcript"] ?? [] {
-            guard let m = l.wholeMatch(of: /\*\*\[(\d+):(\d\d)\] (.+?):\*\* ?(.*)/),
-                  let mins = Int(m.1), let secs = Int(m.2) else { continue }   // hand edits: no force unwraps
-            let start = Double(mins * 60 + secs)
-            if !segments.isEmpty { segments[segments.count - 1].end = start }
-            segments.append(ScrySegment(speaker: String(m.3), start: start, end: start, text: String(m.4)))
+            guard let t = transcriptLine(l) else { continue }   // hand edits
+            if !segments.isEmpty { segments[segments.count - 1].end = t.start }
+            segments.append(ScrySegment(speaker: t.speaker, start: t.start, end: t.start, text: t.text))
         }
 
         let startedAt = fm["start"].flatMap(parseISO) ?? Date(timeIntervalSince1970: 0)
@@ -589,6 +673,20 @@ public struct ScryNote: Equatable, Sendable {
             speakers: speakers, followUpEmail: text("follow-up email"))
         return ScryNote(meta: Meta(startedAt: startedAt, endedAt: endedAt, app: app, participants: participants, speakers: speakers),
                         summary: summary, userNotes: text("your notes"), segments: segments)
+    }
+    /// `**[mm:ss] Speaker:** text` → its parts; nil for any other line. By hand, not Regex: a long call has
+    /// thousands of these lines and Swift Regex took ~0.3 ms each (1.7 s per note).
+    static func transcriptLine(_ l: String) -> (speaker: String, start: Double, text: String)? {
+        guard l.hasPrefix("**["), let close = l.firstIndex(of: "]") else { return nil }
+        let stamp = l[l.index(l.startIndex, offsetBy: 3)..<close]
+        guard let colon = stamp.firstIndex(of: ":"), let mins = Int(stamp[..<colon]), mins >= 0,
+              case let ss = stamp[stamp.index(after: colon)...], ss.count == 2, let secs = Int(ss), secs >= 0,
+              l.index(after: close) < l.endIndex, l[l.index(after: close)] == " " else { return nil }
+        let rest = l[l.index(close, offsetBy: 2)...]
+        guard let end = rest.range(of: ":**"), end.lowerBound > rest.startIndex else { return nil }
+        var text = rest[end.upperBound...]
+        if text.hasPrefix(" ") { text = text.dropFirst() }
+        return (String(rest[..<end.lowerBound]), Double(mins * 60 + secs), String(text))
     }
     /// `<root>/YYYY/MM/YYYY-MM-DD-HHMM-<slug>.md` in local time; slug = lowercase title words joined by
     /// "-", ascii only, ≤ 6 words.
