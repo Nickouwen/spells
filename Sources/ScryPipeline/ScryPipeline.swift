@@ -48,8 +48,11 @@ public enum ScryPipeline {
 
     static func run(_ dir: URL, _ settings: ScrySettings, _ keyterms: [String]) async throws -> Result {
         let capture = try ScryCapture.decode(Data(contentsOf: dir.appending(path: "capture.json")))
-        // On-screen names completed from the calendar invite; nobody read off the screen → the invitees.
-        let seen = ScryNames.completed(ScryNames.fromOCR(capture.screenshotText), capture.invite)
+        // Who was on the call: the Meet tab's participant tiles when the recorder could read them (exact names,
+        // and who spoke when), else on-screen names completed from the calendar invite; nobody → the invitees.
+        let meet = ScryMeet.log(fromJSONL: (try? String(contentsOf: dir.appending(path: "speakers.jsonl"), encoding: .utf8)) ?? "")
+        let seen = meet.participants.isEmpty ? ScryNames.completed(ScryNames.fromOCR(capture.screenshotText), capture.invite)
+                                             : meet.participants
         let names = seen.isEmpty ? capture.invite?.invitees.map(\.name) ?? [] : seen
         // ponytail: on-screen names join the vocabulary, so Scribe spells them the way the call shows them.
         var vocab: [String] = []
@@ -76,9 +79,15 @@ public enum ScryPipeline {
         }
         let scribeMs = ms(clock.now - t0)
         let raw = try ScryTranscript.segments(fromScribeJSON: json)
-        // Named before the summary, so its recap says "Alex", not "Speaker A".
-        let sole = capture.app == nil ? [:] : ScryNames.soleSpeaker(raw, names: names, userName: settings.userName)
-        let segments = ScryTranscript.renamed(raw, sole)
+        // Named before the summary, so its recap says "Alex", not "Speaker A": Meet's speaking indicator votes
+        // first; with nothing from it, a lone far-side speaker is the one other person named.
+        let fromMeet = capture.app == nil ? [:] : ScryMeet.names(for: raw, hints: meet.hints, owner: settings.userName)
+        let sole = capture.app == nil || !fromMeet.isEmpty ? [:] : ScryNames.soleSpeaker(raw, names: names, userName: settings.userName)
+        let known = fromMeet.merging(sole) { a, _ in a }
+        if !meet.hints.isEmpty {
+            SupportLog.scry.info("Meet speakers: \(meet.hints.count, privacy: .public) hints named \(fromMeet.count, privacy: .public) of \(Set(raw.map(\.speaker)).subtracting(["You"]).count, privacy: .public) far-side speakers")
+        }
+        let segments = ScryTranscript.renamed(raw, known)
 
         let appName = capture.app.flatMap { ScryCallApps.known[$0] }
         let prompt = ScryPrompt.summary(segments: segments, participants: names, userNotes: capture.userNotes,
@@ -88,7 +97,7 @@ public enum ScryPipeline {
         let summary = try ScryPrompt.parseSummary(try await claude(prompt))
         let claudeMs = ms(clock.now - t0)
 
-        let speakers = sole.merging(summary.speakers) { a, _ in a }
+        let speakers = known.merging(summary.speakers) { a, _ in a }
         var participants = names
         for n in speakers.values.sorted() where !participants.contains(where: { $0 == n || $0.hasPrefix(n + " ") }) {
             participants.append(n)   // "Alex" is already there as "Alex Client"

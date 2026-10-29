@@ -28,6 +28,7 @@ usage: spellsctl export  [--period current|previous|YYYY-MM-DD..YYYY-MM-DD] [--m
        spellsctl scry ask "<question>" [--root DIR] [--limit N]
        spellsctl scry tidy <note.md>…         (rebuild a note's transcript: echo lines dropped, words joined into turns)
        spellsctl scry list [--root DIR]
+       spellsctl scry meet [--seconds N] [--dump]  (what the Google Meet tab in Chrome reports: people, who's speaking)
                         (Scry meeting notes: Scribe + claude -p → a Markdown note under --root, default
                          ~/Documents/Scry; --keep leaves the capture dir in place)
 DB: $SPELLS_HOME/hours.db, else ~/Library/Application Support/Spells/hours.db
@@ -191,7 +192,7 @@ do {
         try await classify()
 
     case "scry":
-        allow("--root", "--keep", "--limit")   // per subcommand would need `command` inside ScryCommand.swift
+        allow("--root", "--keep", "--limit", "--seconds", "--dump", "--browser")   // per subcommand would need `command` inside ScryCommand.swift
         try await scry()
 
     case "-h", "--help", "help":

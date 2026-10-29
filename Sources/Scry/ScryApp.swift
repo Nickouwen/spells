@@ -14,6 +14,8 @@ import UserNotifications
     @MainActor final class Session {
         let dir: URL, app: String?, startedAt = Date(), recorder: ScryRecorder, settings: ScrySettings, keyterms: [String]
         var live: ScryLive?, screens: [[String]] = [], timer: Timer?, levels: Timer?, invite: ScryInvite?
+        /// The Meet tab's participants and speaking indicator (Chromium browsers only).
+        var meet: ScryMeetWatch?
         init(dir: URL, app: String?, recorder: ScryRecorder, settings: ScrySettings, keyterms: [String]) {
             self.dir = dir; self.app = app; self.recorder = recorder; self.settings = settings; self.keyterms = keyterms
         }
@@ -111,7 +113,8 @@ import UserNotifications
         // The pill: who's on screen now (the latest screenshot), so leavers drop off; the note gets everyone
         // ever seen (all screenshots go to the pipeline).
         // Nobody on screen yet → the invite's title (still says it's the right meeting), else the app.
-        let now = ScryNames.completed(s.screens.last.map { ScryNames.fromOCR([$0]) } ?? [], s.invite)
+        let onScreen = s.meet?.participants ?? []
+        let now = ScryNames.completed(onScreen.isEmpty ? s.screens.last.map { ScryNames.fromOCR([$0]) } ?? [] : onScreen, s.invite)
         let who = ScryNames.pillLabel(now, userName: s.settings.userName,
                                       fallback: s.invite?.title ?? s.app.map(Self.name) ?? "In person")
         if let ms = stopsIn {
@@ -152,6 +155,10 @@ import UserNotifications
             s.invite = ScryCalendar.invite(app: app, now: s.startedAt)
             if let i = s.invite { SupportLog.scry.info("calendar invite matched: \(i.invitees.count, privacy: .public) invitees") }
             if let app {
+                if ScryMeetWatch.browsers.contains(app) {   // a Meet tab, if there is one: names and who's speaking
+                    s.meet = ScryMeetWatch(browser: app, dir: dir, startedAt: s.startedAt)
+                    s.meet?.start()
+                }
                 screenshot(s, app)
                 // Every 30 s: a late joiner shows in the pill within half a minute; OCR is ~0.5 s on-device each.
                 s.timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self, weak s] _ in
@@ -178,7 +185,7 @@ import UserNotifications
         guard let s = session else { return nil }
         session = nil
         pill.hide()
-        s.timer?.invalidate(); s.levels?.invalidate()
+        s.timer?.invalidate(); s.levels?.invalidate(); s.meet?.stop()
         let stats = s.recorder.stop()
         s.live?.stop()
         refreshIcon()

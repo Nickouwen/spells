@@ -35,6 +35,8 @@
 	<string>26.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Scry asks your browser which Google Meet participant is speaking, only while you're recording a meeting, so the transcript can use their names.</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Scry records the other side of a call (system audio) only while you're recording a meeting.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>

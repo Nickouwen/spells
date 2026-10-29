@@ -715,21 +715,26 @@ public enum ScryNames {
     public static func fromOCR(_ screenshots: [[String]]) -> [String] {
         var seen = Set<String>(), out: [String] = []
         for raw in screenshots.joined() {
-            let words = raw.replacing(/\([^)]*\)/, with: "").split(separator: " ")
-            let name = words.joined(separator: " ")
-            guard (1...4).contains(words.count),
-                  name.allSatisfy({ $0.isLetter || " '-.’".contains($0) }),
-                  words.allSatisfy({ $0.first!.isUppercase }),
-                  words.contains(where: { $0.contains(where: \.isLowercase) }), // bare initials ("TT") are avatars
-                  name.firstMatch(of: /[a-z]\.[a-z]/) == nil,                    // domains
-                  words.count > 1 || name.count >= 3,
-                  !words.contains(where: { $0.allSatisfy("IlJ1|".contains) }),
-                  !words.contains(where: { bots.contains($0.lowercased()) }),
-                  !chrome.contains(name.lowercased()), !chromeVerbs.contains(words[0].lowercased()),
-                  seen.insert(name.lowercased()).inserted else { continue }
+            guard let name = candidate(raw), seen.insert(name.lowercased()).inserted else { continue }
             out.append(name)
         }
         return out.filter { n in !out.contains { $0.count > n.count && $0.lowercased().hasPrefix(n.lowercased()) } }
+    }
+
+    /// One line of on-screen text → the name it is, or nil (the rules above, minus the cross-line ones).
+    public static func candidate(_ raw: String) -> String? {
+        let words = raw.replacing(/\([^)]*\)/, with: "").split(separator: " ")
+        let name = words.joined(separator: " ")
+        guard (1...4).contains(words.count),
+              name.allSatisfy({ $0.isLetter || " '-.’".contains($0) }),
+              words.allSatisfy({ $0.first!.isUppercase }),
+              words.contains(where: { $0.contains(where: \.isLowercase) }), // bare initials ("TT") are avatars
+              name.firstMatch(of: /[a-z]\.[a-z]/) == nil,                    // domains
+              words.count > 1 || name.count >= 3,
+              !words.contains(where: { $0.allSatisfy("IlJ1|".contains) }),
+              !words.contains(where: { bots.contains($0.lowercased()) }),
+              !chrome.contains(name.lowercased()), !chromeVerbs.contains(words[0].lowercased()) else { return nil }
+        return name
     }
     private static let bots: Set<String> = ["notetaker", "bot", "assistant", "otter", "fireflies", "recorder"]
     // ponytail: hand-kept lists of Zoom/Meet/Teams/Slack/FaceTime chrome; add to them as new labels leak through.

@@ -43,6 +43,25 @@ import ScryPipeline
             say("\(url.lastPathComponent): \(changed ? "\(before) → \(after) lines" : "unchanged (\(after) lines)")")
         }
 
+    case "meet":
+        // Calibration: what the Meet tab in Chrome reports, twice a second. --dump prints every tile's classes once.
+        guard let secs = Int(options["--seconds"] ?? "10"), secs > 0 else { die("bad --seconds") }
+        let w = ScryMeetWatch(browser: options["--browser"] ?? "com.google.Chrome", dir: URL(filePath: NSTemporaryDirectory()), startedAt: Date())
+        var dumped = !flags.contains("--dump")
+        for _ in 0..<(secs * 2) {
+            if let p = w.peek() {
+                if !dumped {
+                    dumped = true
+                    for t in p.sample.tiles { say("tile \(t.id)  name=\(t.name ?? "-")  self=\(t.isSelf)\n  \(t.classes.sorted().joined(separator: " "))") }
+                    say("selfName=\(p.sample.selfName ?? "-")")
+                }
+                say("\(p.speaking.map { "speaking: \($0.name ?? $0.id)\($0.isSelf ? " (you)" : "")" } ?? "speaking: -")  marker=\(p.marker ?? "-")  people: \(p.sample.participants.joined(separator: ", "))")
+            } else {
+                say("nothing from the browser (no Meet tab, or View ▸ Developer ▸ Allow JavaScript from Apple Events is off)")
+            }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+
     case "list":
         guard positional.count == 1 else { die(usage) }
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"
