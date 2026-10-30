@@ -20,6 +20,11 @@ enum ScryAudioProcesses {
         }
     }
 
+    /// Some other process is playing audio right now (`IsRunningOutput`): what the system tap should be hearing.
+    static func anyRunningOutput() -> Bool {
+        objects().contains { prop($0, kAudioProcessPropertyIsRunningOutput, UInt32(0)) != 0 && prop($0, kAudioProcessPropertyPID, pid_t(0)) != getpid() }
+    }
+
     /// This process's CoreAudio object (to exclude it from the system tap).
     static func object(pid: pid_t) -> AudioObjectID? {
         var addr = address(kAudioHardwarePropertyTranslatePIDToProcessObject)

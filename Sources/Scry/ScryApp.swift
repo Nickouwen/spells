@@ -117,11 +117,13 @@ import UserNotifications
         let now = ScryNames.completed(onScreen.isEmpty ? s.screens.last.map { ScryNames.fromOCR([$0]) } ?? [] : onScreen, s.invite)
         let who = ScryNames.pillLabel(now, userName: s.settings.userName,
                                       fallback: s.invite?.title ?? s.app.map(Self.name) ?? "In person")
+        // The tap stopped delivering (it's being rebuilt): say so, rather than record a one-sided call quietly.
+        let warn = s.recorder.systemAlive ? "" : " · no call audio"
         if let ms = stopsIn {
             pill.showRecording("Ending · \(Int((Double(ms) / 1000).rounded(.up)))s · \(who.short)", tooltip: who.full)
         } else {
             let secs = Int(Date().timeIntervalSince(s.startedAt))
-            pill.showRecording(String(format: "● %02d:%02d · ", secs / 60, secs % 60) + who.short, tooltip: who.full)
+            pill.showRecording(String(format: "● %02d:%02d · ", secs / 60, secs % 60) + who.short + warn, tooltip: who.full + warn)
         }
     }
 
@@ -196,7 +198,7 @@ import UserNotifications
     /// or the manifest couldn't be written.
     private func finish() -> Session? {
         guard let (s, stats) = endSession() else { return nil }
-        SupportLog.scry.info("recording stopped: \(stats.frames, privacy: .public) frames, \(s.screens.count, privacy: .public) screenshots")
+        SupportLog.scry.info("recording stopped: \(stats.frames, privacy: .public) frames, \(s.screens.count, privacy: .public) screenshots, mic RMS \(stats.micRMS, privacy: .public), system RMS \(stats.systemRMS, privacy: .public), \(s.recorder.tapRebuilds, privacy: .public) tap rebuilds")
         let capture = ScryCapture(audioFile: "audio.wav", startedAt: s.startedAt, endedAt: Date(), app: s.app,
                                   screenshotText: s.screens, userNotes: s.live?.model.notes ?? "", invite: s.invite)
         do { try capture.encoded().write(to: s.dir.appending(path: "capture.json")) } catch {

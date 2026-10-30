@@ -59,7 +59,7 @@ enum ScryTestModes {
         }
         print(String(format: "ch0 mic:    %7d samples in, RMS %.5f", stats.micSamples, stats.micRMS))
         print(String(format: "ch1 system: %7d samples in, RMS %.5f", stats.systemSamples, stats.systemRMS))
-        print("wav: \(stats.frames) frames (\(String(format: "%.2f", Double(stats.frames) / 16000)) s, 2 ch, 16 kHz)")
+        print("wav: \(stats.frames) frames (\(String(format: "%.2f", Double(stats.frames) / 16000)) s, 2 ch, 16 kHz), \(recorder.tapRebuilds) tap rebuild(s)")
         // ponytail: there's no public preflight for the audio-capture grant; a denied tap delivers digital
         // silence. Exact zeros on ch 1 without the Screen Recording grant (which implies audio) = denied.
         if stats.systemAllZero && !CGPreflightScreenCaptureAccess() {

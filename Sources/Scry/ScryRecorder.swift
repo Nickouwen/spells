@@ -20,7 +20,8 @@ final class ScryRecorder: @unchecked Sendable {
     }
 
     private let q = DispatchQueue(label: "dev.nic.spells.scry.recorder")
-    private let engine = AVAudioEngine()
+    /// Replaced on restart: after a device change the old engine's input keeps its stale format (-10868).
+    private var engine = AVAudioEngine()
     private let wav: ScryWAV
     private var configObserver: (any NSObjectProtocol)?
     private var tap = AudioObjectID(kAudioObjectUnknown), agg = AudioObjectID(kAudioObjectUnknown), proc: AudioDeviceIOProcID?
@@ -32,36 +33,91 @@ final class ScryRecorder: @unchecked Sendable {
     /// The louder side right now (you or the call), 0…1 on a −50…0 dBFS scale.
     var level: Double { q.sync { max(lastLevel.0, lastLevel.1) } }
     // Guarded by `tapLock`: creating the tap blocks while its permission prompt is up, so it may still be
-    // in flight (on another thread) when `stop` runs; whoever finishes last tears it down.
+    // in flight (on `tapQ`) when `stop` runs; whoever finishes last tears it down.
     private let tapLock = NSLock()
     private var tapStarting = false, tapStopped = false
+    /// All tap setup/teardown runs here, one job at a time (start, rebuilds, device-change listeners).
+    private let tapQ = DispatchQueue(label: "dev.nic.spells.scry.tap", qos: .userInitiated)
+    /// The output device the aggregate was built on, and the listeners that watch it (on `tapQ`).
+    private var outDevice = AudioObjectID(kAudioObjectUnknown), outUID = ""
+    private var deviceListeners: [(AudioObjectID, AudioObjectPropertyAddress)] = []
+    private var rebuildPending = false
+    // Liveness (on `q`): when each channel last delivered samples; the watchdog rebuilds a dead source.
+    // A running tap delivers buffers even in silence, so "no samples" means dead, not quiet.
+    private var lastMicAt = Date(), lastSysAt = Date(), lastMicRestart = Date.distantPast, lastTapRebuild = Date.distantPast
+    private var watchdog: (any DispatchSourceTimer)?
+    private(set) var tapRebuilds = 0
+    static let staleAfter: TimeInterval = 10, retryEvery: TimeInterval = 15
 
-    init(audio: URL) throws { wav = try ScryWAV(url: audio) }
+    init(audio: URL) throws {
+        wav = try ScryWAV(url: audio)
+        let w = DispatchSource.makeTimerSource(queue: q)
+        w.schedule(deadline: .now() + 5, repeating: 5)
+        w.setEventHandler { [weak self] in self?.check() }
+        w.resume()
+        watchdog = w
+    }
+
+    /// False while the tap looks dead (the pill says "no call audio"): see `check`.
+    var systemAlive: Bool { q.sync { !systemStale } }
+    private var systemStale = false
+
+    /// Every 5 s on `q`: a source that stopped delivering is restarted — the mic engine in place, the tap
+    /// rebuilt on the current output device — at most once per `retryEvery`. The mic always delivers (silence
+    /// included); the tap only delivers while some process plays, so it counts as dead only when another
+    /// process is running output and nothing arrives for `staleAfter`.
+    private func check() {
+        guard running else { return }
+        let now = Date()
+        if now.timeIntervalSince(lastMicAt) > Self.staleAfter, now.timeIntervalSince(lastMicRestart) > Self.retryEvery {
+            lastMicRestart = now
+            SupportLog.scry.error("mic delivered nothing for \(Int(now.timeIntervalSince(self.lastMicAt)), privacy: .public) s; restarting it")
+            DispatchQueue.main.async { [weak self] in self?.restartMic() }
+        }
+        systemStale = withSystem && now.timeIntervalSince(lastSysAt) > Self.staleAfter && ScryAudioProcesses.anyRunningOutput()
+        if systemStale, now.timeIntervalSince(lastTapRebuild) > Self.retryEvery {
+            lastTapRebuild = now
+            rebuildSystem(reason: "no system audio for \(Int(now.timeIntervalSince(lastSysAt))) s while a process plays")
+        }
+    }
 
     // MARK: Mic
 
     func startMic() throws {
         installMicTap()
-        configObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
-            // The system stopped the engine because the input changed (AirPods in/out): re-tap at the new format.
-            guard let self else { return }
-            engine.inputNode.removeTap(onBus: 0)
-            installMicTap()
-            do { try engine.start() } catch { SupportLog.scry.error("mic restart failed: \(error.localizedDescription, privacy: .public)") }
-            SupportLog.scry.info("audio input changed; mic re-tapped")
-        }
+        observeConfigChanges()
         try engine.start()
     }
 
-    private func installMicTap() {
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, let resample = ScryResampler(from: format) else {
-            SupportLog.scry.error("no usable audio input"); return
+    private func observeConfigChanges() {
+        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
+        configObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            // The system stopped the engine because a default device changed (AirPods in/out): start afresh.
+            self?.restartMic()
+            SupportLog.scry.info("audio devices changed; mic restarted")
         }
-        input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buf, _ in
-            guard let self else { return }
-            let pcm = resample.convert(buf)
+    }
+
+    /// Main thread: a fresh engine on the current default devices (the old one's input node keeps the old
+    /// hardware format and refuses to start). If this fails, the watchdog tries again in `retryEvery`.
+    private func restartMic() {
+        guard q.sync(execute: { running }) else { return }
+        engine.stop()
+        engine.inputNode.removeTap(onBus: 0)
+        engine = AVAudioEngine()
+        installMicTap()
+        observeConfigChanges()
+        do { try engine.start() } catch { SupportLog.scry.error("mic restart failed: \(error.localizedDescription, privacy: .public)") }
+    }
+
+    /// Taps the input in whatever format it delivers (asking for a format after a device change raises
+    /// "Failed to create tap due to format mismatch"); the resampler follows the buffers' format.
+    private func installMicTap() {
+        nonisolated(unsafe) var resample: ScryResampler?   // the tap block runs serially on the render thread
+        engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: nil) { [weak self] buf, _ in
+            guard let self, buf.format.sampleRate > 0 else { return }
+            if resample?.input != buf.format { resample = ScryResampler(from: buf.format) }
+            guard let pcm = resample?.convert(buf) else { return }
             q.async { self.append(pcm, system: false) }
         }
     }
@@ -71,9 +127,77 @@ final class ScryRecorder: @unchecked Sendable {
     /// Blocks until coreaudiod answers — for as long as the first-run "System Audio Recording" prompt is
     /// up — so the app calls it off the main thread. A no-op once `stop` has run.
     func startSystem() throws {
-        guard tapLock.withLock({ () -> Bool in if tapStopped { return false }; tapStarting = true; return true }) else { return }
-        do { try createTap() } catch { tapLock.withLock { tapStarting = false }; throw error }
-        if tapLock.withLock({ tapStarting = false; return tapStopped }) { stopSystem() }   // stopped while it was starting
+        try tapQ.sync {
+            guard begin() else { return }
+            defer { end() }
+            try createTap()
+            watchOutputDevice()
+        }
+    }
+
+    /// Marks a tap job as running (false: the recording has stopped, do nothing).
+    private func begin() -> Bool { tapLock.withLock { if tapStopped { return false }; tapStarting = true; return true } }
+    /// Ends a tap job; if `stop` ran meanwhile, this job tears the tap down.
+    private func end() { if tapLock.withLock({ tapStarting = false; return tapStopped }) { stopSystem() } }
+
+    /// The tap follows the processes, but the aggregate it is read through is clocked by the output device
+    /// it was built on. When the default output moves (AirPods in or out), or that device changes its format
+    /// (AirPods flipping between the hands-free and music profiles when the mic moves on or off them), or dies,
+    /// the aggregate goes quiet or garbles: rebuild on the current device. Debounced, since one switch fires
+    /// several notifications.
+    private func watchOutputDevice() {
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        listen(system, kAudioHardwarePropertyDefaultOutputDevice, "default output changed")
+        if outDevice != kAudioObjectUnknown {
+            listen(outDevice, kAudioDevicePropertyNominalSampleRate, "output device changed its sample rate")
+            listen(outDevice, kAudioDevicePropertyStreamConfiguration, "output device changed its streams")
+            listen(outDevice, kAudioDevicePropertyDeviceIsAlive, "output device went away")
+        }
+    }
+
+    private func listen(_ obj: AudioObjectID, _ sel: AudioObjectPropertySelector, _ reason: String) {
+        var addr = AudioObjectPropertyAddress(mSelector: sel, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        let st = AudioObjectAddPropertyListenerBlock(obj, &addr, tapQ) { [weak self] _, _ in
+            guard let self, !rebuildPending else { return }
+            if sel == kAudioHardwarePropertyDefaultOutputDevice {   // only a real move, not a re-announcement of the same device
+                let now = ScryAudioProcesses.string(ScryAudioProcesses.prop(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultOutputDevice, AudioObjectID(0)),
+                                                    kAudioDevicePropertyDeviceUID)
+                guard now != outUID else { return }
+            }
+            rebuildPending = true
+            tapQ.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self else { return }
+                rebuildPending = false
+                rebuildSystem(reason: reason)
+            }
+        }
+        if st == noErr { deviceListeners.append((obj, addr)) }
+    }
+
+    private func unlisten() {
+        for (obj, addr) in deviceListeners {
+            var a = addr
+            AudioObjectRemovePropertyListenerBlock(obj, &a, tapQ) { _, _ in }   // ponytail: the block identity isn't needed to remove a queue listener
+        }
+        deviceListeners.removeAll()
+    }
+
+    /// Tears the tap down and builds it again on the current default output device. Any thread.
+    func rebuildSystem(reason: String) {
+        tapQ.async { [self] in
+            guard begin() else { return }
+            defer { end() }
+            stopSystem()
+            do {
+                try createTap()
+                watchOutputDevice()
+                q.async { self.tapRebuilds += 1; self.lastSysAt = Date(); self.lastTapRebuild = Date() }
+                SupportLog.scry.info("system tap rebuilt (\(reason, privacy: .public))")
+            } catch {
+                SupportLog.scry.error("system tap rebuild failed (\(reason, privacy: .public)): \(String(describing: error), privacy: .public)")
+                q.async { self.lastTapRebuild = Date() }   // the watchdog tries again in `retryEvery`
+            }
+        }
     }
 
     private func createTap() throws {
@@ -82,8 +206,9 @@ final class ScryRecorder: @unchecked Sendable {
         var st = AudioHardwareCreateProcessTap(desc, &tap)
         guard st == noErr else { throw TapFailed(step: "create tap", status: st) }
         let system = AudioObjectID(kAudioObjectSystemObject)
-        let outUID = ScryAudioProcesses.string(ScryAudioProcesses.prop(system, kAudioHardwarePropertyDefaultOutputDevice, AudioObjectID(0)),
-                                               kAudioDevicePropertyDeviceUID)
+        outDevice = ScryAudioProcesses.prop(system, kAudioHardwarePropertyDefaultOutputDevice, AudioObjectID(0))
+        outUID = ScryAudioProcesses.string(outDevice, kAudioDevicePropertyDeviceUID)
+        let outUID = self.outUID
         let aggDesc: [String: Any] = [
             kAudioAggregateDeviceNameKey: "Scry", kAudioAggregateDeviceUIDKey: UUID().uuidString,
             kAudioAggregateDeviceMainSubDeviceKey: outUID, kAudioAggregateDeviceIsPrivateKey: true,
@@ -102,17 +227,18 @@ final class ScryRecorder: @unchecked Sendable {
             append(resample.convert(buf), system: true)   // already on q
         }
         guard st == noErr else { stopSystem(); throw TapFailed(step: "create IOProc", status: st) }
-        q.sync { withSystem = true }   // before the first buffer lands, so ch 1 isn't padded under it
+        q.sync { withSystem = true; lastSysAt = Date() }   // before the first buffer lands, so ch 1 isn't padded under it
         st = AudioDeviceStart(agg, proc)
         guard st == noErr else { q.sync { withSystem = false }; stopSystem(); throw TapFailed(step: "start device", status: st) }
-        SupportLog.scry.info("system tap: \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch")
+        SupportLog.scry.info("system tap: \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, on \(ScryAudioProcesses.string(self.outDevice, kAudioObjectPropertyName), privacy: .public)")
     }
 
     private func stopSystem() {
+        unlisten()
         if let proc { AudioDeviceStop(agg, proc); AudioDeviceDestroyIOProcID(agg, proc) }
         if agg != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(agg) }
         if tap != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tap) }
-        proc = nil; agg = AudioObjectID(kAudioObjectUnknown); tap = AudioObjectID(kAudioObjectUnknown)
+        proc = nil; agg = AudioObjectID(kAudioObjectUnknown); tap = AudioObjectID(kAudioObjectUnknown); outDevice = AudioObjectID(kAudioObjectUnknown)
     }
 
     // MARK: Writing
@@ -125,11 +251,11 @@ final class ScryRecorder: @unchecked Sendable {
         let lv = max(0, min(1, (20 * log10(max(rms, 1e-6)) + 50) / 50))
         if system { lastLevel.1 = lv } else { lastLevel.0 = lv }
         if system {
-            sys += pcm; sumSq.1 += ss; received.1 += pcm.count
+            sys += pcm; sumSq.1 += ss; received.1 += pcm.count; lastSysAt = Date()
             if !sysNonZero, pcm.contains(where: { $0 != 0 }) { sysNonZero = true }
             onSystem?(data)
         } else {
-            mic += pcm; sumSq.0 += ss; received.0 += pcm.count
+            mic += pcm; sumSq.0 += ss; received.0 += pcm.count; lastMicAt = Date()
             onMic?(data)
         }
         drain(final: false)
@@ -152,10 +278,12 @@ final class ScryRecorder: @unchecked Sendable {
 
     /// Stops both sources, flushes (padding the shorter channel), patches the WAV header.
     func stop() -> Stats {
+        watchdog?.cancel(); watchdog = nil
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
         if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
-        if !tapLock.withLock({ tapStopped = true; return tapStarting }) { stopSystem() }
+        // Not starting or rebuilding right now → tear down here; otherwise that job does it when it ends.
+        if !tapLock.withLock({ tapStopped = true; return tapStarting }) { tapQ.sync { stopSystem() } }
         return q.sync {
             drain(final: true)
             running = false
@@ -172,10 +300,12 @@ final class ScryResampler: @unchecked Sendable {
     private static let out = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)!
     private let converter: AVAudioConverter
 
+    let input: AVAudioFormat
+
     init?(from format: AVAudioFormat) {
         guard let c = AVAudioConverter(from: format, to: Self.out) else { return nil }
         c.downmix = true
-        converter = c
+        converter = c; input = format
     }
 
     func convert(_ buf: AVAudioPCMBuffer) -> [Int16] {
