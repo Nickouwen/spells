@@ -182,6 +182,20 @@ private let unexpected: @Sendable (String) async throws -> String = { _ in Issue
     }
 }
 
+@Test func fixDropsTheTrailingPeriodOnEveryPath() async {
+    // The model's answer, the raw Scribe text when no pass is needed, and the raw text after a failed pass.
+    #expect(await IncantFix.run("fix the build", settings: always, primary: { _ in "Fix the build." }, fallback: nil).text == "Fix the build")
+    #expect(await IncantFix.run("fix the build.", settings: IncantSettings(), primary: { _ in "x" }, fallback: nil).text == "fix the build")
+    #expect(await IncantFix.run("fix the build. ", settings: always, primary: { _ in throw CancellationError() }, fallback: nil).text == "fix the build")
+    // Only one final full stop goes; everything else stays as it was.
+    #expect(IncantFix.withoutTrailingPeriod("Really?") == "Really?")
+    #expect(IncantFix.withoutTrailingPeriod("Wait...") == "Wait...")
+    #expect(IncantFix.withoutTrailingPeriod("Two sentences. Second one.") == "Two sentences. Second one")
+    #expect(IncantFix.withoutTrailingPeriod("open main.swift") == "open main.swift")
+    #expect(IncantFix.withoutTrailingPeriod("line one.\nline two.\n") == "line one.\nline two")
+    #expect(IncantFix.withoutTrailingPeriod("") == "")
+}
+
 // MARK: - Scribe
 
 @Test func scribeURL() throws {
