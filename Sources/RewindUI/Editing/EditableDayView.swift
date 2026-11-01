@@ -12,6 +12,9 @@ public struct EditableDayView: View {
     var scrollable = true
 
     @Environment(\.undoManager) private var undoManager
+    /// Timeline or Blocks: the inspector, the selection shortcuts and the toast's selection belong to
+    /// the timeline; Blocks mode has its own side panel and keys (`BlocksColumn`).
+    @AppStorage(DayMode.storageKey) private var mode: DayMode = .timeline
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focused: Bool
     /// Blocks mode's settings + rules (W22), shared through the environment.
@@ -39,7 +42,7 @@ public struct EditableDayView: View {
                         .padding(.horizontal, Theme.Space.gutter)
                 }
                 .environment(\.hoursEditFlash, session.flash)
-            if session.inspectorVisible {
+            if session.inspectorVisible, mode == .timeline {
                 // Fades while the day narrows / widens to make room; no slide.
                 Rectangle().fill(Theme.hairline).frame(width: Theme.Stroke.hairline)
                     .transition(.opacity)
@@ -64,6 +67,7 @@ public struct EditableDayView: View {
             for await _ in ChangeFeed.stream(name: blocksStore.db.notifyName) { await blocksStore.reload() }
         }
         .onChange(of: data) { session.update(data) }
+        .onChange(of: mode) { if mode == .blocks { session.picker = nil; session.newEntry = nil } }
         .onChange(of: undoManager) { session.undoManager = undoManager }
         .sheet(isPresented: $session.historyVisible) {
             EditHistoryView(session: session) { r in session.selection.set([r]) }
@@ -102,7 +106,7 @@ public struct EditableDayView: View {
     }
 
     private func handleKey(_ press: KeyPress) -> KeyPress.Result {
-        guard focused else { return .ignored }
+        guard focused, mode == .timeline else { return .ignored }
         let mods = press.modifiers
         switch press.key {
         case .escape:

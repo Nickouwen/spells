@@ -12,7 +12,8 @@ import RewindCore
 /// - S over a block (or right-click → Split Here) splits it at the pointer.
 /// - Drag across empty time (a break, a gap, before or after the blocks) to add a manual entry over it:
 ///   the range is confined to that gap and goes to the side panel's New entry form on release
-///   (`BlocksAdd`). Right-click there → Add Entry Here (30 min). Escape or a click cancels.
+///   (`BlocksAdd`). Right-click there → Add Entry Here (30 min), as does N over empty time. Escape or
+///   a click cancels.
 /// Snapping: neighbouring blocks' edges, now, hour/half-hour marks (6 px), else 5 min; ⌥ = free.
 struct BlocksColumn: View {
     let data: DayData
@@ -146,6 +147,13 @@ struct BlocksColumn: View {
         return BlocksAdd.gap(at: geo.ms(atY: p.y), blocks: day.blocks, data: data, minBlockMs: minBlockMs)
     }
 
+    /// Add Entry Here / N: 30 min from the pointer, when it's over empty time.
+    private func suggestedEntry(at p: CGPoint) -> Range<Int64>? {
+        guard p.x >= BlocksGeometry.gutter + Theme.Space.s,
+              let gap = BlocksAdd.gap(at: geo.ms(atY: p.y), blocks: day.blocks, data: data, minBlockMs: minBlockMs) else { return nil }
+        return BlocksAdd.suggested(at: snappedInGap(geo.ms(atY: p.y), gap), in: gap)
+    }
+
     /// `ms` snapped to the gap's edges, now and the hour marks (⌥ held = as is), kept inside the gap.
     private func snappedInGap(_ ms: Int64, _ gap: Range<Int64>) -> Int64 {
         let t = NSEvent.modifierFlags.contains(.option) ? ms
@@ -253,6 +261,12 @@ struct BlocksColumn: View {
             split(b, at: snapped(ms, for: b))
             return .handled
         }
+        if press.characters.lowercased() == "n", mods.isDisjoint(with: [.command, .option, .control]), let p = hover,
+           let r = suggestedEntry(at: p) {
+            adding = r
+            selectedMs = nil
+            return .handled
+        }
         return .ignored
     }
 
@@ -295,9 +309,7 @@ struct BlocksColumn: View {
                     }
                 }
             }
-        } else if editable, let p = hover, p.x >= BlocksGeometry.gutter + Theme.Space.s,
-                  let gap = BlocksAdd.gap(at: geo.ms(atY: p.y), blocks: day.blocks, data: data, minBlockMs: minBlockMs),
-                  let r = BlocksAdd.suggested(at: snappedInGap(geo.ms(atY: p.y), gap), in: gap) {
+        } else if editable, let p = hover, let r = suggestedEntry(at: p) {
             Button("Add Entry Here (\(Fmt.clock(ms: r.lowerBound, timeZone: data.timeZone)) · \(Fmt.duration(ms: r.upperBound - r.lowerBound)))") {
                 adding = r
                 selectedMs = nil
