@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import RewindCore
 import ScryCore
 
@@ -74,9 +75,10 @@ public struct ShellDetailView: View {
             .focusedSceneValue(\.shellModel, model)
             .onKeyPress(.leftArrow) { arrow(-1) }
             .onKeyPress(.rightArrow) { arrow(1) }
-            // Bare T = Today (⌘T is the menu item). Text fields get the key first, so typing a "t" is safe.
+            // Bare T = Today (⌘T is the menu item). These handlers see the key before a text field does,
+            // so they stand down while one is being edited (typing a "t", moving the caret).
             .onKeyPress(keys: ["t"]) { press in
-                guard press.modifiers.subtracting([.shift, .capsLock]).isEmpty else { return .ignored }
+                guard !Self.typing, press.modifiers.subtracting([.shift, .capsLock]).isEmpty else { return .ignored }
                 model.goToday()
                 return .handled
             }
@@ -89,8 +91,11 @@ public struct ShellDetailView: View {
     }
 
 
+    /// A text field (NSTextView field editor) has the keyboard.
+    static var typing: Bool { NSApp.keyWindow?.firstResponder is NSTextView }
+
     private func arrow(_ days: Int) -> KeyPress.Result {
-        guard model.view != .range else { return .ignored }
+        guard !Self.typing, model.view != .range else { return .ignored }
         model.step(days: model.view == .week ? 7 * days : days)
         return .handled
     }
