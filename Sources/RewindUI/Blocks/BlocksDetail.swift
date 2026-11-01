@@ -55,7 +55,7 @@ struct BlocksDetail: View {
         let key = draft != nil ? "new" : selected.map { "block-\($0.startMs)" } ?? "overview"
         ZStack(alignment: .topLeading) {
             Group {
-                if let entry = Binding($draft) { newEntry(entry) } else if let b = selected { detail(b) } else { overview }
+                if let entry = draft { newEntry(Self.binding($draft, fallback: entry)) } else if let b = selected { detail(b) } else { overview }
             }
             .id(key)
             .transition(.opacity)
@@ -70,6 +70,13 @@ struct BlocksDetail: View {
     }
 
     // MARK: New entry
+
+    /// The form's binding over an optional draft. Not `Binding($draft)`: that force-unwraps, and the
+    /// form is still on screen (fading out) after Add entry / Cancel set the draft to nil. Reads fall
+    /// back to the last value; writes after the draft is gone are dropped rather than reviving it.
+    static func binding(_ draft: Binding<EditSession.NewEntry?>, fallback: EditSession.NewEntry) -> Binding<EditSession.NewEntry> {
+        Binding(get: { draft.wrappedValue ?? fallback }, set: { if draft.wrappedValue != nil { draft.wrappedValue = $0 } })
+    }
 
     /// The form for a manual entry over empty time (the range came from the drag; the times are editable).
     private func newEntry(_ entry: Binding<EditSession.NewEntry>) -> some View {

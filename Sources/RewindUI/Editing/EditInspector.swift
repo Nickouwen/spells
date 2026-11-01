@@ -16,8 +16,9 @@ struct EditInspector: View {
                     Spacer()
                     IconButton(symbol: "sidebar.right", help: "Hide inspector (I)") { session.inspectorVisible = false }
                 }
-                if session.picker == .newEntry, let entry = Binding($session.newEntry) {
-                    EditNewEntryForm(entry: entry, data: data, onAdd: { session.commitNewEntry() },
+                if session.picker == .newEntry, let entry = session.newEntry {
+                    EditNewEntryForm(entry: BlocksDetail.binding($session.newEntry, fallback: entry), data: data,
+                                     onAdd: { session.commitNewEntry() },
                                      onCancel: { session.newEntry = nil; session.picker = nil },
                                      onRange: { session.selection.set([$0]) })
                 } else if let hull = session.selection.hull {
