@@ -19,6 +19,8 @@ struct BlocksCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var zoom: CGFloat = 1
     @State private var selectedMs: Int64?
+    /// A manual entry being added (a drag across empty time, or Add Entry Here): the side panel shows its form.
+    @State private var draft: EditSession.NewEntry?
     @State private var thresholdOpen = false
     @State private var scroll = ScrollPosition(edge: .top)
     /// The column's current scroll offset (for keeping the top time put across a zoom).
@@ -38,6 +40,7 @@ struct BlocksCard: View {
         self.preview = preview
         self.fillHeight = fillHeight
         _selectedMs = State(initialValue: preview?.selectedMs)
+        _draft = State(initialValue: preview?.newEntry.map { EditSession.NewEntry(range: $0) })
     }
 
     private var settings: [String: String] { store?.settings ?? [:] }
@@ -75,7 +78,7 @@ struct BlocksCard: View {
                 // The whole day scrolls inside a fixed 18 h viewport (`blocks_window_hours`).
                 ScrollView(.vertical) {
                     BlocksColumn(data: data, day: day, geo: geo, thresholdMs: thresholdMs, minBlockMs: minBlockMs,
-                                 editable: editable, selectedMs: $selectedMs, commit: commit, saveRules: saveRules,
+                                 editable: editable, selectedMs: $selectedMs, adding: adding, commit: commit, saveRules: saveRules,
                                  preview: preview, onFocus: { focus($0.startMs..<$0.endMs) }, glide: glide)
                 }
                 .frame(height: viewport)
@@ -90,8 +93,8 @@ struct BlocksCard: View {
             ScrollView(.vertical) {
                 BlocksDetail(data: data, day: day, minBlockMs: minBlockMs, selected: selected, editable: editable,
                              pickerOpen: preview?.projectPickerOpen ?? false,
-                             onSelect: { selectedMs = $0 },
-                             onAssign: { b, p, always in assign(b, p, always: always) },
+                             draft: $draft, onSelect: { selectedMs = $0 },
+                             onAssign: { b, p, always in assign(b, p, always: always) }, onAdd: add,
                              canSaveRules: store != nil)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
             }
@@ -106,6 +109,7 @@ struct BlocksCard: View {
         }
         .onChange(of: data.date) {
             selectedMs = Self.requestedSelection(openRequest, on: data.date)
+            draft = nil
             zoom = 1
             scrollToDefault()
         }
@@ -180,6 +184,25 @@ struct BlocksCard: View {
         let top = BlocksGeometry.defaultTop(range: data.bounds, windowStart: start, windowMs: Int64(hours) * BlocksGeometry.hourMs,
                                             first: blocks.first?.startMs, last: blocks.last?.endMs, focus: focus)
         return geo.offset(top: top)
+    }
+
+    /// The column's view of the draft: its range. Setting one starts an entry (or retargets the open
+    /// one); nil cancels it.
+    private var adding: Binding<Range<Int64>?> {
+        Binding(get: { draft?.range }, set: { r in
+            guard let r else { draft = nil; return }
+            if draft != nil { draft?.range = r; return }
+            let blocks = MetricsBlocks.compute(spans: data.spans, categories: data.categories, breakThresholdMs: thresholdMs)
+            draft = EditSession.NewEntry(range: r, categoryId: BlocksAdd.defaultCategory(for: r, blocks: blocks))
+        })
+    }
+
+    /// "Add entry": one edit group; the new block (or the one it merged into) is selected.
+    private func add() {
+        guard let d = draft, let plan = BlocksAdd.plan(d, data: data) else { return }
+        commit(plan)
+        draft = nil
+        selectedMs = d.range.lowerBound + (d.range.upperBound - d.range.lowerBound) / 2
     }
 
     private func assign(_ b: WorkBlock, _ projectId: Int64, always: Bool) {

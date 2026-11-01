@@ -15,7 +15,7 @@ import RewindCore
         let day = MetricsBlocks.day(spans: d.spans, categories: d.categories, breakThresholdMs: 10 * 60_000)
         let g1 = BlocksGeometry.day(bounds: d.bounds, windowHours: 18), g4 = BlocksGeometry.day(bounds: d.bounds, windowHours: 18, zoom: 4)
         var col = BlocksColumn(data: d, day: day, geo: g1, thresholdMs: 10 * 60_000, editable: false,
-                               selectedMs: .constant(nil), commit: { _ in })
+                               selectedMs: .constant(nil), adding: .constant(nil), commit: { _ in })
         col.animatableData = (g1.pxPerHour + g4.pxPerHour) / 2
         #expect(col.geo.pxPerHour == 2.5 * g1.pxPerHour)
         let noon = d.bounds.lowerBound + 8 * BlocksGeometry.hourMs

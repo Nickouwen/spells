@@ -14,6 +14,7 @@ import RewindCore
 /// - `merge-light`: dragging a block's bottom to leave a 5-min gap → ghost + "Merge"
 /// - `late-light`: activity past midnight scrolls the viewport down, scale unchanged
 /// - `fromweek-light`: a block opened from the Week, selected and in view
+/// - `newentry-light`: a drag across the longest break released → ghost in the column, form in the panel
 @Suite(.serialized) @MainActor struct BlocksV2RenderTests {
     typealias Base = BlocksRenderTests
     static let data = DayData.fixture()
@@ -39,6 +40,14 @@ import RewindCore
         let view = Base.view(d, preview).environment(\.blocksOpenRequest, request)
         let path = try BlocksRender.png(view, size: Base.size, scheme: scheme, name: name, prefix: "hours-blocks2-")
         print("BlocksRender: \(path)")
+    }
+
+    @Test func newEntry() throws {
+        let day = MetricsBlocks.day(spans: Self.data.spans, categories: Self.data.categories, breakThresholdMs: 600_000)
+        let br = try #require(day.breaks.max { $0.durationMs < $1.durationMs })
+        let r = (br.startMs + 5 * 60_000)..<(br.endMs - 5 * 60_000)
+        #expect(BlocksAdd.gap(at: r.lowerBound, blocks: day.blocks, data: Self.data, minBlockMs: 0) == br.startMs..<br.endMs)
+        try Self.render(Self.data, BlocksPreview(thresholdMin: 10, newEntry: r), "newentry-light")
     }
 
     @Test(arguments: [ColorScheme.light, .dark])

@@ -50,6 +50,8 @@ struct BlocksPreview: Hashable {
     var hoverMs: Int64? = nil
     var drag: BlocksDrag? = nil
     var projectPickerOpen = false
+    /// A manual entry being added over this range (the ghost in the column, the form in the panel).
+    var newEntry: Range<Int64>? = nil
 }
 
 extension EnvironmentValues {

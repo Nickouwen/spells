@@ -10,6 +10,9 @@ import RewindCore
 ///   extent and commits one edit group on release. Near the page's top/bottom edge it auto-scrolls.
 /// - Selected block: ⌘⌥↑/↓ moves its top edge, ⌘⌥⇧↑/↓ its bottom edge, 5 min per press.
 /// - S over a block (or right-click → Split Here) splits it at the pointer.
+/// - Drag across empty time (a break, a gap, before or after the blocks) to add a manual entry over it:
+///   the range is confined to that gap and goes to the side panel's New entry form on release
+///   (`BlocksAdd`). Right-click there → Add Entry Here (30 min). Escape or a click cancels.
 /// Snapping: neighbouring blocks' edges, now, hour/half-hour marks (6 px), else 5 min; ⌥ = free.
 struct BlocksColumn: View {
     let data: DayData
@@ -21,6 +24,8 @@ struct BlocksColumn: View {
     var minBlockMs: Int64 = 0
     let editable: Bool
     @Binding var selectedMs: Int64?
+    /// The manual entry being added (its form is open in the side panel); set on release, nil cancels.
+    @Binding var adding: Range<Int64>?
     var commit: (EditPlan) -> Void
     /// "Always for these apps" (context menu): rules for the block's apps → project.
     var saveRules: ((WorkBlock, Int64) -> Void)?
@@ -32,6 +37,8 @@ struct BlocksColumn: View {
 
     @State private var hover: CGPoint?
     @State private var drag: BlocksDrag?
+    /// A drag across empty time in flight: where it started, where it is, and the gap it's confined to.
+    @State private var marquee: Marquee?
     /// Pointer offset from the grabbed edge, so the edge doesn't jump to the pointer.
     @State private var grabOffsetMs: Int64 = 0
     @State private var scroll = BlocksScrollBox()
@@ -43,6 +50,7 @@ struct BlocksColumn: View {
 
     /// The block holding `anchorMs` (its undragged edge) draws its `edge` at the settling time.
     struct Settle: Hashable { var anchorMs: Int64; var edge: EditGesture.Edge; var ms: Int64 }
+    struct Marquee: Hashable { var anchorMs: Int64; var ms: Int64; var gap: Range<Int64> }
 
     static let stripW: CGFloat = 5
     static let edgeZone: CGFloat = 6
@@ -57,11 +65,14 @@ struct BlocksColumn: View {
             let hotEdge = liveDrag.map { ($0.blockStartMs, $0.edge) } ?? hoverPt.flatMap { edgeHit($0, width: width) }
                 .map { ($0.0.startMs, $0.1) }
             let proposal = liveDrag.flatMap(proposal)
+            // The entry being added: the drag's range while it runs, then the form's (edited in the panel).
+            let addGhost = marquee.flatMap { BlocksAdd.range(from: $0.anchorMs, to: $0.ms, in: $0.gap) } ?? adding
             // The edge time animates from the grip (mid-drag, direct) to the settle target on release.
             BlocksCanvas(edgeMs: Double(settle?.ms ?? liveDrag.map { BlocksResize.grip(proposal, drag: $0) } ?? 0)) { ctx, size, edgeMs in
                 ctx.translateBy(x: 0, y: shift)
                 draw(&ctx, width: size.width, hover: hoverPt, drag: liveDrag, proposal: proposal,
-                     hotEdge: hotEdge.map { HotEdge(blockStartMs: $0.0, edge: $0.1) }, settleMs: edgeMs)
+                     hotEdge: hotEdge.map { HotEdge(blockStartMs: $0.0, edge: $0.1) }, settleMs: edgeMs,
+                     adding: addGhost, addPillAtTop: marquee.map { $0.ms < $0.anchorMs } ?? false)
             }
             .overlay(alignment: .topLeading) { flashMark(width: width).offset(y: shift) }
             .background(BlocksScrollProbe(box: scroll))
@@ -78,6 +89,7 @@ struct BlocksColumn: View {
             .gesture(SpatialTapGesture().onEnded { v in
                 let at = CGPoint(x: v.location.x, y: v.location.y - shift)
                 let ms = geo.ms(atY: at.y)
+                if adding != nil { adding = nil }   // a click anywhere drops the entry being added
                 let hit = day.blocks.first { $0.contains(ms) && blockRect($0, width: width).contains(at) }
                 selectedMs = hit.flatMap { $0.contains(selectedMs ?? .min) ? nil : ms }
                 if let hit, selectedMs != nil { onFocus?(hit) }
@@ -125,13 +137,37 @@ struct BlocksColumn: View {
                                 toleranceMs: Int64(Self.snapPx / geo.pxPerHour * 3_600_000), timeZone: data.timeZone)
     }
 
+    /// The gap under `p` when it's over empty time: past the gutter, not on or within the edge zone of
+    /// a block (micro ticks don't count), and not past the watermark.
+    private func emptyGap(at p: CGPoint, width: CGFloat) -> Range<Int64>? {
+        guard editable, p.x >= BlocksGeometry.gutter + Theme.Space.s else { return nil }
+        let onBlock = day.blocks.contains { !isMicro($0) && blockRect($0, width: width).insetBy(dx: 0, dy: -Self.edgeZone).contains(p) }
+        guard !onBlock else { return nil }
+        return BlocksAdd.gap(at: geo.ms(atY: p.y), blocks: day.blocks, data: data, minBlockMs: minBlockMs)
+    }
+
+    /// `ms` snapped to the gap's edges, now and the hour marks (⌥ held = as is), kept inside the gap.
+    private func snappedInGap(_ ms: Int64, _ gap: Range<Int64>) -> Int64 {
+        let t = NSEvent.modifierFlags.contains(.option) ? ms
+            : BlocksResize.snap(ms, targets: BlocksAdd.targets(gap, data: data),
+                                toleranceMs: Int64(Self.snapPx / geo.pxPerHour * 3_600_000), timeZone: data.timeZone)
+        return min(max(t, gap.lowerBound), gap.upperBound)
+    }
+
     private func dragChanged(_ v: DragGesture.Value, width: CGFloat) {
-        if drag == nil {
-            guard let (b, edge) = edgeHit(v.startLocation, width: width) else { return }
-            let edgeMs = edge == .lower ? b.startMs : b.endMs
-            grabOffsetMs = edgeMs - geo.ms(atY: v.startLocation.y)
-            settle = nil
-            drag = BlocksDrag(blockStartMs: b.startMs, edge: edge, ms: edgeMs)
+        if drag == nil, marquee == nil {
+            if let (b, edge) = edgeHit(v.startLocation, width: width) {
+                let edgeMs = edge == .lower ? b.startMs : b.endMs
+                grabOffsetMs = edgeMs - geo.ms(atY: v.startLocation.y)
+                settle = nil
+                drag = BlocksDrag(blockStartMs: b.startMs, edge: edge, ms: edgeMs)
+            } else if let gap = emptyGap(at: v.startLocation, width: width) {
+                let ms = snappedInGap(geo.ms(atY: v.startLocation.y), gap)
+                marquee = Marquee(anchorMs: ms, ms: ms, gap: gap)
+                adding = nil
+            } else {
+                return
+            }
             focused = true
         }
         moveDrag(toY: v.location.y)
@@ -139,6 +175,11 @@ struct BlocksColumn: View {
     }
 
     private func moveDrag(toY y: CGFloat) {
+        if var m = marquee {
+            m.ms = snappedInGap(geo.ms(atY: y), m.gap)
+            marquee = m
+            return
+        }
         guard var d = drag, let b = day.blocks.first(where: { $0.startMs == d.blockStartMs }) else { return }
         d.ms = snapped(geo.ms(atY: y) + grabOffsetMs, for: b)
         drag = d
@@ -147,6 +188,15 @@ struct BlocksColumn: View {
     private func dragEnded(_ v: DragGesture.Value, width: CGFloat) {
         dragChanged(v, width: width)
         scroll.stop()
+        if let m = marquee {
+            // Released over empty time: the range goes to the side panel's form (nothing is written yet).
+            marquee = nil
+            if let r = BlocksAdd.range(from: m.anchorMs, to: m.ms, in: m.gap) {
+                adding = r
+                selectedMs = nil
+            }
+            return
+        }
         guard let d = drag, let b = day.blocks.first(where: { $0.startMs == d.blockStartMs }),
               let plan = BlocksResize.plan(b, edge: d.edge, to: d.ms, blocks: day.blocks, data: data, thresholdMs: thresholdMs) else {
             drag = nil
@@ -176,7 +226,7 @@ struct BlocksColumn: View {
     private func startAutoScroll() {
         guard scroll.task == nil, scroll.step() != 0 else { return }
         scroll.task = Task { @MainActor in
-            while !Task.isCancelled, drag != nil {
+            while !Task.isCancelled, drag != nil || marquee != nil {
                 let step = scroll.step()
                 if step == 0 { break }
                 scroll.scroll(by: step)
@@ -188,7 +238,8 @@ struct BlocksColumn: View {
     }
 
     private func handleKey(_ press: KeyPress) -> KeyPress.Result {
-        guard editable, drag == nil else { return .ignored }
+        guard editable, drag == nil, marquee == nil else { return .ignored }
+        if press.key == .escape, adding != nil { adding = nil; return .handled }
         // Arrow keys also carry numeric-pad / function flags, so test the ones that matter.
         let mods = press.modifiers
         if press.key == .upArrow || press.key == .downArrow, mods.contains(.command), mods.contains(.option), !mods.contains(.control) {
@@ -244,6 +295,13 @@ struct BlocksColumn: View {
                     }
                 }
             }
+        } else if editable, let p = hover, p.x >= BlocksGeometry.gutter + Theme.Space.s,
+                  let gap = BlocksAdd.gap(at: geo.ms(atY: p.y), blocks: day.blocks, data: data, minBlockMs: minBlockMs),
+                  let r = BlocksAdd.suggested(at: snappedInGap(geo.ms(atY: p.y), gap), in: gap) {
+            Button("Add Entry Here (\(Fmt.clock(ms: r.lowerBound, timeZone: data.timeZone)) · \(Fmt.duration(ms: r.upperBound - r.lowerBound)))") {
+                adding = r
+                selectedMs = nil
+            }
         }
     }
 
@@ -292,12 +350,13 @@ struct BlocksColumn: View {
     // MARK: Drawing
 
     private func draw(_ ctx: inout GraphicsContext, width: CGFloat, hover: CGPoint?, drag: BlocksDrag?,
-                      proposal: BlocksResize.Proposal?, hotEdge: HotEdge?, settleMs: Int64) {
+                      proposal: BlocksResize.Proposal?, hotEdge: HotEdge?, settleMs: Int64,
+                      adding: Range<Int64>?, addPillAtTop: Bool) {
         let tz = data.timeZone
         let x0 = BlocksGeometry.gutter + Theme.Space.s
         let nowY = data.nowMs.flatMap { $0 >= geo.startMs && $0 <= geo.endMs ? geo.y($0) : nil }
-        // The pointer's time, read off the gutter (not while dragging: the ghost shows its own times).
-        let pointerY = drag == nil ? hover.map { min(max($0.y, geo.y(geo.startMs)), geo.y(geo.endMs)) } : nil
+        // The pointer's time, read off the gutter (not while dragging: the ghosts show their own times).
+        let pointerY = drag == nil && marquee == nil ? hover.map { min(max($0.y, geo.y(geo.startMs)), geo.y(geo.endMs)) } : nil
 
         // Hour grid: a hairline per hour, a fainter one per half hour when there's room; labels in the gutter.
         for t in geo.hours(tz) {
@@ -332,7 +391,8 @@ struct BlocksColumn: View {
 
         // A break the drag is claiming loses its label under the ghost.
         for br in day.breaks {
-            let covered = proposal.map { $0.kind != .trim && $0.changed.overlaps(br.startMs..<br.endMs) } ?? false
+            let covered = (proposal.map { $0.kind != .trim && $0.changed.overlaps(br.startMs..<br.endMs) } ?? false)
+                || (adding.map { $0.overlaps(br.startMs..<br.endMs) } ?? false)
             drawBreak(&ctx, br, x0: x0, width: width, label: !covered)
         }
 
@@ -372,6 +432,7 @@ struct BlocksColumn: View {
         if let drag, let b = day.blocks.first(where: { $0.startMs == drag.blockStartMs }) {
             drawGhost(&ctx, b, drag: drag, proposal: proposal, width: width)
         }
+        if let adding { drawAdd(&ctx, adding, width: width, pillAtTop: addPillAtTop) }
 
         if let now = data.nowMs, let nowY {
             let y = nowY.rounded() + 0.5
@@ -583,6 +644,33 @@ struct BlocksColumn: View {
             .font(TextRole.label.font).foregroundStyle(Theme.surface))
         let sz = t.measure(in: CGSize(width: 400, height: 20))
         let pill = CGRect(x: r.maxX - sz.width - 12 - Theme.Space.s, y: gy - sz.height / 2 - 3, width: sz.width + 12, height: sz.height + 6)
+        ctx.fill(Path(roundedRect: pill, cornerRadius: 5, style: .continuous), with: .style(Theme.ink))
+        ctx.draw(t, at: CGPoint(x: pill.midX, y: pill.midY), anchor: .center)
+    }
+
+    /// The entry being added: the claim ghost's look (tint, strip, hatching, dashed outline) in the
+    /// Uncategorized colour, "New entry" inside when it fits, and `start–end · length` in a pill on the
+    /// edge being dragged (the bottom once released).
+    private func drawAdd(_ ctx: inout GraphicsContext, _ r: Range<Int64>, width: CGFloat, pillAtTop: Bool) {
+        let rect = blockRect(r, width: width)
+        let style = TimelineBlockStyle(slot: data.slot(nil))
+        let shape = Path(roundedRect: rect, cornerRadius: min(Theme.Radius.block, rect.height / 2), style: .continuous)
+        var c = ctx
+        c.clip(to: shape)
+        c.fill(Path(rect), with: .style(style.tint))
+        c.fill(Path(CGRect(x: rect.minX, y: rect.minY, width: Self.stripW, height: rect.height)), with: .style(style.edge))
+        Self.hatch(&c, CGRect(x: rect.minX + Self.stripW, y: rect.minY, width: rect.width - Self.stripW, height: rect.height),
+                   style.edge, alpha: 0.3)
+        ctx.stroke(Path(roundedRect: rect.insetBy(dx: -1.5, dy: -1.5), cornerRadius: Theme.Radius.block + 1.5, style: .continuous),
+                   with: .style(Theme.ink), style: StrokeStyle(lineWidth: Theme.Stroke.selection, dash: [5, 3]))
+        if rect.height >= 18, rect.width >= 160 {
+            let t = ctx.resolve(Text("New entry").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Theme.ink))
+            ctx.draw(t, at: CGPoint(x: rect.minX + Self.stripW + Theme.Space.s, y: rect.minY + min(rect.height / 2, 11)), anchor: .leading)
+        }
+        let t = ctx.resolve(Text(BlocksAdd.readout(r, data: data)).font(TextRole.label.font).foregroundStyle(Theme.surface))
+        let sz = t.measure(in: CGSize(width: 400, height: 20))
+        let y = pillAtTop ? rect.minY : rect.maxY
+        let pill = CGRect(x: rect.maxX - sz.width - 12 - Theme.Space.s, y: y - sz.height / 2 - 3, width: sz.width + 12, height: sz.height + 6)
         ctx.fill(Path(roundedRect: pill, cornerRadius: 5, style: .continuous), with: .style(Theme.ink))
         ctx.draw(t, at: CGPoint(x: pill.midX, y: pill.midY), anchor: .center)
     }

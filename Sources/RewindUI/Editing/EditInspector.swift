@@ -16,8 +16,10 @@ struct EditInspector: View {
                     Spacer()
                     IconButton(symbol: "sidebar.right", help: "Hide inspector (I)") { session.inspectorVisible = false }
                 }
-                if session.picker == .newEntry, session.newEntry != nil {
-                    EditNewEntryForm(session: session, data: data)
+                if session.picker == .newEntry, let entry = Binding($session.newEntry) {
+                    EditNewEntryForm(entry: entry, data: data, onAdd: { session.commitNewEntry() },
+                                     onCancel: { session.newEntry = nil; session.picker = nil },
+                                     onRange: { session.selection.set([$0]) })
                 } else if let hull = session.selection.hull {
                     selectionBody(hull)
                 } else {
@@ -231,57 +233,59 @@ struct EditPickerRow: View {
     private func slotFor(_ name: String) -> Int? { data.categories.first { $0.name == name }?.colorSlot }
 }
 
-/// Manual entry: label (focused), times, category, project; Return adds.
+/// Manual entry: label (focused), times, category, project; Return adds. Shared by the timeline's
+/// inspector (over `EditSession.newEntry`) and the Blocks side panel (over the card's draft).
 struct EditNewEntryForm: View {
-    @Bindable var session: EditSession
+    @Binding var entry: EditSession.NewEntry
     let data: DayData
+    let onAdd: () -> Void
+    let onCancel: () -> Void
+    /// The range was retyped (the inspector mirrors it into the selection).
+    var onRange: ((Range<Int64>) -> Void)? = nil
     @FocusState private var labelFocused: Bool
 
     var body: some View {
-        if let entry = session.newEntry {
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
-                TextField("What were you doing?", text: Binding(get: { session.newEntry?.label ?? "" },
-                                                               set: { session.newEntry?.label = $0 }))
-                    .textFieldStyle(.roundedBorder)
-                    .focused($labelFocused)
-                    .onSubmit { session.commitNewEntry() }
-                HStack(spacing: Theme.Space.s) {
-                    EditTimeField(title: "Start", ms: entry.range.lowerBound, tz: data.timeZone) { setEdge(lower: true, $0) }
-                    EditTimeField(title: "End", ms: entry.range.upperBound, tz: data.timeZone) { setEdge(lower: false, $0) }
-                }
-                Text(Fmt.duration(ms: entry.range.upperBound - entry.range.lowerBound)).textRole(.metric)
-                Picker("Category", selection: Binding(get: { session.newEntry?.categoryId }, set: { session.newEntry?.categoryId = $0 })) {
-                    Text("Uncategorized").tag(Int64?.none)
-                    ForEach(data.categories.filter { !$0.archived && $0.key != "uncategorized" }) { c in
-                        Text(c.name).tag(Int64?.some(c.id))
-                    }
-                }
-                Picker("Project", selection: Binding(get: { session.newEntry?.projectId }, set: { session.newEntry?.projectId = $0 })) {
-                    Text("None").tag(Int64?.none)
-                    ForEach(data.projects.filter { !$0.archived }) { p in Text(p.name).tag(Int64?.some(p.id)) }
-                }
-                let replaced = EditPlanner.trackedMs([entry.range], data)
-                if replaced > 0 {
-                    Text("Replaces \(Fmt.duration(ms: replaced)) of tracked time (undoable).")
-                        .textRole(.label, Theme.inkSecondary)
-                }
-                HStack {
-                    Button("Cancel") { session.newEntry = nil; session.picker = nil }
-                    Spacer()
-                    Button("Add entry") { session.commitNewEntry() }
-                        .buttonStyle(RewindButtonStyle())
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            TextField("What were you doing?", text: $entry.label)
+                .textFieldStyle(.roundedBorder)
+                .focused($labelFocused)
+                .onSubmit(onAdd)
+            HStack(spacing: Theme.Space.s) {
+                EditTimeField(title: "Start", ms: entry.range.lowerBound, tz: data.timeZone) { setEdge(lower: true, $0) }
+                EditTimeField(title: "End", ms: entry.range.upperBound, tz: data.timeZone) { setEdge(lower: false, $0) }
+            }
+            Text(Fmt.duration(ms: entry.range.upperBound - entry.range.lowerBound)).textRole(.metric)
+            Picker("Category", selection: $entry.categoryId) {
+                Text("Uncategorized").tag(Int64?.none)
+                ForEach(data.categories.filter { !$0.archived && $0.key != "uncategorized" }) { c in
+                    Text(c.name).tag(Int64?.some(c.id))
                 }
             }
-            .onAppear { labelFocused = true }
+            Picker("Project", selection: $entry.projectId) {
+                Text("None").tag(Int64?.none)
+                ForEach(data.projects.filter { !$0.archived }) { p in Text(p.name).tag(Int64?.some(p.id)) }
+            }
+            let replaced = EditPlanner.trackedMs([entry.range], data)
+            if replaced > 0 {
+                Text("Replaces \(Fmt.duration(ms: replaced)) of tracked time (undoable).")
+                    .textRole(.label, Theme.inkSecondary)
+            }
+            HStack {
+                Button("Cancel", action: onCancel)
+                Spacer()
+                Button("Add entry", action: onAdd)
+                    .buttonStyle(RewindButtonStyle())
+            }
         }
+        .onAppear { labelFocused = true }
     }
 
     private func setEdge(lower: Bool, _ text: String) -> Bool {
-        guard let e = session.newEntry, let t = EditTime.parse(text, bounds: data.bounds, timeZone: data.timeZone) else { return false }
-        let r = lower ? t..<e.range.upperBound : e.range.lowerBound..<t
+        guard let t = EditTime.parse(text, bounds: data.bounds, timeZone: data.timeZone) else { return false }
+        let r = lower ? t..<entry.range.upperBound : entry.range.lowerBound..<t
         guard let c = EditPlanner.clamp(r, data) else { return false }
-        session.newEntry?.range = c
-        session.selection.set([c])
+        entry.range = c
+        onRange?(c)
         return true
     }
 }

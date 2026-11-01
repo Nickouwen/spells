@@ -9,20 +9,25 @@ extension EnvironmentValues {
     @Entry var openMeeting: ((URL) -> Void)? = nil
 }
 
-/// Side panel of the Blocks mode. With a block selected: its categories, projects, apps & sites and
-/// spans, reusing the Day panels' components over the block's slice of the day, plus a project chip
-/// that relabels the whole block and links to Scry notes taken during it. Otherwise: the day's blocks as a list (click to select; micro
-/// blocks left out), the Day's breakdowns (categories, projects, apps & sites, sessions) condensed,
-/// and how editing works.
+/// Side panel of the Blocks mode. With an entry being added (a drag across empty time): its form.
+/// With a block selected: its categories, projects, apps & sites and spans, reusing the Day panels'
+/// components over the block's slice of the day, plus a project chip that relabels the whole block
+/// and links to Scry notes taken during it. Otherwise: the day's blocks as a list (click to select;
+/// micro blocks left out), the Day's breakdowns (categories, projects, apps & sites, sessions)
+/// condensed, and how editing works.
 struct BlocksDetail: View {
     let data: DayData
     let day: MetricsBlocks.Day
     let minBlockMs: Int64
     let selected: WorkBlock?
     let editable: Bool
+    /// The manual entry being added, if any (nil = none; setting nil cancels).
+    @Binding var draft: EditSession.NewEntry?
     let onSelect: (Int64?) -> Void
     /// Project chip pick: (block, project, also save "Always for these apps" rules).
     let onAssign: (WorkBlock, Int64, Bool) -> Void
+    /// "Add entry" on the draft.
+    let onAdd: () -> Void
     let canSaveRules: Bool
 
     @State private var pickerOpen: Bool
@@ -34,30 +39,52 @@ struct BlocksDetail: View {
     @State private var meetings: [ScryNoteFile] = []
 
     init(data: DayData, day: MetricsBlocks.Day, minBlockMs: Int64, selected: WorkBlock?, editable: Bool,
-         pickerOpen: Bool = false, onSelect: @escaping (Int64?) -> Void,
-         onAssign: @escaping (WorkBlock, Int64, Bool) -> Void, canSaveRules: Bool) {
+         pickerOpen: Bool = false, draft: Binding<EditSession.NewEntry?> = .constant(nil), onSelect: @escaping (Int64?) -> Void,
+         onAssign: @escaping (WorkBlock, Int64, Bool) -> Void, onAdd: @escaping () -> Void = {}, canSaveRules: Bool) {
         self.data = data; self.day = day; self.minBlockMs = minBlockMs; self.selected = selected
-        self.editable = editable; self.onSelect = onSelect; self.onAssign = onAssign; self.canSaveRules = canSaveRules
+        self.editable = editable; self.onSelect = onSelect; self.onAssign = onAssign; self.onAdd = onAdd
+        self.canSaveRules = canSaveRules
+        _draft = draft
         _pickerOpen = State(initialValue: pickerOpen)
     }
 
     static let maxSpans = 7, maxBlocks = 9
 
     var body: some View {
-        // Another block (or overview ↔ block) crossfades: the old content fades out over the new.
+        // Another block (or overview ↔ block ↔ new entry) crossfades: the old content fades out over the new.
+        let key = draft != nil ? "new" : selected.map { "block-\($0.startMs)" } ?? "overview"
         ZStack(alignment: .topLeading) {
             Group {
-                if let b = selected { detail(b) } else { overview }
+                if let entry = Binding($draft) { newEntry(entry) } else if let b = selected { detail(b) } else { overview }
             }
-            .id(selected?.startMs)
+            .id(key)
             .transition(.opacity)
         }
-        .animation(Theme.Motion.animation(Theme.Motion.hover, reduceMotion: reduceMotion), value: selected?.startMs)
+        .animation(Theme.Motion.animation(Theme.Motion.hover, reduceMotion: reduceMotion), value: key)
         .onChange(of: selected?.startMs) { pickerOpen = false; alwaysForApps = false }
         .task(id: selected.map { [$0.startMs, $0.endMs] }) {
             guard let b = selected, let root = scryRoot, openMeeting != nil else { meetings = []; return }
             let r = b.startMs..<b.endMs
             meetings = await Task.detached(priority: .utility) { ScryNotes.overlapping(ScryNotes.load(root), r) }.value
+        }
+    }
+
+    // MARK: New entry
+
+    /// The form for a manual entry over empty time (the range came from the drag; the times are editable).
+    private func newEntry(_ entry: Binding<EditSession.NewEntry>) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            HStack(alignment: .top, spacing: Theme.Space.s) {
+                VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                    Text("New entry").textRole(.heading)
+                    Text("Manual time over an empty stretch. It counts as work when its category does, and as billable with a project.")
+                        .font(TextRole.label.font).foregroundStyle(Theme.inkTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                IconButton(symbol: "xmark", help: "Cancel (Esc)") { draft = nil }
+            }
+            EditNewEntryForm(entry: entry, data: data, onAdd: onAdd, onCancel: { draft = nil })
         }
     }
 
