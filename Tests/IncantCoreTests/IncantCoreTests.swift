@@ -418,3 +418,17 @@ private let unexpected: @Sendable (String) async throws -> String = { _ in Issue
         #expect(s.live.mode == .off)
     }
 }
+
+@Suite struct IncantPauseDotsTests {
+    @Test func pauseDotsNeverReachTheApp() {
+        #expect(IncantGhost.withoutPauseDots("This is a test... of the stream") == "This is a test of the stream")
+        #expect(IncantGhost.withoutPauseDots("wait…") == "wait")
+        #expect(IncantGhost.withoutPauseDots("so... um... let's go") == "so um let's go")
+        #expect(IncantGhost.withoutPauseDots("one...two") == "onetwo" || IncantGhost.withoutPauseDots("one...two") == "one two")
+        #expect(IncantGhost.withoutPauseDots("fine.") == "fine.")   // a single stop is not a pause
+        var g = IncantGhost()
+        _ = g.partial("This is a test...")
+        #expect(g.partial("This is a test... of the stream") == IncantGhost.Edit(delete: 0, text: " of the stream"))
+        #expect(g.commit("This is a test… of the stream").isEmpty)
+    }
+}

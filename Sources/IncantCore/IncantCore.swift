@@ -396,7 +396,7 @@ public struct IncantGhost: Equatable, Sendable {
 
     /// A partial (the sentence so far). Empty ones (Scribe's keepalives) change nothing.
     public mutating func partial(_ text: String) -> Edit {
-        let p = Self.open(IncantFillers.strip(text))
+        let p = Self.open(IncantFillers.strip(Self.withoutPauseDots(text)))
         guard !p.isEmpty else { return Edit(delete: 0, text: "") }
         raw = p
         return retarget(composed)
@@ -406,14 +406,21 @@ public struct IncantGhost: Equatable, Sendable {
     /// were revised underneath it since.
     public mutating func live(_ text: String, of rawSent: String) -> Edit {
         guard raw.hasPrefix(rawSent) else { return Edit(delete: 0, text: "") }
-        cleaned = Cleaned(of: rawSent, text: Self.open(text))
+        cleaned = Cleaned(of: rawSent, text: Self.open(Self.withoutPauseDots(text)))
         return retarget(composed)
     }
 
     /// The sentence's final form, corrected and without its full stop; empty = it was only filler and goes.
     public mutating func commit(_ sentence: String) -> Edit {
         raw = ""; cleaned = nil
-        return retarget(sentence.isEmpty ? "" : lead + sentence)
+        let s = Self.withoutPauseDots(sentence)
+        return retarget(s.isEmpty ? "" : lead + s)
+    }
+
+    /// Scribe marks a pause with "..." (or "…"), which then sits mid-sentence once the next words come,
+    /// and the model may echo it. Stream mode types none of them.
+    public static func withoutPauseDots(_ text: String) -> String {
+        text.replacing(/\s*(\.{2,}|…)\s*/, with: " ").replacing(/\ {2,}/, with: " ").trimmingCharacters(in: .whitespaces)
     }
 
     /// The cleaned prefix plus the raw words since, or the raw sentence so far.
