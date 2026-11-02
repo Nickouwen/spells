@@ -53,6 +53,7 @@ import IncantCore
             setFn(event.flags.contains(.maskSecondaryFn))
             return false
         case .keyDown:
+            if event.getIntegerValueField(.eventSourceUserData) == IncantTyper.marker { return false }   // our own typing
             if event.getIntegerValueField(.keyboardEventKeycode) == 53 {
                 guard isListening() else { return false }
                 onEvent(.escape)

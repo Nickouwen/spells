@@ -46,7 +46,7 @@ public struct IncantSettingsView: View {
                 HStack(spacing: Theme.Space.s) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Stream as I speak").textRole(.body)
-                        Text("Each sentence is corrected and typed when you pause, instead of everything at once when you let go. Typed text is never changed afterwards.")
+                        Text("Words are typed as you say them, about a second behind. Each sentence is corrected at the pause that ends it; earlier sentences are never changed.")
                             .textRole(.label, Theme.inkSecondary)
                     }
                     Spacer()

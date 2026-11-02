@@ -122,8 +122,8 @@ public struct IncantSettings: Equatable, Sendable {
     public var cues: [String] = defaultCues
     public var model: String = defaultModel
     public var keyterms: [String] = defaultKeyterms
-    /// Stream mode: Scribe commits on each pause, and every sentence is corrected and typed as it lands
-    /// instead of everything at once on release. Already-typed text is never revised.
+    /// Stream mode: words are typed as Scribe hears them, each sentence is corrected at the pause that
+    /// ends it, and the release flushes the rest. Only the sentence in flight is ever revised.
     public var stream: Bool = false
     public init() {}
     /// From the setting table's rows. Lists are stored one item per line; blank lines dropped.
@@ -289,14 +289,20 @@ public enum IncantFix {
 
 public enum IncantScribe {
     public static let model = "scribe_v2_realtime"
+    /// How long a pause is before Scribe commits the sentence in `vad` mode. Measured 2026-11-02: a
+    /// commit lands ~0.5 s after the pause at 0.4 s; the service default (~1.5 s) never fired between
+    /// two sentences spoken normally.
+    public static let vadSilenceSecs = 0.4
     /// wss://api.elevenlabs.io/v1/speech-to-text/realtime with model_id, audio_format=pcm_16000,
-    /// commit_strategy=manual (`vad`: commits on pauses — stream mode, Scry's live panel), no_verbatim=true,
-    /// language_code, and one `keyterms` item per term.
+    /// commit_strategy=manual (`vad`: commits on pauses of `vadSilenceSecs` — stream mode, Scry's live
+    /// panel), no_verbatim=true, language_code, and one `keyterms` item per term.
     public static func url(keyterms: [String], language: String = "en", vad: Bool = false) -> URL {
         var c = URLComponents(string: "wss://api.elevenlabs.io/v1/speech-to-text/realtime")!
         c.queryItems = [.init(name: "model_id", value: model), .init(name: "audio_format", value: "pcm_16000"),
                         .init(name: "commit_strategy", value: vad ? "vad" : "manual"), .init(name: "no_verbatim", value: "true"),
                         .init(name: "language_code", value: language)]
+            + (vad ? [URLQueryItem(name: "vad_silence_threshold_secs", value: String(vadSilenceSecs)),
+                      URLQueryItem(name: "min_silence_duration_ms", value: "100"), URLQueryItem(name: "min_speech_duration_ms", value: "100")] : [])
             + keyterms.map { URLQueryItem(name: "keyterms", value: $0) }
         // URLQueryItem leaves "+" alone, which servers read as a space ("C++" → "C  ").
         c.percentEncodedQuery = c.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
@@ -350,6 +356,48 @@ public enum IncantStream {
         var h = Substring(held)
         if h.hasPrefix(". ") { h.removeFirst(2) }
         return h.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// The sentence in flight in stream mode: what has been typed for it so far (its lead — the joiner
+/// after the previous sentence — included) and the edit that brings that to a new target. Scribe's
+/// partials are cumulative and only grow (measured 2026-11-02: no earlier word changed, only the trailing
+/// mark did — "all." became "all, which"), so a partial is typed minus that mark and the edit is nearly
+/// always an append; the commit's corrected sentence then revises only the tail that differs.
+public struct IncantGhost: Equatable, Sendable {
+    public struct Edit: Equatable, Sendable {
+        /// Characters to delete from the end of what's typed, then `text` to type.
+        public var delete: Int
+        public var text: String
+        public var isEmpty: Bool { delete == 0 && text.isEmpty }
+        public init(delete: Int, text: String) { self.delete = delete; self.text = text }
+    }
+    public let lead: String
+    public private(set) var typed = ""
+    public init(lead: String = "") { self.lead = lead }
+
+    /// A partial (the sentence so far). Empty ones (Scribe's keepalives) change nothing.
+    public mutating func partial(_ text: String) -> Edit {
+        let p = Self.open(text)
+        return p.isEmpty ? Edit(delete: 0, text: "") : retarget(lead + p)
+    }
+
+    /// The sentence's final form, corrected and without its full stop; empty = it was only filler and goes.
+    public mutating func commit(_ sentence: String) -> Edit {
+        retarget(sentence.isEmpty ? "" : lead + sentence)
+    }
+
+    mutating func retarget(_ target: String) -> Edit {
+        let common = zip(typed, target).prefix { $0 == $1 }.count
+        defer { typed = target }
+        return Edit(delete: typed.count - common, text: String(target.dropFirst(common)))
+    }
+
+    /// Without trailing whitespace and the trailing mark: the only part of a partial Scribe revises.
+    public static func open(_ text: String) -> String {
+        var t = Substring(text)
+        while let l = t.last, l.isWhitespace || ".,;:!?-–—…".contains(l) { t.removeLast() }
+        return String(t)
     }
 }
 

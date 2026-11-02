@@ -345,3 +345,40 @@ private let unexpected: @Sendable (String) async throws -> String = { _ in Issue
         #expect(IncantStream.unjoined(" and more") == "and more")
     }
 }
+
+@Suite struct IncantGhostTests {
+    @Test func partialsAppendWithoutTheirTrailingMark() {
+        var g = IncantGhost(lead: ". ")
+        #expect(g.partial("This is a test-") == IncantGhost.Edit(delete: 0, text: ". This is a test"))
+        #expect(g.partial("This is a test of the stream as I") == IncantGhost.Edit(delete: 0, text: " of the stream as I"))
+        #expect(g.partial("") == IncantGhost.Edit(delete: 0, text: ""))   // keepalive
+        #expect(g.partial("This is a test of the stream as I speak feature.") == IncantGhost.Edit(delete: 0, text: " speak feature"))
+        #expect(g.typed == ". This is a test of the stream as I speak feature")
+    }
+
+    @Test func aRevisedTailIsDeletedAndRetyped() {
+        var g = IncantGhost()
+        _ = g.partial("It's currently not streaming at all.")
+        #expect(g.partial("It's currently not streaming at all, which is an") == IncantGhost.Edit(delete: 0, text: ", which is an"))
+        _ = g.partial("Let's fix the auth module")
+        #expect(g.commit("Let's fix the billing module") == IncantGhost.Edit(delete: 11, text: "billing module"))
+        #expect(g.commit("Let's fix the billing module").isEmpty)
+        #expect(g.commit("") == IncantGhost.Edit(delete: 28, text: ""))   // only filler: it goes
+        #expect(g.typed == "")
+    }
+
+    @Test func aCommitBeforeAnyPartialTypesTheWholeSentence() {
+        var g = IncantGhost(lead: " ")
+        #expect(g.commit("Is it done?") == IncantGhost.Edit(delete: 0, text: " Is it done?"))
+        #expect(IncantGhost.open("Is it done? ") == "Is it done")
+        #expect(IncantGhost.open("well…") == "well")
+    }
+
+    @Test func vadURLCarriesTheSilenceThreshold() throws {
+        let c = try #require(URLComponents(url: IncantScribe.url(keyterms: [], vad: true), resolvingAgainstBaseURL: false))
+        func value(_ n: String) -> String? { c.queryItems?.first { $0.name == n }?.value }
+        #expect(value("vad_silence_threshold_secs") == "0.4" && value("min_silence_duration_ms") == "100")
+        let manual = try #require(URLComponents(url: IncantScribe.url(keyterms: []), resolvingAgainstBaseURL: false))
+        #expect(manual.queryItems?.contains { $0.name == "vad_silence_threshold_secs" } == false)
+    }
+}
