@@ -42,6 +42,19 @@ public struct IncantSettingsView: View {
                             .buttonStyle(RewindButtonStyle())
                     }
                 }
+                SettingsDivider()
+                HStack(spacing: Theme.Space.s) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Stream as I speak").textRole(.body)
+                        Text("Each sentence is corrected and typed when you pause, instead of everything at once when you let go. Typed text is never changed afterwards.")
+                            .textRole(.label, Theme.inkSecondary)
+                    }
+                    Spacer()
+                    Toggle("Stream as I speak", isOn: Binding(get: { saved.stream }, set: { on in
+                        var s = saved; s.stream = on; persist(s, refresh: false)   // keep unsaved text edits
+                    }))
+                    .toggleStyle(.switch).labelsHidden()
+                }
             }
             SettingsSection("Correction", detail: "After you speak, a fast model applies spoken self-corrections (\"three, no, four\" → \"four\"). \"When needed\" runs it only when it hears a cue word.") {
                 HStack {

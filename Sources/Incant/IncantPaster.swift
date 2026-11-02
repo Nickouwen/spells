@@ -14,17 +14,27 @@ import AppKit
         for m in markers { pb.setString("", forType: m) }
     }
 
+    /// The user's clipboard while ours is on the board, and the paste it belongs to. Stream mode pastes
+    /// sentence after sentence: the snapshot is taken before the first and put back a second after the
+    /// last, so a later paste never snapshots our own text and the earlier restores stand down.
+    private static var snapshot: [[(NSPasteboard.PasteboardType, Data)]]?
+    private static var ours = -1, generation = 0
+
     static func paste(_ text: String) {
         let pb = NSPasteboard.general
-        // ponytail: every type read as raw data — resolves lazy promises (a big copied image) up front.
-        let saved = (pb.pasteboardItems ?? []).map { item in item.types.compactMap { t in item.data(forType: t).map { (t, $0) } } }
+        if snapshot == nil || pb.changeCount != ours {   // nothing held, or someone copied since: theirs is the clipboard to keep
+            // ponytail: every type read as raw data — resolves lazy promises (a big copied image) up front.
+            snapshot = (pb.pasteboardItems ?? []).map { item in item.types.compactMap { t in item.data(forType: t).map { (t, $0) } } }
+        }
         // Marked transient + concealed so clipboard managers keep dictated text out of their history.
         let markers = [NSPasteboard.PasteboardType("org.nspasteboard.TransientType"),
                        NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")]
         pb.declareTypes([.string] + markers, owner: nil)
         pb.setString(text, forType: .string)
         for m in markers { pb.setString("", forType: m) }   // some managers check for data, not just the type
-        let ours = pb.changeCount
+        ours = pb.changeCount
+        generation += 1
+        let gen = generation
 
         let source = CGEventSource(stateID: .combinedSessionState)
         for down in [true, false] {
@@ -37,7 +47,8 @@ import AppKit
             // Apps read the pasteboard asynchronously; Electron/remote-desktop ones can take well over 300 ms.
             try? await Task.sleep(for: .seconds(1))
             let pb = NSPasteboard.general
-            guard pb.changeCount == ours else { return }
+            guard gen == generation, pb.changeCount == ours, let saved = snapshot else { return }
+            snapshot = nil
             pb.clearContents()
             pb.writeObjects(saved.map { entries in
                 let item = NSPasteboardItem()

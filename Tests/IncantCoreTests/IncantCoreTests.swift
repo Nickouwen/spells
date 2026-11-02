@@ -310,3 +310,38 @@ private let unexpected: @Sendable (String) async throws -> String = { _ in Issue
         #expect(q.contains("keyterms=C%2B%2B") && q.contains("keyterms=ExampleCRM") && !q.contains("C++"))
     }
 }
+
+@Suite struct IncantStreamTests {
+    @Test func streamSettingRoundTrips() {
+        var s = IncantSettings(); s.stream = true
+        #expect(s.rows[IncantSettings.streamKey] == "1")
+        #expect(IncantSettings.load(s.rows) == s)
+        #expect(IncantSettings.load([IncantSettings.streamKey: "0"]).stream == false)
+        #expect(IncantSettings().stream == false)
+    }
+
+    @Test func perSentenceCorrectsAlwaysUnlessOff() {
+        var s = IncantSettings(); s.mode = .whenNeeded
+        #expect(s.perSentence.mode == .always)
+        s.mode = .off
+        #expect(s.perSentence.mode == .off)
+    }
+
+    @Test func vadURLCommitsOnPauses() throws {
+        let c = try #require(URLComponents(url: IncantScribe.url(keyterms: [], vad: true), resolvingAgainstBaseURL: false))
+        #expect(c.queryItems?.first { $0.name == "commit_strategy" }?.value == "vad")
+    }
+
+    @Test func sentencesJoinWithTheStopThePassRemoved() {
+        #expect(IncantStream.joiner(after: "", before: "Hello") == "")
+        #expect(IncantStream.joiner(after: "Fix the auth module", before: "Then run the tests") == ". ")
+        #expect(IncantStream.joiner(after: "Is it done?", before: "Check again") == " ")
+        #expect(IncantStream.joiner(after: "First,", before: "the tests") == " ")
+        #expect(IncantStream.joiner(after: "He said \"fine\"", before: "Then left") == ". ")
+        #expect(IncantStream.joiner(after: "He said \"fine.\"", before: "Then left") == " ")
+        #expect(IncantStream.joiner(after: "Title", before: "\nBody") == "")
+        #expect(IncantStream.joiner(after: "Line one\n", before: "Line two") == "")
+        #expect(IncantStream.unjoined(". Then left") == "Then left")
+        #expect(IncantStream.unjoined(" and more") == "and more")
+    }
+}

@@ -372,17 +372,8 @@ final class ScryLiveSocket: @unchecked Sendable {
         task?.cancel(with: .normalClosure, reason: nil)
     }
 
-    /// `IncantScribe.url` with `commit_strategy=vad` (Incant's is manual): segments commit on pauses.
-    static func url(keyterms: [String]) -> URL {
-        var c = URLComponents(string: "wss://api.elevenlabs.io/v1/speech-to-text/realtime")!
-        c.queryItems = [.init(name: "model_id", value: IncantScribe.model), .init(name: "audio_format", value: "pcm_16000"),
-                        .init(name: "commit_strategy", value: "vad"), .init(name: "no_verbatim", value: "true"),
-                        .init(name: "language_code", value: "en")]
-            + keyterms.map { URLQueryItem(name: "keyterms", value: $0) }
-        // URLQueryItem leaves "+" alone, which servers read as a space ("C++" → "C  ").
-        c.percentEncodedQuery = c.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
-        return c.url!
-    }
+    /// `IncantScribe.url` with `commit_strategy=vad`: segments commit on pauses.
+    static func url(keyterms: [String]) -> URL { IncantScribe.url(keyterms: keyterms, vad: true) }
 
     private func connect() {
         var req = URLRequest(url: Self.url(keyterms: keyterms))

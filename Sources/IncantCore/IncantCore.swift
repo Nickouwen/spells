@@ -75,7 +75,7 @@ public enum IncantFixMode: String, CaseIterable, Sendable { case whenNeeded = "w
 /// Incant's settings, stored in the shared `setting` table (keys below). Missing keys = defaults.
 public struct IncantSettings: Equatable, Sendable {
     public static let modeKey = "incant_fix_mode", promptKey = "incant_prompt", cuesKey = "incant_cues",
-                      modelKey = "incant_model", keytermsKey = "incant_keyterms"
+                      modelKey = "incant_model", keytermsKey = "incant_keyterms", streamKey = "incant_stream"
     // Adapted from FreeFlow's default cleanup prompt (MIT, see THIRD_PARTY_NOTICES.md): no app/screen
     // context or email rules here, English examples, our correction cues, and the keyterms appended
     // as vocabulary at call time.
@@ -122,6 +122,9 @@ public struct IncantSettings: Equatable, Sendable {
     public var cues: [String] = defaultCues
     public var model: String = defaultModel
     public var keyterms: [String] = defaultKeyterms
+    /// Stream mode: Scribe commits on each pause, and every sentence is corrected and typed as it lands
+    /// instead of everything at once on release. Already-typed text is never revised.
+    public var stream: Bool = false
     public init() {}
     /// From the setting table's rows. Lists are stored one item per line; blank lines dropped.
     /// A blank (or whitespace-only) row counts as missing.
@@ -138,8 +141,12 @@ public struct IncantSettings: Equatable, Sendable {
         if let v = list(cuesKey) { s.cues = v }
         if let v = value(modelKey) { s.model = v }
         if let v = list(keytermsKey) { s.keyterms = v }
+        if let v = settings[streamKey] { s.stream = v == "1" }
         return s
     }
+    /// What one streamed sentence is corrected with: "when needed" becomes "always" (a cue in it may
+    /// refer to wording the model has to see), off stays off.
+    public var perSentence: IncantSettings { var s = self; if s.mode == .whenNeeded { s.mode = .always }; return s }
     /// What the correction model is sent: the prompt plus the keyterms as a spelling vocabulary.
     public var instructions: String {
         keyterms.isEmpty ? prompt : prompt + "\n\nVocabulary (spell these exactly as written): " + keyterms.joined(separator: ", ")
@@ -162,7 +169,7 @@ public struct IncantSettings: Equatable, Sendable {
     /// The rows to write for this value (inverse of `load`).
     public var rows: [String: String] {
         [Self.modeKey: mode.rawValue, Self.promptKey: prompt, Self.cuesKey: cues.joined(separator: "\n"),
-         Self.modelKey: model, Self.keytermsKey: keyterms.joined(separator: "\n")]
+         Self.modelKey: model, Self.keytermsKey: keyterms.joined(separator: "\n"), Self.streamKey: stream ? "1" : "0"]
     }
 }
 
@@ -283,11 +290,12 @@ public enum IncantFix {
 public enum IncantScribe {
     public static let model = "scribe_v2_realtime"
     /// wss://api.elevenlabs.io/v1/speech-to-text/realtime with model_id, audio_format=pcm_16000,
-    /// commit_strategy=manual, no_verbatim=true, language_code, and one `keyterms` item per term.
-    public static func url(keyterms: [String], language: String = "en") -> URL {
+    /// commit_strategy=manual (`vad`: commits on pauses — stream mode, Scry's live panel), no_verbatim=true,
+    /// language_code, and one `keyterms` item per term.
+    public static func url(keyterms: [String], language: String = "en", vad: Bool = false) -> URL {
         var c = URLComponents(string: "wss://api.elevenlabs.io/v1/speech-to-text/realtime")!
         c.queryItems = [.init(name: "model_id", value: model), .init(name: "audio_format", value: "pcm_16000"),
-                        .init(name: "commit_strategy", value: "manual"), .init(name: "no_verbatim", value: "true"),
+                        .init(name: "commit_strategy", value: vad ? "vad" : "manual"), .init(name: "no_verbatim", value: "true"),
                         .init(name: "language_code", value: language)]
             + keyterms.map { URLQueryItem(name: "keyterms", value: $0) }
         // URLQueryItem leaves "+" alone, which servers read as a space ("C++" → "C  ").
@@ -320,6 +328,29 @@ public enum IncantScribe {
     static let errorTypes: Set = ["quota_exceeded", "rate_limited", "invalid_request", "commit_throttled", "unaccepted_terms",
                                   "queue_overflow", "resource_exhausted", "session_time_limit_exceeded",
                                   "chunk_size_exceeded", "insufficient_audio_activity"]
+}
+
+// MARK: - Stream mode
+
+/// Stream mode types sentence after sentence. Each one comes out of the pass without its full stop
+/// (`IncantFix.withoutTrailingPeriod`), and the stop comes back as the joiner in front of the next
+/// sentence — so the text never ends with one, whichever sentence turns out to be the last.
+public enum IncantStream {
+    /// What goes between what's been typed and `next`: nothing at the start or around a line break,
+    /// a space after punctuation, ". " after a bare word. Closing quotes and brackets are looked through.
+    public static func joiner(after typed: String, before next: String) -> String {
+        guard let last = typed.last else { return "" }
+        if last.isNewline || last.isWhitespace || next.first?.isNewline == true { return "" }
+        let core = typed.last { !"\"'”’)]".contains($0) } ?? last
+        return ".!?…:;,-—".contains(core) ? " " : ". "
+    }
+
+    /// Text held back after an app switch, for the clipboard: the joiner it starts with goes.
+    public static func unjoined(_ held: String) -> String {
+        var h = Substring(held)
+        if h.hasPrefix(". ") { h.removeFirst(2) }
+        return h.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
 
 // MARK: - Cerebras (OpenAI-compatible chat completions)
