@@ -152,6 +152,18 @@ public struct IncantSettings: Equatable, Sendable {
         keyterms.isEmpty ? prompt : prompt + "\n\nVocabulary (spell these exactly as written): " + keyterms.joined(separator: ", ")
     }
 
+    /// Stream mode's live pass runs on the sentence while it's still being spoken: the same prompt, told
+    /// the text is cut off mid-way so it cleans what's there and never finishes it.
+    public static let livePrompt = """
+    Live mode: the text is one sentence still being spoken, cut off mid-way. Clean only what is there: remove filler, hesitations and abandoned starts, apply self-corrections that are already complete, fix recognition mistakes you are sure of, keep the vocabulary spelled as given. Do not finish the sentence, do not add words, do not end it with a period or other closing punctuation. If the last word looks cut off, keep it as it is. If nothing needs changing, return the text unchanged.
+    """
+    /// The live pass's settings: the prompt with the live rules, correcting every time (off stays off).
+    public var live: IncantSettings {
+        var s = perSentence
+        s.prompt = prompt + "\n\n" + Self.livePrompt
+        return s
+    }
+
     /// The settings window's text fields → settings. Empty prompt/model fall back to the defaults; lists drop blank lines.
     public static func edited(_ base: IncantSettings, prompt: String, cues: String, keyterms: String, model: String) -> IncantSettings {
         func lines(_ t: String) -> [String] {
@@ -363,7 +375,9 @@ public enum IncantStream {
 /// after the previous sentence — included) and the edit that brings that to a new target. Scribe's
 /// partials are cumulative and only grow (measured 2026-11-02: no earlier word changed, only the trailing
 /// mark did — "all." became "all, which"), so a partial is typed minus that mark and the edit is nearly
-/// always an append; the commit's corrected sentence then revises only the tail that differs.
+/// always an append. A live pass cleans the sentence so far while it's spoken: its answer stands in for
+/// the raw text it was given, with whatever arrived since appended raw, so corrections land mid-sentence
+/// without the next words undoing them. The commit's corrected sentence then revises only the tail that differs.
 public struct IncantGhost: Equatable, Sendable {
     public struct Edit: Equatable, Sendable {
         /// Characters to delete from the end of what's typed, then `text` to type.
@@ -374,17 +388,38 @@ public struct IncantGhost: Equatable, Sendable {
     }
     public let lead: String
     public private(set) var typed = ""
+    /// The latest partial, fillers stripped and the trailing mark withheld: what a live pass is given.
+    public private(set) var raw = ""
+    private var cleaned: Cleaned?
+    private struct Cleaned: Equatable, Sendable { var of: String, text: String }
     public init(lead: String = "") { self.lead = lead }
 
     /// A partial (the sentence so far). Empty ones (Scribe's keepalives) change nothing.
     public mutating func partial(_ text: String) -> Edit {
-        let p = Self.open(text)
-        return p.isEmpty ? Edit(delete: 0, text: "") : retarget(lead + p)
+        let p = Self.open(IncantFillers.strip(text))
+        guard !p.isEmpty else { return Edit(delete: 0, text: "") }
+        raw = p
+        return retarget(composed)
+    }
+
+    /// A live pass's answer for `rawSent` (an earlier value of `raw`). Nothing changes if the partials
+    /// were revised underneath it since.
+    public mutating func live(_ text: String, of rawSent: String) -> Edit {
+        guard raw.hasPrefix(rawSent) else { return Edit(delete: 0, text: "") }
+        cleaned = Cleaned(of: rawSent, text: Self.open(text))
+        return retarget(composed)
     }
 
     /// The sentence's final form, corrected and without its full stop; empty = it was only filler and goes.
     public mutating func commit(_ sentence: String) -> Edit {
-        retarget(sentence.isEmpty ? "" : lead + sentence)
+        raw = ""; cleaned = nil
+        return retarget(sentence.isEmpty ? "" : lead + sentence)
+    }
+
+    /// The cleaned prefix plus the raw words since, or the raw sentence so far.
+    private var composed: String {
+        if let c = cleaned, raw.hasPrefix(c.of) { return lead + c.text + raw.dropFirst(c.of.count) }
+        return lead + raw
     }
 
     mutating func retarget(_ target: String) -> Edit {

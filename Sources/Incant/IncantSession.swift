@@ -28,11 +28,11 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
     /// Stream mode: the settled text (the next joiner depends on how it ends), the sentence in flight,
     /// the chain that applies edits in order, and the text held back once you switched apps.
     private struct Stream {
-        var fix: IncantFixClients
+        var fix: IncantFixClients, live: IncantFixClients
         var document = "", held = ""
         var ghost: IncantGhost?
-        var sentences = 0
-        var diverted = false
+        var sentences = 0, segment = 0
+        var diverted = false, correcting = false
         var chain: Task<Void, Never>?
     }
 
@@ -95,7 +95,7 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
         targetPid = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let fix = IncantFixClients(settings: settings)
         self.fix = fix
-        stream = streaming ? Stream(fix: fix) : nil
+        stream = streaming ? Stream(fix: fix, live: IncantFixClients(settings: settings.live)) : nil
         timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -170,13 +170,37 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
         }
     }
 
-    /// A partial: the sentence so far, typed minus its trailing mark.
+    /// A partial: the sentence so far, typed at once minus fillers and its trailing mark; the live pass
+    /// then cleans it in the background.
     private func show(_ partial: String) {
         guard stream != nil, !stream!.diverted else { return }
         if stream!.ghost == nil {
             stream!.ghost = IncantGhost(lead: IncantStream.joiner(after: stream!.document, before: partial))
         }
         apply(stream!.ghost!.partial(partial))
+        correctLive()
+    }
+
+    /// One live pass at a time, always on the newest partial: its answer replaces the raw words it was
+    /// given (`IncantGhost.live`), and a newer partial by then starts the next pass. A pass that ran
+    /// past the cutoff or failed (rate limit, offline) changes nothing: the raw words stand.
+    private func correctLive() {
+        guard let s = stream, !s.correcting, settings.mode != .off, let g = s.ghost, !g.raw.isEmpty else { return }
+        stream!.correcting = true
+        let raw = g.raw, segment = s.segment, live = s.live, shown = shown, settings = settings.live
+        Task { [weak self] in
+            let r = await live.run(raw, settings: settings)
+            guard let self, self.shown == shown, self.stream != nil else { return }
+            self.stream!.correcting = false
+            if r.source == .primary || r.source == .fallback {
+                SupportLog.incant.info("live fix \(r.ms) ms (\(r.source.rawValue, privacy: .public))")
+                self.chain(shown) { me in
+                    guard me.stream?.segment == segment, me.stream?.ghost != nil else { return }   // the sentence has settled since
+                    me.apply(me.stream!.ghost!.live(r.text, of: raw))
+                }
+            }
+            if self.stream?.ghost?.raw != raw { self.correctLive() }
+        }
     }
 
     /// A commit: the sentence's final form (corrected) replaces what its partials typed, then it's settled.
@@ -197,6 +221,7 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
         stream!.document += stream!.ghost!.typed
         if !result.text.isEmpty { stream!.sentences += 1 }
         stream!.ghost = nil
+        stream!.segment += 1   // a live answer still in flight for this sentence is dropped
         SupportLog.incant.info("stream sentence \(self.stream!.sentences): fix \(result.ms) ms (\(result.source.rawValue, privacy: .public))")
     }
 

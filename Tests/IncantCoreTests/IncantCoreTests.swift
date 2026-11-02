@@ -382,3 +382,39 @@ private let unexpected: @Sendable (String) async throws -> String = { _ in Issue
         #expect(manual.queryItems?.contains { $0.name == "vad_silence_threshold_secs" } == false)
     }
 }
+
+@Suite struct IncantGhostLiveTests {
+    @Test func aLivePassReplacesTheRawWordsItWasGivenAndKeepsTheTail() {
+        var g = IncantGhost(lead: " ")
+        #expect(g.partial("um so let's fix the") == IncantGhost.Edit(delete: 0, text: " so let's fix the"))
+        #expect(g.raw == "so let's fix the")
+        // More words arrive while the pass runs; its answer then stands in for the words it saw.
+        #expect(g.partial("um so let's fix the auth module,") == IncantGhost.Edit(delete: 0, text: " auth module"))
+        #expect(g.live("So let's fix the", of: "so let's fix the") == IncantGhost.Edit(delete: 28, text: "So let's fix the auth module"))
+        #expect(g.typed == " So let's fix the auth module")
+        // The next partial appends after the cleaned prefix, never retyping it.
+        #expect(g.partial("um so let's fix the auth module, no, the billing") == IncantGhost.Edit(delete: 0, text: ", no, the billing"))
+        #expect(g.live("So let's fix the billing", of: "so let's fix the auth module, no, the billing")
+                == IncantGhost.Edit(delete: 28, text: "billing"))
+        #expect(g.typed == " So let's fix the billing")
+        // The commit's corrected sentence settles it.
+        #expect(g.commit("So let's fix the billing module").text == " module")
+        #expect(g.raw == "")
+    }
+
+    @Test func aStaleLiveAnswerChangesNothing() {
+        var g = IncantGhost()
+        _ = g.partial("let's fix the auth")
+        _ = g.partial("let us fix the auth module")   // revised underneath (never seen from Scribe, but safe)
+        #expect(g.live("Let's fix the auth", of: "let's fix the auth").isEmpty)
+        #expect(g.typed == "let us fix the auth module")
+        #expect(g.live("", of: "let us fix the auth module") == IncantGhost.Edit(delete: 26, text: ""))   // only filler
+    }
+
+    @Test func liveSettingsCarryTheLiveRulesAndAlwaysCorrect() {
+        var s = IncantSettings(); s.mode = .whenNeeded
+        #expect(s.live.mode == .always && s.live.instructions.contains("still being spoken") && s.live.instructions.contains("Vocabulary"))
+        s.mode = .off
+        #expect(s.live.mode == .off)
+    }
+}
