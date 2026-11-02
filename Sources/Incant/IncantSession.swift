@@ -46,8 +46,10 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
 
     private func tick() {
         // A missed Fn-up (screen lock, fast user switch, sleep with Fn down) would leave the mic open:
-        // trust the hardware state over our event history.
-        if fnHeld, !CGEventSource.flagsState(.combinedSessionState).contains(.maskSecondaryFn) {
+        // trust the hardware state over our event history — except right after our own keystrokes,
+        // which clobber that state (`IncantTyper.lastPostMs`); the real Fn-up still comes through the tap.
+        if fnHeld, incantNowMs() - IncantTyper.lastPostMs > IncantTyper.settleMs,
+           !CGEventSource.flagsState(.combinedSessionState).contains(.maskSecondaryFn) {
             SupportLog.incant.info("Fn-up missed; resyncing from key state")
             handle(.fnUp)
             guard gesture.isListening else { return }

@@ -8,6 +8,11 @@ import AppKit
 @MainActor enum IncantTyper {
     /// Stamped on every event so the Fn tap doesn't take our keystrokes for a chord.
     static let marker: Int64 = 0x494E_4341   // "INCA"
+    /// When the last keystroke was posted. A posted keyboard event overwrites the system's modifier
+    /// state with its own flags (measured 2026-11-02, every event source), so for a moment after one
+    /// `CGEventSource.flagsState` says Fn is up while it's held: the session's resync waits this out.
+    static private(set) var lastPostMs: Int64 = 0
+    static let settleMs: Int64 = 500
 
     static func type(_ text: String) {
         for (i, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
@@ -35,5 +40,6 @@ import AppKit
             e.setIntegerValueField(.eventSourceUserData, value: marker)
             e.post(tap: .cghidEventTap)
         }
+        lastPostMs = incantNowMs()
     }
 }
