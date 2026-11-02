@@ -9,10 +9,10 @@ import AppKit
     /// Stamped on every event so the Fn tap doesn't take our keystrokes for a chord.
     static let marker: Int64 = 0x494E_4341   // "INCA"
     /// When the last keystroke was posted. A posted keyboard event overwrites the system's modifier
-    /// state with its own flags (measured 2026-11-02, every event source), so for a moment after one
-    /// `CGEventSource.flagsState` says Fn is up while it's held: the session's resync waits this out.
+    /// and key state with its own flags (measured 2026-11-02: `flagsState` and `keyState`, every event
+    /// source, and it stays that way until the next real modifier event), so after one of ours
+    /// `CGEventSource` says Fn is up while it's held. The session polls neither once it has typed.
     static private(set) var lastPostMs: Int64 = 0
-    static let settleMs: Int64 = 500
 
     static func type(_ text: String) {
         for (i, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {

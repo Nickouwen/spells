@@ -20,6 +20,7 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
     private var timer: Timer?
     private var shown = 0   // this dictation's overlay token
     private var fnHeld = false   // Fn is down per our events; tick() re-checks the real key state
+    private var startedMs: Int64 = 0   // this dictation's start: the key-state check is off once it has typed
     private var targetPid: pid_t?   // the app that was frontmost at start: the paste goes there or nowhere
     private var stream: Stream?   // stream mode's state for this dictation (nil = one paste on release)
     var onListening: (Bool) -> Void = { _ in }
@@ -46,9 +47,10 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
 
     private func tick() {
         // A missed Fn-up (screen lock, fast user switch, sleep with Fn down) would leave the mic open:
-        // trust the hardware state over our event history — except right after our own keystrokes,
-        // which clobber that state (`IncantTyper.lastPostMs`); the real Fn-up still comes through the tap.
-        if fnHeld, incantNowMs() - IncantTyper.lastPostMs > IncantTyper.settleMs,
+        // trust the system's key state over our event history — until this dictation has typed, which
+        // leaves that state saying Fn is up for good (`IncantTyper.lastPostMs`). From then on only the
+        // tap's flagsChanged, which the physical release always produces, ends the dictation.
+        if fnHeld, IncantTyper.lastPostMs < startedMs,
            !CGEventSource.flagsState(.combinedSessionState).contains(.maskSecondaryFn) {
             SupportLog.incant.info("Fn-up missed; resyncing from key state")
             handle(.fnUp)
@@ -70,6 +72,7 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
 
     private func start() {
         settings = Self.loadSettings()
+        startedMs = incantNowMs()
         shown = overlay.show()
         guard let key = SupportKeychain.read(SupportKeychain.elevenLabs) else {
             return abort("No ElevenLabs key — add it in Spells")
