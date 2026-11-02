@@ -189,17 +189,24 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
     /// One pass over `raw` with the settled text's tail in front, so the model decides whether the pause
     /// ended a sentence: (cleaned words, the joiner it chose or nil, the pass). A pass that didn't run
     /// (cutoff, failure) gives the raw words; one that rewrote the settled text is redone on the words alone.
-    private func pass(_ clients: IncantFixClients, _ raw: String, settings: IncantSettings) async -> (text: String, lead: String?, result: IncantFixResult) {
+    private func pass(_ clients: IncantFixClients, _ raw: String, settings: IncantSettings, cutoffMs: Int) async -> (text: String, lead: String?, result: IncantFixResult) {
         let ctx = IncantStream.context(stream?.document ?? "")
-        guard !ctx.isEmpty else { let r = await clients.run(raw, settings: settings); return (r.text, nil, r) }
-        let r = await clients.run(ctx + " " + raw, settings: settings)
+        guard !ctx.isEmpty else { let r = await clients.run(raw, settings: settings, cutoffMs: cutoffMs); return (r.text, nil, r) }
+        let r = await clients.run(ctx + " " + raw, settings: settings, cutoffMs: cutoffMs)
         guard r.source == .primary || r.source == .fallback else {
             return (IncantFix.withoutTrailingPeriod(IncantFillers.strip(raw)), nil, r)
         }
         if let (joiner, text) = IncantStream.split(answer: r.text, context: ctx) { return (text, joiner, r) }
-        let alone = await clients.run(raw, settings: settings)
+        SupportLog.incant.info("pass rewrote the settled text; redoing the sentence alone")
+        let alone = await clients.run(raw, settings: settings, cutoffMs: cutoffMs)
         return (alone.text, nil, alone)
     }
+
+    /// Stream mode's cutoffs: the live pass must land before the next partial (~1 s); a commit revises
+    /// text that's already typed, so it may take longer; the final pass runs once, after the release.
+    private static let liveCutoffMs = 900, commitCutoffMs = 1500, finalCutoffMs = 2500
+    /// The final pass retypes at most this much of the dictation's tail, and never across a line break.
+    private static let finalRetypeMax = 240
 
     /// One live pass at a time, always on the newest partial: its answer replaces the raw words it was
     /// given (`IncantGhost.live`), and a newer partial by then starts the next pass. A pass that ran
@@ -210,7 +217,7 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
         let raw = g.raw, segment = s.segment, live = s.live, shown = shown, settings = settings.live
         Task { [weak self] in
             guard let self else { return }
-            let (text, lead, r) = await self.pass(live, raw, settings: settings)
+            let (text, lead, r) = await self.pass(live, raw, settings: settings, cutoffMs: Self.liveCutoffMs)
             guard self.shown == shown, self.stream != nil else { return }
             self.stream!.correcting = false
             if r.source == .primary || r.source == .fallback {
@@ -227,7 +234,7 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
     /// A commit: the sentence's final form (corrected) replaces what its partials typed, then it's settled.
     private func settle(_ sentence: String) async {
         guard let s = stream else { return }
-        let (text, lead, result) = await pass(s.fix, sentence, settings: settings.perSentence)
+        let (text, lead, result) = await pass(s.fix, sentence, settings: settings.perSentence, cutoffMs: Self.commitCutoffMs)
         guard !Task.isCancelled, stream != nil else { return }
         if stream!.diverted {   // nothing is typed into the other app; the rest is copied on release
             if !text.isEmpty { stream!.held += (lead ?? IncantStream.joiner(after: stream!.held, before: text)) + text }
@@ -244,6 +251,26 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
         SupportLog.incant.info("stream sentence \(self.stream!.sentences): fix \(result.ms) ms (\(result.source.rawValue, privacy: .public))")
     }
 
+    /// The dictation is over: the model sees all of it, complete, and the tail that differs is retyped
+    /// (a joiner it now hears differently, a question mark, a correction that spanned a pause). Bounded:
+    /// a difference further back than `finalRetypeMax` characters, or one that would delete across a
+    /// line break, is left as typed.
+    private func finalPass() async {
+        guard let s = stream, !s.diverted, settings.mode != .off, !s.document.isEmpty else { return }
+        let r = await s.fix.run(s.document, settings: settings.perSentence, cutoffMs: Self.finalCutoffMs)
+        guard !Task.isCancelled, stream != nil, r.source == .primary || r.source == .fallback, !r.text.isEmpty else { return }
+        let before = stream!.document, after = IncantGhost.withoutPauseDots(r.text)
+        let common = zip(before, after).prefix { $0 == $1 }.count
+        let tail = before.dropFirst(common)
+        guard before != after, tail.count <= Self.finalRetypeMax, !tail.contains(where: \.isNewline) else {
+            SupportLog.incant.info("final pass \(r.ms) ms: \(before == after ? "no change" : "change too far back; left as typed")")
+            return
+        }
+        apply(IncantGhost.Edit(delete: tail.count, text: String(after.dropFirst(common))))
+        stream!.document = after
+        SupportLog.incant.info("final pass \(r.ms) ms (\(r.source.rawValue, privacy: .public)): retyped \(tail.count) chars")
+    }
+
     /// Types an edit into the target app — unless you've switched apps, which ends the typing for good.
     private func apply(_ e: IncantGhost.Edit) {
         guard !e.isEmpty, stream != nil else { return }
@@ -256,9 +283,11 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
     }
 
     /// The release in stream mode: what was said since the last pause settles after the sentences in
-    /// flight; text held back after an app switch is copied for a manual ⌘V.
+    /// flight, then the whole dictation gets one last pass; text held back after an app switch is
+    /// copied for a manual ⌘V.
     private func finishStream(_ last: String, shown: Int, committedMs: Int64, released: Int64) async {
         if !last.isEmpty { chain(shown) { await $0.settle(last) } }
+        chain(shown) { await $0.finalPass() }
         await stream?.chain?.value
         guard self.shown == shown, let s = stream else { return }
         stream = nil

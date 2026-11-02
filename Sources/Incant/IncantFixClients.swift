@@ -21,8 +21,13 @@ struct IncantFixClients: Sendable {
             let model = settings.model, prompt = settings.instructions
             cerebras = { text in
                 let req = IncantCerebras.request(text: text, instructions: prompt, model: model, apiKey: key)
-                let (data, resp) = try await URLSession.shared.data(for: req)
-                return try IncantCerebras.parse(data, status: (resp as? HTTPURLResponse)?.statusCode ?? 0)
+                do {
+                    let (data, resp) = try await URLSession.shared.data(for: req)
+                    return try IncantCerebras.parse(data, status: (resp as? HTTPURLResponse)?.statusCode ?? 0)
+                } catch {
+                    SupportLog.incant.error("Cerebras pass failed: \(String(describing: error), privacy: .public)")
+                    throw error
+                }
             }
         }
         var onDevice: (@Sendable (String) async throws -> String)?
@@ -40,9 +45,12 @@ struct IncantFixClients: Sendable {
         fallback = cerebras == nil ? nil : onDevice
     }
 
-    func run(_ text: String, settings: IncantSettings) async -> IncantFixResult {
+    /// `cutoffMs`: past it the raw text stands. Stream mode's passes revise text that's already typed,
+    /// so they can wait longer than the one paste on release.
+    func run(_ text: String, settings: IncantSettings, cutoffMs: Int = 600) async -> IncantFixResult {
         // Hedge 0: on-device starts with Cerebras, so a slow Cerebras reply (seen up to 600+ ms on the
         // free tier) is covered by the ~400 ms local answer; Cerebras still wins when it's fast.
-        await IncantFix.run(text, settings: settings, hedgeMs: 0, primary: primary ?? { _ in throw Unavailable() }, fallback: fallback)
+        await IncantFix.run(text, settings: settings, cutoffMs: cutoffMs, hedgeMs: 0,
+                            primary: primary ?? { _ in throw Unavailable() }, fallback: fallback)
     }
 }
