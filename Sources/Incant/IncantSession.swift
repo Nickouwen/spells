@@ -174,11 +174,31 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
     /// then cleans it in the background.
     private func show(_ partial: String) {
         guard stream != nil, !stream!.diverted else { return }
-        if stream!.ghost == nil {
-            stream!.ghost = IncantGhost(lead: IncantStream.joiner(after: stream!.document, before: partial))
-        }
+        if stream!.ghost == nil { stream!.ghost = IncantGhost(lead: provisionalLead(before: partial)) }
         apply(stream!.ghost!.partial(partial))
         correctLive()
+    }
+
+    /// Until a pass has seen it next to the settled text, a new segment continues the previous one: a
+    /// pause short enough to split a sentence must not show a full stop even for a moment.
+    private func provisionalLead(before text: String) -> String {
+        let j = IncantStream.joiner(after: stream?.document ?? "", before: text)
+        return j == ". " ? " " : j
+    }
+
+    /// One pass over `raw` with the settled text's tail in front, so the model decides whether the pause
+    /// ended a sentence: (cleaned words, the joiner it chose or nil, the pass). A pass that didn't run
+    /// (cutoff, failure) gives the raw words; one that rewrote the settled text is redone on the words alone.
+    private func pass(_ clients: IncantFixClients, _ raw: String, settings: IncantSettings) async -> (text: String, lead: String?, result: IncantFixResult) {
+        let ctx = IncantStream.context(stream?.document ?? "")
+        guard !ctx.isEmpty else { let r = await clients.run(raw, settings: settings); return (r.text, nil, r) }
+        let r = await clients.run(ctx + " " + raw, settings: settings)
+        guard r.source == .primary || r.source == .fallback else {
+            return (IncantFix.withoutTrailingPeriod(IncantFillers.strip(raw)), nil, r)
+        }
+        if let (joiner, text) = IncantStream.split(answer: r.text, context: ctx) { return (text, joiner, r) }
+        let alone = await clients.run(raw, settings: settings)
+        return (alone.text, nil, alone)
     }
 
     /// One live pass at a time, always on the newest partial: its answer replaces the raw words it was
@@ -189,14 +209,15 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
         stream!.correcting = true
         let raw = g.raw, segment = s.segment, live = s.live, shown = shown, settings = settings.live
         Task { [weak self] in
-            let r = await live.run(raw, settings: settings)
-            guard let self, self.shown == shown, self.stream != nil else { return }
+            guard let self else { return }
+            let (text, lead, r) = await self.pass(live, raw, settings: settings)
+            guard self.shown == shown, self.stream != nil else { return }
             self.stream!.correcting = false
             if r.source == .primary || r.source == .fallback {
                 SupportLog.incant.info("live fix \(r.ms) ms (\(r.source.rawValue, privacy: .public))")
                 self.chain(shown) { me in
                     guard me.stream?.segment == segment, me.stream?.ghost != nil else { return }   // the sentence has settled since
-                    me.apply(me.stream!.ghost!.live(r.text, of: raw))
+                    me.apply(me.stream!.ghost!.live(text, of: raw, lead: lead))
                 }
             }
             if self.stream?.ghost?.raw != raw { self.correctLive() }
@@ -206,18 +227,16 @@ func incantNowMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1_
     /// A commit: the sentence's final form (corrected) replaces what its partials typed, then it's settled.
     private func settle(_ sentence: String) async {
         guard let s = stream else { return }
-        let result = await s.fix.run(sentence, settings: settings.perSentence)
+        let (text, lead, result) = await pass(s.fix, sentence, settings: settings.perSentence)
         guard !Task.isCancelled, stream != nil else { return }
         if stream!.diverted {   // nothing is typed into the other app; the rest is copied on release
-            if !result.text.isEmpty {
-                stream!.held += IncantStream.joiner(after: stream!.held, before: result.text) + result.text
-            }
+            if !text.isEmpty { stream!.held += (lead ?? IncantStream.joiner(after: stream!.held, before: text)) + text }
             return
         }
         if stream!.ghost == nil {   // committed before any partial (a quick flush): the whole sentence lands now
-            stream!.ghost = IncantGhost(lead: IncantStream.joiner(after: stream!.document, before: result.text))
+            stream!.ghost = IncantGhost(lead: provisionalLead(before: text))
         }
-        apply(stream!.ghost!.commit(result.text))
+        apply(stream!.ghost!.commit(text, lead: lead))
         stream!.document += stream!.ghost!.typed
         if !result.text.isEmpty { stream!.sentences += 1 }
         stream!.ghost = nil

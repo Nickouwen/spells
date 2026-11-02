@@ -369,6 +369,46 @@ public enum IncantStream {
         if h.hasPrefix(". ") { h.removeFirst(2) }
         return h.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    /// Whether a pause ended a sentence is the model's call, not the pause length's: a pass gets the
+    /// settled text's tail (`context`) in front of the new words and answers with them re-joined, and
+    /// `split` reads the joiner and the cleaned words back off that answer.
+    public static func context(_ document: String, words: Int = 20) -> String {
+        document.split(whereSeparator: \.isWhitespace).suffix(words).joined(separator: " ")
+    }
+
+    /// The answer for `context + " " + raw` → (joiner, cleaned words): the context's words must come
+    /// back first (compared without case or punctuation); what follows the last of them is the joiner
+    /// (". ", ", ", "? "…, a bare space, or a line break) and then the cleaned sentence. nil when the
+    /// model rewrote the context (then the sentence is cleaned on its own).
+    public static func split(answer: String, context: String) -> (joiner: String, text: String)? {
+        let ctx = context.split(whereSeparator: \.isWhitespace).map(core)
+        guard !ctx.isEmpty else { return nil }
+        var i = answer.startIndex, k = 0
+        var end = answer.startIndex   // just past the core of the last matched context word
+        while k < ctx.count {
+            while i < answer.endIndex, answer[i].isWhitespace { i = answer.index(after: i) }
+            guard i < answer.endIndex else { return nil }
+            var j = i
+            while j < answer.endIndex, !answer[j].isWhitespace { j = answer.index(after: j) }
+            let word = answer[i..<j]
+            guard core(word) == ctx[k] else { return nil }
+            end = word.lastIndex { $0.isLetter || $0.isNumber }.map { answer.index(after: $0) } ?? j
+            i = j; k += 1
+        }
+        let rest = answer[end...]
+        let marks = rest.prefix { !$0.isLetter && !$0.isNumber && $0 != "\"" && $0 != "(" && $0 != "'" }
+        let text = rest.dropFirst(marks.count).trimmingCharacters(in: .whitespacesAndNewlines)
+        let joiner: String
+        if marks.contains(where: \.isNewline) { joiner = "\n" }
+        else if let m = marks.first(where: { ".,;:!?".contains($0) }) { joiner = "\(m) " }
+        else { joiner = " " }
+        return (joiner, text)
+    }
+
+    private static func core<S: StringProtocol>(_ word: S) -> String {
+        word.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
 }
 
 /// The sentence in flight in stream mode: what has been typed for it so far (its lead — the joiner
@@ -386,7 +426,7 @@ public struct IncantGhost: Equatable, Sendable {
         public var isEmpty: Bool { delete == 0 && text.isEmpty }
         public init(delete: Int, text: String) { self.delete = delete; self.text = text }
     }
-    public let lead: String
+    public private(set) var lead: String
     public private(set) var typed = ""
     /// The latest partial, fillers stripped and the trailing mark withheld: what a live pass is given.
     public private(set) var raw = ""
@@ -402,19 +442,21 @@ public struct IncantGhost: Equatable, Sendable {
         return retarget(composed)
     }
 
-    /// A live pass's answer for `rawSent` (an earlier value of `raw`). Nothing changes if the partials
-    /// were revised underneath it since.
-    public mutating func live(_ text: String, of rawSent: String) -> Edit {
+    /// A live pass's answer for `rawSent` (an earlier value of `raw`), and the joiner it decided on, if
+    /// it saw the settled text. Nothing changes if the partials were revised underneath it since.
+    public mutating func live(_ text: String, of rawSent: String, lead: String? = nil) -> Edit {
         guard raw.hasPrefix(rawSent) else { return Edit(delete: 0, text: "") }
+        if let lead { self.lead = lead }
         cleaned = Cleaned(of: rawSent, text: Self.open(Self.withoutPauseDots(text)))
         return retarget(composed)
     }
 
     /// The sentence's final form, corrected and without its full stop; empty = it was only filler and goes.
-    public mutating func commit(_ sentence: String) -> Edit {
+    public mutating func commit(_ sentence: String, lead: String? = nil) -> Edit {
         raw = ""; cleaned = nil
+        if let lead { self.lead = lead }
         let s = Self.withoutPauseDots(sentence)
-        return retarget(s.isEmpty ? "" : lead + s)
+        return retarget(s.isEmpty ? "" : self.lead + s)
     }
 
     /// Scribe marks a pause with "..." (or "…"), which then sits mid-sentence once the next words come,

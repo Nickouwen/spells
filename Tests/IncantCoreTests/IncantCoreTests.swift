@@ -432,3 +432,25 @@ private let unexpected: @Sendable (String) async throws -> String = { _ in Issue
         #expect(g.commit("This is a test… of the stream").isEmpty)
     }
 }
+
+@Suite struct IncantJoinerByModelTests {
+    @Test func theModelsAnswerCarriesTheJoiner() {
+        let ctx = "so let's fix the auth module"
+        #expect(IncantStream.split(answer: "So let's fix the auth module. Then run the tests", context: ctx)! == (". ", "Then run the tests"))
+        #expect(IncantStream.split(answer: "So let's fix the auth module and then run the tests", context: ctx)! == (" ", "and then run the tests"))
+        #expect(IncantStream.split(answer: "So, let's fix the auth module, then run the tests.", context: ctx)! == (", ", "then run the tests."))
+        #expect(IncantStream.split(answer: "So let's fix the auth module?\nYes", context: ctx)! == ("\n", "Yes"))
+        #expect(IncantStream.split(answer: "So let's fix the auth module", context: ctx)! == (" ", ""))   // the new words were only filler
+        #expect(IncantStream.split(answer: "Let's fix the billing module. Then run the tests", context: ctx) == nil)   // context rewritten
+        #expect(IncantStream.split(answer: "anything", context: "") == nil)
+        #expect(IncantStream.context("one two three four five", words: 3) == "three four five")
+    }
+
+    @Test func aPassCanChangeTheLeadItWasTypedWith() {
+        var g = IncantGhost(lead: " ")
+        _ = g.partial("then run the tests")
+        #expect(g.live("Then run the tests", of: "then run the tests", lead: ". ") == IncantGhost.Edit(delete: 19, text: ". Then run the tests"))
+        #expect(g.lead == ". ")
+        #expect(g.commit("Then run the tests", lead: " ") == IncantGhost.Edit(delete: 20, text: " Then run the tests"))
+    }
+}
