@@ -12,6 +12,7 @@ public struct SpellSettingsFile: Sendable, Equatable {
     public static func incant(_ paths: SupportPaths = .current()) -> SpellSettingsFile { .init(spell: "incant", paths: paths) }
     public static func scry(_ paths: SupportPaths = .current()) -> SpellSettingsFile { .init(spell: "scry", paths: paths) }
     public static func transmute(_ paths: SupportPaths = .current()) -> SpellSettingsFile { .init(spell: "transmute", paths: paths) }
+    public static func ward(_ paths: SupportPaths = .current()) -> SpellSettingsFile { .init(spell: "ward", paths: paths) }
     public static func rewind(_ paths: SupportPaths = .current()) -> SpellSettingsFile { .init(spell: "rewind", paths: paths) }
     /// The launcher's own file (`catalog_url` override).
     public static func launcher(_ paths: SupportPaths = .current()) -> SpellSettingsFile { .init(spell: "spells", paths: paths) }

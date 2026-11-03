@@ -6,6 +6,7 @@ import ScryUI
 import SpellsKit
 import SpellsUI
 import TransmuteUI
+import WardUI
 
 /// Sidebar: Modules, then a group per installed module (Rewind: Day / Week / Range; Scry: Meetings), and
 /// one Settings entry pinned at the bottom (with Rewind's health pill) that switches between the installed
@@ -53,6 +54,11 @@ struct HubView: View {
             if hub.transmute != nil {
                 Section("Transmute") {
                     Label("Invoices", systemImage: "flask").tag(HubSection.invoices)
+                }
+            }
+            if hub.ward != nil {
+                Section("Ward") {
+                    Label("Network", systemImage: "shield.lefthalf.filled").tag(HubSection.network)
                 }
             }
         }
@@ -104,6 +110,7 @@ struct HubView: View {
                 case .scry: ScrySettingsView(onSaved: { hub.scrySettingsSaved() })
                 case .incant: IncantSettingsView(permissions: nil)
                 case .transmute: TransmuteSettingsView(onSaved: { hub.transmute?.reloadSettings() })
+                case .ward: if let w = hub.ward { WardSettingsView(model: w) }
                 }
             }
             .frame(maxWidth: 960, maxHeight: .infinity, alignment: .topLeading)   // readable line length; left-aligned with the tiles
@@ -119,6 +126,7 @@ struct HubView: View {
             case .scry: ("eye", "Meeting notes")
             case .incant: ("waveform", "Dictation")
             case .transmute: ("flask", "Invoices")
+            case .ward: ("shield.lefthalf.filled", "Network watch")
         }
         return Button { hub.settingsModule = m } label: {
             HStack(spacing: Theme.Space.s + 2) {
@@ -162,6 +170,10 @@ struct HubView: View {
         case .invoices:
             if let t = hub.transmute {
                 InvoicesView(model: t, openSettings: { hub.showSettings(.transmute) }).navigationTitle("Invoices")
+            }
+        case .network:
+            if let w = hub.ward {
+                WardView(model: w, openSettings: { hub.showSettings(.ward) }).navigationTitle("Network")
             }
         case .settings:
             settings

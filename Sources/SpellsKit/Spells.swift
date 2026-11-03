@@ -21,6 +21,7 @@ public enum Spells {
     public static let incantBundleID = "dev.nic.spells.incant"
     public static let scryBundleID = "dev.nic.spells.scry"
     public static let transmuteBundleID = "dev.nic.spells.transmute"
+    public static let wardBundleID = "dev.nic.spells.ward"
 }
 
 /// The `claude` CLI path, a setting any module may store under the same key.

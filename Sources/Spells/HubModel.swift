@@ -7,6 +7,7 @@ import ScryUI
 import SpellsKit
 import SpellsUI
 import TransmuteUI
+import WardUI
 
 /// A place in the hub's sidebar.
 enum HubSection: Hashable {
@@ -14,13 +15,14 @@ enum HubSection: Hashable {
     case rewind(ShellView)
     case meetings
     case invoices
+    case network
     /// One Settings entry, pinned at the bottom; `HubModel.settingsModule` picks whose.
     case settings
 }
 
 /// Whose settings the Settings section shows.
 enum SettingsModule: String, CaseIterable, Identifiable {
-    case rewind = "Rewind", scry = "Scry", incant = "Incant", transmute = "Transmute"
+    case rewind = "Rewind", scry = "Scry", incant = "Incant", transmute = "Transmute", ward = "Ward"
     var id: String { rawValue }
 }
 
@@ -39,6 +41,8 @@ enum SettingsModule: String, CaseIterable, Identifiable {
     /// Transmute's model over the same hours.db; nil until both Transmute and Rewind are installed.
     private(set) var transmute: TransmuteModel?
     private(set) var transmuteInstalled = false
+    /// Ward's model; nil until Ward is installed (its scripts come from the installed Ward.app).
+    private(set) var ward: WardModel?
 
     func start() {
         launcher.onChange = { [weak self] in self?.sync() }
@@ -68,13 +72,19 @@ enum SettingsModule: String, CaseIterable, Identifiable {
             transmute = nil
             if section == .invoices { section = .modules }
         }
+        if ids.contains(Spells.wardBundleID) {
+            if ward == nil { ward = WardModel() }
+        } else if ward != nil {
+            ward = nil
+            if section == .network { section = .modules }
+        }
         if !settingsModules.contains(settingsModule), let first = settingsModules.first { settingsModule = first }
     }
 
     /// The modules with settings to show, in sidebar order.
     var settingsModules: [SettingsModule] {
         [rewind != nil ? SettingsModule.rewind : nil, meetings != nil ? .scry : nil, incantInstalled ? .incant : nil,
-         transmuteInstalled ? .transmute : nil].compactMap { $0 }
+         transmuteInstalled ? .transmute : nil, ward != nil ? .ward : nil].compactMap { $0 }
     }
 
     func showSettings(_ m: SettingsModule) {

@@ -14,6 +14,7 @@ let package = Package(
         .executable(name: "Incant", targets: ["Incant"]),
         .executable(name: "Scry", targets: ["Scry"]),
         .executable(name: "Transmute", targets: ["Transmute"]),
+        .executable(name: "Ward", targets: ["Ward"]),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift", from: "7.0.0"),
@@ -36,7 +37,7 @@ let package = Package(
         // …and the after-call pipeline (Scribe batch → claude -p → note), shared by Scry.app and spellsctl.
         .target(name: "ScryPipeline", dependencies: ["ScryCore", "SpellsKit", "IncantCore"]),
         // The launcher: finds module apps in ~/Applications/Spells and starts, stops and opens them. Installs nothing.
-        .executableTarget(name: "Spells", dependencies: ["SpellsKit", "SpellsUI", "RewindUI", "RewindCore", "ScryUI", "ScryCore", "IncantUI", "TransmuteUI", "TransmuteCore"]),
+        .executableTarget(name: "Spells", dependencies: ["SpellsKit", "SpellsUI", "RewindUI", "RewindCore", "ScryUI", "ScryCore", "IncantUI", "TransmuteUI", "TransmuteCore", "WardUI", "WardCore"]),
         // Rewind, the time-tracking module: the former hub window plus RewindTracker as its login item.
         .executableTarget(name: "Rewind", dependencies: ["RewindUI", "RewindCore", "SpellsUI"]),
         .executableTarget(name: "RewindTracker", dependencies: ["TrackerCore", "RewindCore"]),
@@ -52,6 +53,10 @@ let package = Package(
         .target(name: "TransmuteCore", dependencies: ["RewindCore"]),
         .target(name: "TransmuteUI", dependencies: ["TransmuteCore", "RewindCore", "SpellsKit", "SpellsUI"]),
         .executableTarget(name: "Transmute", dependencies: ["SpellsKit", "SpellsUI", "RewindCore", "TransmuteCore", "TransmuteUI"]),
+        // Ward: network watch — the rolling packet capture's facts and parsing (pure), its views, the windowed app.
+        .target(name: "WardCore"),
+        .target(name: "WardUI", dependencies: ["WardCore", "SpellsKit", "SpellsUI"]),
+        .executableTarget(name: "Ward", dependencies: ["SpellsKit", "SpellsUI", "WardCore", "WardUI"]),
         .testTarget(name: "SpellsKitTests", dependencies: ["SpellsKit"]),
         .testTarget(name: "RewindCoreTests", dependencies: ["RewindCore"]),
         .testTarget(name: "TrackerCoreTests", dependencies: ["TrackerCore"]),
@@ -59,5 +64,6 @@ let package = Package(
         .testTarget(name: "IncantCoreTests", dependencies: ["IncantCore"]),
         .testTarget(name: "ScryCoreTests", dependencies: ["ScryCore", "ScryPipeline"]),
         .testTarget(name: "TransmuteCoreTests", dependencies: ["TransmuteCore"]),
+        .testTarget(name: "WardCoreTests", dependencies: ["WardCore"]),
     ]
 )

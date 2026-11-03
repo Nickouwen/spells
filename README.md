@@ -7,6 +7,7 @@ standalone modules you install only if you want them.
 - **Rewind**: local-first automatic time tracking with SQLite, classification rules, editing, reports, CSV/PDF exports, and tamper-evident proof bundles. Its tracker helper runs at login.
 - **Incant**: press-to-dictate. A menu-bar app with its own settings window.
 - **Scry**: meeting note capture and summarization, with a Meetings window for the notes. A menu-bar app.
+- **Ward**: network watch. A root LaunchDaemon keeps a rolling packet capture (dumpcap, a ~1 GB ring on `en0`, 256 bytes per packet: headers, DNS, TLS server names) in `/var/log/netcap`, so a security incident can be audited after the fact. The window shows whether it runs and what it covers, reads the captures with your password, and lists the destinations, DNS lookups and TLS names in a window of time plus a scan for the 2026-11-02 infostealer's indicators. The shell scripts it runs ship in its bundle. A windowed app; its views also sit in the hub.
 - **Transmute**: invoices from your hours. Picks a period (the semi-month just finished, the one in progress, or any dates), reads the days' time from Rewind's database, prices it at your rate and writes a PDF (one line item, then the day-by-day hours). Keeps a ledger of what it issued and numbers the next one. A windowed app; its views also sit in the hub.
 
 A module is an ordinary `.app` with a `SpellsModule` dictionary in its Info.plist (name, summary, symbol,
@@ -14,7 +15,7 @@ URL scheme, whether it is a login item). The launcher talks to it over `<scheme>
 `login-item?on=1|0`; a module keeps its own settings in `~/Library/Application Support/Spells/<scheme>/settings.json`
 and never opens another module's data. Shared code lives in `SpellsKit` (identifiers, log, keychain, paths, settings
 files) and `SpellsUI` (design primitives, module windows and URL verbs); each module's views are a library
-(`RewindUI`, `ScryUI`, `IncantUI`, `TransmuteUI`) used by both the module's app and the hub.
+(`RewindUI`, `ScryUI`, `IncantUI`, `TransmuteUI`, `WardUI`) used by both the module's app and the hub.
 
 ## Privacy model
 
