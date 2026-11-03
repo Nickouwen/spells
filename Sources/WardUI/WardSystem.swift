@@ -5,7 +5,7 @@ import WardCore
 /// What Ward asks the system: the daemon's state (no root needed) and the scripts run as root through
 /// macOS's administrator-password dialog (`do shell script … with administrator privileges`, via
 /// osascript so the wait never blocks the app). Never logs the output: it names hosts.
-enum WardSystem {
+public enum WardSystem {
     /// The bundled scripts: this app's own when it is Ward, else the installed Ward.app's (the hub).
     static var scriptsDir: URL {
         if let own = Bundle.main.resourceURL?.appending(path: "scripts"), FileManager.default.fileExists(atPath: own.appending(path: Ward.snapshotScript).path) {
@@ -15,7 +15,7 @@ enum WardSystem {
             .appending(path: "Applications/Spells/Ward.app/Contents/Resources/scripts", directoryHint: .isDirectory)
     }
 
-    static func status() async -> WardStatus {
+    public static func status() async -> WardStatus {
         await Task.detached {
             let (out, code) = run("/bin/launchctl", ["print", "system/\(Ward.label)"])
             let fm = FileManager.default

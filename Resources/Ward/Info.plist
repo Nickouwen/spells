@@ -37,6 +37,8 @@
 	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
+	<key>LSUIElement</key>
+	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSPrincipalClass</key>
@@ -44,7 +46,7 @@
 	<key>SpellsModule</key>
 	<dict>
 		<key>LoginItem</key>
-		<false/>
+		<true/>
 		<key>Name</key>
 		<string>Ward</string>
 		<key>Scheme</key>

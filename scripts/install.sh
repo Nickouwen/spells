@@ -55,7 +55,7 @@ for m in "${MODULES[@]}"; do "$LSREG" -f "$MOD_DIR/$m.app" >/dev/null 2>&1 || tr
 # Rewind registers + starts its tracker. A menu-bar module comes back if it was set to start at login
 # (first run after the split: both, as they were login items before), and keeps itself at login.
 open "$MOD_DIR/Rewind.app"
-for m in Incant Scry; do
+for m in Incant Scry Ward; do
   scheme="$(tr '[:upper:]' '[:lower:]' <<<"$m")"
   if [[ $first_run == 1 ]] || grep -q '"login_item" : "1"' "$HOME/Library/Application Support/Spells/$scheme/settings.json" 2>/dev/null; then
     open -g -a "$MOD_DIR/$m.app" "$scheme://login-item?on=1"
