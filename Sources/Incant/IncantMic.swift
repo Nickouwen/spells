@@ -46,13 +46,16 @@ final class IncantMic: @unchecked Sendable {
 
     private func installTap() {
         let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, let converter = AVAudioConverter(from: format, to: Self.out) else {
+        // The hardware format, not outputFormat(forBus:): right after a configuration change the output
+        // format can still be the old device's, and installTap asserts the tap's rate against the hardware
+        // (crashed 2026-11-03 when a call on AirPods ended and the input went back to the built-in mic).
+        let format = input.inputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
             SupportLog.incant.error("no usable audio input")
             tapped = false
             return
         }
-        input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buf, _ in self?.convert(buf, converter) }
+        input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buf, _ in self?.convert(buf) }
         tapped = true
         engine.prepare()
     }
@@ -68,7 +71,12 @@ final class IncantMic: @unchecked Sendable {
         SupportLog.incant.info("audio input changed; mic re-tapped")
     }
 
-    private func convert(_ buf: AVAudioPCMBuffer, _ converter: AVAudioConverter) {
+    /// Made from the first buffer's format and remade if that changes; only the tap's thread touches it.
+    nonisolated(unsafe) private var converter: AVAudioConverter?
+
+    private func convert(_ buf: AVAudioPCMBuffer) {
+        if converter?.inputFormat != buf.format { converter = AVAudioConverter(from: buf.format, to: Self.out) }
+        guard let converter else { return }
         let cap = AVAudioFrameCount(Double(buf.frameLength) * 16000 / buf.format.sampleRate) + 16
         guard let out = AVAudioPCMBuffer(pcmFormat: Self.out, frameCapacity: cap) else { return }
         // The input block runs synchronously inside convert(), so these never cross threads.
