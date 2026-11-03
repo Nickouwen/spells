@@ -139,6 +139,7 @@ public enum Money {
             formatters[currency] = f
             return f
         }()
-        return f.string(from: NSDecimalNumber(mantissa: UInt64(abs(cents)), exponent: -2, isNegative: cents < 0)) ?? "\(cents)"
+        let s = f.string(from: NSDecimalNumber(mantissa: UInt64(abs(cents)), exponent: -2, isNegative: false)) ?? "\(abs(cents))"
+        return cents < 0 ? "\u{2212}" + s : s
     }
 }

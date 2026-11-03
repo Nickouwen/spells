@@ -29,14 +29,65 @@ public struct Invoice: Codable, Sendable, Equatable {
     public var terms: String
     /// Days with time on them, in date order.
     public var days: [Day]
+    /// Deductions and extras, in the order they were added; each is a line under the period line.
+    public var amendments: [Amendment] = []
+
+    enum CodingKeys: String, CodingKey {
+        case number, issued, from, through, fromName, fromAddress, fromEmail, clientName, clientAddress, clientEmail
+        case currency, rateCents, basis, description, terms, days, amendments
+    }
 
     public var period: ExportPeriod { ExportPeriod(from: from, through: through) }
     public var totalHundredths: Int64 { days.reduce(0) { $0 + $1.hundredths } }
     public var totalMs: Int64 { days.reduce(0) { $0 + $1.ms } }
-    /// Hours × rate, rounded half up to the cent.
-    public var amountCents: Int64 { (totalHundredths * rateCents + 50) / 100 }
-    /// `12.34`.
+    /// `12.34`: every hour in the period, before amendments.
     public var hours: String { ExportPeriodData.hours(totalHundredths) }
+
+    // MARK: - Lines
+
+    /// One row of the invoice table.
+    public struct Line: Sendable, Equatable, Identifiable {
+        public var id: String
+        public var title: String
+        /// Hours × 100, negative for a deduction; nil for a fixed amount.
+        public var hundredths: Int64?
+        public var cents: Int64
+        /// The amendment behind it; nil for the period line.
+        public var amendment: UUID?
+    }
+
+    /// The period at the rate, then one line per amendment. A day already paid is taken off once even if
+    /// two amendments cover it.
+    public var lines: [Line] {
+        var out = [Line(id: "period", title: title, hundredths: totalHundredths, cents: priced(totalHundredths), amendment: nil)]
+        var claimed = Set<LocalDate>()
+        for a in amendments {
+            switch a.kind {
+            case .paidDays:
+                let h = days.filter { a.covers($0.date) && claimed.insert($0.date).inserted }.reduce(0) { $0 + $1.hundredths }
+                out.append(Line(id: a.id.uuidString, title: a.title, hundredths: -h, cents: -priced(h), amendment: a.id))
+            case .credit:
+                out.append(Line(id: a.id.uuidString, title: a.title, hundredths: nil, cents: -a.amountCents, amendment: a.id))
+            case .charge:
+                out.append(Line(id: a.id.uuidString, title: a.title, hundredths: nil, cents: a.amountCents, amendment: a.id))
+            }
+        }
+        return out
+    }
+
+    /// Hours × rate, rounded half up to the cent.
+    func priced(_ hundredths: Int64) -> Int64 { (hundredths * rateCents + 50) / 100 }
+    /// The sum of the lines.
+    public var amountCents: Int64 { lines.reduce(0) { $0 + $1.cents } }
+    /// Hours left once the paid days are off: what the PDF's day table totals.
+    public var billedHundredths: Int64 { lines.compactMap(\.hundredths).reduce(0, +) }
+    public var billedHours: String { Self.hours(billedHundredths) }
+    /// The amendment that takes `d` off the invoice, if any.
+    public func paidBy(_ d: LocalDate) -> Amendment? { amendments.first { $0.covers(d) } }
+    /// `12.34` or `−12.34`.
+    public static func hours(_ hundredths: Int64) -> String {
+        hundredths < 0 ? "\u{2212}" + ExportPeriodData.hours(-hundredths) : ExportPeriodData.hours(hundredths)
+    }
     public var amount: String { Money.format(cents: amountCents, currency: currency) }
     public var rate: String { Money.format(cents: rateCents, currency: currency) }
     /// The description with `{period}` filled in.
@@ -129,5 +180,29 @@ public struct InvoiceLedger: Sendable {
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         try enc.encode(entries).write(to: url, options: .atomic)
+    }
+}
+
+/// Decoding is by hand so ledgers written before amendments existed still load.
+extension Invoice {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        number = try c.decode(String.self, forKey: .number)
+        issued = try c.decode(LocalDate.self, forKey: .issued)
+        from = try c.decode(LocalDate.self, forKey: .from)
+        through = try c.decode(LocalDate.self, forKey: .through)
+        fromName = try c.decode(String.self, forKey: .fromName)
+        fromAddress = try c.decode(String.self, forKey: .fromAddress)
+        fromEmail = try c.decode(String.self, forKey: .fromEmail)
+        clientName = try c.decode(String.self, forKey: .clientName)
+        clientAddress = try c.decode(String.self, forKey: .clientAddress)
+        clientEmail = try c.decode(String.self, forKey: .clientEmail)
+        currency = try c.decode(String.self, forKey: .currency)
+        rateCents = try c.decode(Int64.self, forKey: .rateCents)
+        basis = try c.decode(String.self, forKey: .basis)
+        description = try c.decode(String.self, forKey: .description)
+        terms = try c.decode(String.self, forKey: .terms)
+        days = try c.decode([Day].self, forKey: .days)
+        amendments = try c.decodeIfPresent([Amendment].self, forKey: .amendments) ?? []
     }
 }

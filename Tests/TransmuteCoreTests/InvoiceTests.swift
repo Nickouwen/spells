@@ -66,7 +66,9 @@ private var settings: InvoiceSettings {
     let days = p.days.enumerated().map { (i, d) in (d.day + (i / 31) * 0, Int64(3_600_000 * (1 + i % 5)), Int64(0)) }
     var r = RangeMetrics()
     for (i, d) in p.days.enumerated() { var m = DayMetrics(); m.workMs = days[i].1; r.days.append(.init(date: d, metrics: m)) }
-    let inv = Invoice.build(period: p, metrics: r, settings: settings, issued: p.through)
+    var inv = Invoice.build(period: p, metrics: r, settings: settings, issued: p.through)
+    inv.amendments = [.paidDays(LocalDate(year: 2026, month: 7, day: 1), LocalDate(year: 2026, month: 7, day: 6)),
+                      .credit(cents: 5000, note: "Deposit received")]
     let (data, pages) = InvoicePDF.render(inv)
     #expect(data.starts(with: Array("%PDF".utf8)))
     #expect(pages >= 2)
@@ -81,4 +83,35 @@ private var settings: InvoiceSettings {
     #expect(ledger.list().map(\.id) == ["INV-0012"])
     try ledger.remove("INV-0012")
     #expect(ledger.list().isEmpty)
+}
+
+@Test func amendmentsBecomeLinesAndChangeTheTotal() throws {
+    let p = ExportPeriod(from: LocalDate(year: 2026, month: 10, day: 1), through: LocalDate(year: 2026, month: 10, day: 15))
+    func d(_ day: Int) -> LocalDate { LocalDate(year: 2026, month: 10, day: day) }
+    let h = Int64(3_600_000)
+    var inv = Invoice.build(period: p, metrics: metrics([(1, h, h), (2, 2 * h, 2 * h), (3, 3 * h, 3 * h), (10, h, h)]), settings: settings, issued: p.through)
+    #expect(inv.amountCents == 31850)                     // 7 h × 45.50
+    let paid = Amendment.paidDays(d(1), d(2))
+    inv.amendments = [paid, .paidDays(d(2), d(3), note: "paid by deposit"), .credit(cents: 1000, note: "Deposit"), .charge(cents: 500, note: "Rush")]
+    let lines = inv.lines
+    #expect(lines.map(\.title) == ["For development October 1–15, 2026", "Less October 1–2, 2026 (already paid)",
+                                   "Less October 2–3, 2026 (paid by deposit)", "Deposit", "Rush"])
+    #expect(lines.map(\.hundredths) == [700, -300, -300, nil, nil])   // day 2 comes off once
+    #expect(lines.map(\.cents) == [31850, -13650, -13650, -1000, 500])
+    #expect(inv.amountCents == 4050)
+    #expect(inv.billedHundredths == 100)
+    #expect(inv.billedHours == "1.00")
+    #expect(inv.paidBy(d(2))?.id == paid.id)
+    #expect(inv.paidBy(d(10)) == nil)
+    #expect(Money.format(cents: -13650, currency: "CAD") == "−$136.50")
+    #expect(Invoice.hours(-300) == "−3.00")
+
+    // Round-trips, and a ledger written before amendments existed still decodes.
+    let data = try JSONEncoder().encode(inv)
+    #expect(try JSONDecoder().decode(Invoice.self, from: data) == inv)
+    var dict = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+    dict["amendments"] = nil
+    let old = try JSONDecoder().decode(Invoice.self, from: JSONSerialization.data(withJSONObject: dict))
+    #expect(old.amendments.isEmpty)
+    #expect(old.amountCents == 31850)
 }
