@@ -27,15 +27,18 @@ public enum InvoicePreset: String, CaseIterable, Identifiable, Sendable {
     let ledger: InvoiceLedger
 
     public private(set) var settings = InvoiceSettings()
-    public var preset: InvoicePreset = .previous { didSet { reload() } }
+    public var preset: InvoicePreset = .previous { didSet { amendments = []; reload() } }
     public var customFrom: LocalDate { didSet { if preset == .custom { reload() } } }
     public var customThrough: LocalDate { didSet { if preset == .custom { reload() } } }
     public private(set) var preview: Invoice?
     public private(set) var loading = false
     public private(set) var error: String?
     public private(set) var issued: [InvoiceLedger.Entry] = []
-    /// The PDF just written, until the period or settings change.
+    /// The PDF just written, until the period, settings or amendments change.
     public private(set) var justIssued: InvoiceLedger.Entry?
+    /// This invoice's deductions and extras. They survive a settings or custom-date change and go when
+    /// the preset changes.
+    public var amendments: [Amendment] = [] { didSet { justIssued = nil; preview?.amendments = amendments } }
     private var generation = 0
 
     public init(db: RewindDB, timeZone: TimeZone = .current, settings: SpellSettingsFile = .transmute()) {
@@ -84,7 +87,7 @@ public enum InvoicePreset: String, CaseIterable, Identifiable, Sendable {
             guard gen == generation else { return }
             loading = false
             switch result {
-            case .success(let inv): preview = inv; error = nil
+            case .success(var inv): inv.amendments = amendments; preview = inv; error = nil
             case .failure(let e): preview = nil; error = "Couldn't read Rewind's hours: \(e)"
             }
         }
@@ -111,6 +114,9 @@ public enum InvoicePreset: String, CaseIterable, Identifiable, Sendable {
             SupportLog.transmute.error("issue failed: \(String(describing: error), privacy: .public)")
         }
     }
+
+    public func add(_ a: Amendment) { amendments.append(a) }
+    public func remove(amendment id: UUID) { amendments.removeAll { $0.id == id } }
 
     public func open(_ e: InvoiceLedger.Entry) { NSWorkspace.shared.open(e.url) }
     public func reveal(_ e: InvoiceLedger.Entry) { NSWorkspace.shared.activateFileViewerSelecting([e.url]) }

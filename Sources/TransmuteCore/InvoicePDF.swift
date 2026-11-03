@@ -109,13 +109,17 @@ public enum InvoicePDF {
             c.text("AMOUNT", f.label, x: colAmount, base: y + 10, right: true, gray: 0.45, kern: 0.8)
             c.rule(y + 16, weight: 0.75)
         })
-        out.append(Block(height: 26) { c, y in
-            c.text(inv.title, f.regular, x: 0, base: y + 16, maxWidth: colHours - 60)
-            c.text(inv.hours, f.regular, x: colHours, base: y + 16, right: true)
-            c.text(inv.rate, f.regular, x: colRate, base: y + 16, right: true)
-            c.text(inv.amount, f.regular, x: colAmount, base: y + 16, right: true)
-            c.rule(y + 24, gray: 0.6, weight: 0.5)
-        })
+        for line in inv.lines {
+            out.append(Block(height: 26) { c, y in
+                c.text(line.title, f.regular, x: 0, base: y + 16, maxWidth: colHours - 60)
+                if let h = line.hundredths {
+                    c.text(Invoice.hours(h), f.regular, x: colHours, base: y + 16, right: true)
+                    c.text(inv.rate, f.regular, x: colRate, base: y + 16, right: true)
+                }
+                c.text(Money.format(cents: line.cents, currency: inv.currency), f.regular, x: colAmount, base: y + 16, right: true)
+                c.rule(y + 24, gray: 0.6, weight: 0.5)
+            })
+        }
         out.append(Block(height: 54) { c, y in
             c.text("Total (\(inv.currency))", f.heading, x: colRate - 24, base: y + 22, right: true)
             c.text(inv.amount, f.total, x: colAmount, base: y + 22, right: true)
@@ -130,15 +134,23 @@ public enum InvoicePDF {
             c.rule(y + 18, weight: 0.75)
         })
         for d in inv.days {
+            let paid = inv.paidBy(d.date)
+            let gray: CGFloat = paid == nil ? 0 : 0.5
             out.append(Block(height: dayRow) { c, y in
-                c.text(Invoice.dayLabel(d.date), f.regular, x: 0, base: y + 11)
-                c.text(ExportPeriodData.hours(d.hundredths), f.regular, x: 180, base: y + 11, right: true)
+                c.text(Invoice.dayLabel(d.date), f.regular, x: 0, base: y + 11, gray: gray)
+                c.text(ExportPeriodData.hours(d.hundredths), f.regular, x: 180, base: y + 11, right: true, gray: gray)
+                if let paid { c.text(paid.reason, f.small, x: 196, base: y + 11, gray: 0.5) }
             })
         }
-        out.append(Block(height: 24) { c, y in
+        let paidHundredths = inv.totalHundredths - inv.billedHundredths
+        out.append(Block(height: paidHundredths > 0 ? 40 : 24) { c, y in
             c.rule(y + 4, gray: 0.6, weight: 0.5)
             c.text("\(inv.days.count) day\(inv.days.count == 1 ? "" : "s")", f.regular, x: 0, base: y + 18, gray: 0.35)
-            c.text(inv.hours, f.bold, x: 180, base: y + 18, right: true)
+            c.text(inv.hours, paidHundredths > 0 ? f.regular : f.bold, x: 180, base: y + 18, right: true)
+            if paidHundredths > 0 {
+                c.text("Billed", f.regular, x: 0, base: y + 34, gray: 0.35)
+                c.text(inv.billedHours, f.bold, x: 180, base: y + 34, right: true)
+            }
         })
         return out
     }

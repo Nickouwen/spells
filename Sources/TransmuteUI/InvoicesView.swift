@@ -9,6 +9,7 @@ public struct InvoicesView: View {
     @Bindable var model: TransmuteModel
     var openSettings: () -> Void
     @State private var deleting: InvoiceLedger.Entry?
+    @State private var amending = false
 
     public init(model: TransmuteModel, openSettings: @escaping () -> Void) {
         self.model = model
@@ -87,11 +88,18 @@ public struct InvoicesView: View {
                     Text("\(inv.fromName) → \(inv.clientName)").textRole(.label, Theme.inkSecondary).lineLimit(1).truncationMode(.middle)
                 }
                 .padding(.bottom, Theme.Space.m)
-                HStack(alignment: .firstTextBaseline) {
-                    Text(inv.title).textRole(.body).lineLimit(2)
-                    Spacer()
-                    Text("\(inv.hours) h × \(inv.rate)").textRole(.body, Theme.inkSecondary)
-                    Text(inv.amount).textRole(.bodyEmph).frame(width: 100, alignment: .trailing)
+                ForEach(inv.lines) { line in
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                        Text(line.title).textRole(.body, line.amendment == nil ? nil : Theme.inkSecondary).lineLimit(2)
+                        Spacer()
+                        if let h = line.hundredths { Text("\(Invoice.hours(h)) h × \(inv.rate)").textRole(.body, Theme.inkSecondary) }
+                        Text(Money.format(cents: line.cents, currency: inv.currency)).textRole(.bodyEmph).frame(width: 100, alignment: .trailing)
+                        if let id = line.amendment {
+                            IconButton(symbol: "xmark.circle", help: "Remove this amendment") { model.remove(amendment: id) }
+                        } else {
+                            Color.clear.frame(width: 26, height: 26)   // keeps the amounts in one column
+                        }
+                    }
                 }
                 Rectangle().fill(Theme.hairline).frame(height: Theme.Stroke.hairline).padding(.vertical, Theme.Space.m)
                 if inv.days.isEmpty {
@@ -100,16 +108,20 @@ public struct InvoicesView: View {
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Theme.Space.l)], alignment: .leading, spacing: Theme.Space.xs) {
                         ForEach(inv.days, id: \.date) { d in
+                            let paid = inv.paidBy(d.date) != nil
                             HStack {
-                                Text(Invoice.dayLabel(d.date)).textRole(.body, Theme.inkSecondary)
+                                Text(Invoice.dayLabel(d.date)).textRole(.body, paid ? Theme.inkTertiary : Theme.inkSecondary)
                                 Spacer()
-                                Text(ExportPeriodData.hours(d.hundredths)).textRole(.body)
+                                Text(ExportPeriodData.hours(d.hundredths)).textRole(.body, paid ? Theme.inkTertiary : nil).strikethrough(paid)
                             }
+                            .help(paid ? "Already paid; not billed" : "")
                         }
                     }
                 }
                 HStack(alignment: .firstTextBaseline) {
-                    Text("\(inv.days.count) day\(inv.days.count == 1 ? "" : "s") · \(Fmt.duration(ms: inv.totalMs))").textRole(.label, Theme.inkTertiary)
+                    Text("\(inv.days.count) day\(inv.days.count == 1 ? "" : "s") · \(Fmt.duration(ms: inv.totalMs))"
+                         + (inv.billedHundredths == inv.totalHundredths ? "" : " · \(inv.billedHours) h billed"))
+                        .textRole(.label, Theme.inkTertiary)
                     Spacer()
                     Text("Total").textRole(.label, Theme.inkSecondary)
                     Text(inv.amount).textRole(.metric).frame(minWidth: 100, alignment: .trailing)
@@ -124,6 +136,10 @@ public struct InvoicesView: View {
                         Text(error).textRole(.label, Theme.StateLayer.distraction).lineLimit(2)
                     }
                     Spacer()
+                    Button("Amend…") { amending = true }.buttonStyle(RewindButtonStyle()).disabled(inv.days.isEmpty || model.loading)
+                        .popover(isPresented: $amending, arrowEdge: .bottom) {
+                            AmendmentForm(period: inv.period, currency: inv.currency) { model.add($0); amending = false }
+                        }
                     Button("Make PDF") { model.issue() }.buttonStyle(RewindButtonStyle()).disabled(inv.days.isEmpty || model.loading)
                 }
                 .padding(.top, Theme.Space.l)
