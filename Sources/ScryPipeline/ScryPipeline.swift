@@ -51,7 +51,8 @@ public enum ScryPipeline {
         // Who was on the call: the Meet tab's participant tiles when the recorder could read them (exact names,
         // and who spoke when), else on-screen names completed from the calendar invite; nobody → the invitees.
         let meet = ScryMeet.log(fromJSONL: (try? String(contentsOf: dir.appending(path: "speakers.jsonl"), encoding: .utf8)) ?? "")
-        let seen = meet.participants.isEmpty ? ScryNames.completed(ScryNames.fromOCR(capture.screenshotText), capture.invite)
+        let expected = (capture.invite?.invitees.map(\.name) ?? []) + [settings.userName]
+        let seen = meet.participants.isEmpty ? ScryNames.completed(ScryNames.fromOCR(capture.screenshotText, known: expected), capture.invite)
                                              : meet.participants
         let names = seen.isEmpty ? capture.invite?.invitees.map(\.name) ?? [] : seen
         // ponytail: on-screen names join the vocabulary, so Scribe spells them the way the call shows them.

@@ -114,7 +114,7 @@ import UserNotifications
         // ever seen (all screenshots go to the pipeline).
         // Nobody on screen yet → the invite's title (still says it's the right meeting), else the app.
         let onScreen = s.meet?.participants ?? []
-        let now = ScryNames.completed(onScreen.isEmpty ? s.screens.last.map { ScryNames.fromOCR([$0]) } ?? [] : onScreen, s.invite)
+        let now = ScryNames.completed(onScreen.isEmpty ? s.screens.last.map { ScryNames.fromOCR([$0], known: (s.invite?.invitees.map(\.name) ?? []) + [s.settings.userName]) } ?? [] : onScreen, s.invite)
         let who = ScryNames.pillLabel(now, userName: s.settings.userName,
                                       fallback: s.invite?.title ?? s.app.map(Self.name) ?? "In person")
         // The tap stopped delivering (it's being rebuilt): say so, rather than record a one-sided call quietly.

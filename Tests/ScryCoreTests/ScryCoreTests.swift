@@ -326,17 +326,35 @@ private let fullNote = ScryNote(
 
 @Test func namesFromOCR() {
     let names = ScryNames.fromOCR([
-        ["Alex Client", "Mute", "Stop Video", "Jordan", "Example User (Host)", "Share Screen", "Participants", "12:04",
+        ["Alex Client", "Mute", "Stop Video", "Jordan", "Priya Raman (Host)", "Share Screen", "Participants", "12:04",
          "https://zoom.us/j/123", "meet.google.com", "Meeting details", "TT"],
         ["Alex Client", "Jordan", "Recording", "Leave"],
     ])
-    #expect(names == ["Alex Client", "Jordan", "Example User"])
+    #expect(names == ["Alex Client", "Jordan", "Priya Raman"])
 }
 
 @Test func namesFromOCRDropMeetJunk() {   // a real Meet call's junk, names swapped
     let names = ScryNames.fromOCR([["Co", "Contributors", "Sam Rivera", "Alex Client", "Alex's Loom Notetaker",
                                     "Ask Gemini", "JIl", "Sam Rive", "IlI", "Ill"]])
     #expect(names == ["Sam Rivera", "Alex Client"])
+}
+
+@Test func namesFromOCRDropSharedScreenAndMisreads() {   // a real Meet call with a shared screen, names swapped
+    let tiles = ["Sam Rivera", "Alex Okafor", "Jordan's Loom Notet"]
+    let share = ["Reducto Studio", "Google Password Manager", "New Project", "History", "Window", "Help", "Presentation",
+                 "Chrome", "File Edit", "Bookmarks", "Profiles", "Tab", "Contractor Hub", "Meetings", "Calls", "Past",
+                 "Liens", "Wrong", "Offboarding", "GoHighLevel", "BluePeak Ventures", "Entire Screen", "Environments"]
+    let names = ScryNames.fromOCR([
+        tiles + share + ["Mlex Okafor", "Ta Mihi Mam-dEone", "MyCiaes", "D AcENTard", "Sam...", "Alex Ok..."],
+        tiles + share + ["Pöpoling Al", "Ottocarding"],
+        tiles + share + ["Hile", "ARteu", "Prole-t"],
+        ["Sam Rivera"] + share,
+    ])
+    #expect(names == ["Sam Rivera", "Alex Okafor"])
+    // Everyday-word names survive with a first name in them, or when the invite expects them.
+    #expect(ScryNames.fromOCR([["Will Brown", "Rose Hill"]]) == ["Will Brown"])
+    #expect(ScryNames.fromOCR([["Will Brown", "Rose Hill"]], known: ["Rose Hill"]) == ["Will Brown", "Rose Hill"])
+    #expect(ScryNames.fromOCR([["Sean O'Brien", "Ava McKay", "José Núñez"]]) == ["Sean O'Brien", "Ava McKay", "José Núñez"])
 }
 
 @Test func soleFarSpeakerIsTheOnlyOtherPerson() {

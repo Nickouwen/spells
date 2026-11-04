@@ -711,14 +711,68 @@ public enum ScryNames {
     /// "Participants", "Leave", "Recording", "Meeting details"…), not timers/URLs; parentheticals like
     /// "(Host)" or "(You)" stripped. Also dropped: one-word labels under 3 letters, I/l/J misreads ("IlI"),
     /// notetaker bots, and a name that's a cut-off copy of another ("Sam Rive" beside "Sam Rivera").
-    /// Deduped across screenshots, order of first appearance.
-    public static func fromOCR(_ screenshots: [[String]]) -> [String] {
-        var seen = Set<String>(), out: [String] = []
-        for raw in screenshots.joined() {
-            guard let name = candidate(raw), seen.insert(name.lowercased()).inserted else { continue }
-            out.append(name)
+    /// On top of `candidate`, OCR text must pass `plausible` (name-shaped words, not all everyday words), so a
+    /// shared screen's menus and headings ("File Edit", "Contractor Hub") and misreads ("AcENTard") stay out;
+    /// with 3+ screenshots a name must show in at least two (a tile is on every one; a misread rarely repeats).
+    /// `known` (invitees, your name) skips both checks. Deduped across screenshots, order of first appearance.
+    public static func fromOCR(_ screenshots: [[String]], known: [String] = []) -> [String] {
+        var seen = Set<String>(), out: [String] = [], shots: [String: Int] = [:]
+        for shot in screenshots {
+            var here = Set<String>()
+            for raw in shot {
+                guard let name = candidate(raw) else { continue }
+                let key = name.lowercased()
+                guard isKnown(key, known) || plausible(name) else { continue }
+                if here.insert(key).inserted { shots[key, default: 0] += 1 }
+                if seen.insert(key).inserted { out.append(name) }
+            }
         }
-        return out.filter { n in !out.contains { $0.count > n.count && $0.lowercased().hasPrefix(n.lowercased()) } }
+        let repeated = out.filter { screenshots.count < 3 || shots[$0.lowercased(), default: 0] >= 2 || isKnown($0.lowercased(), known) }
+        return repeated.filter { n in !repeated.contains { $0.count > n.count && $0.lowercased().hasPrefix(n.lowercased()) } }
+    }
+
+    private static func isKnown(_ key: String, _ known: [String]) -> Bool {
+        known.contains { let k = $0.lowercased(); return k == key || k.split(separator: " ").first.map(String.init) == key }
+    }
+
+    /// OCR-only checks (exact Meet names skip them): each word name-shaped ("Teagan", "O'Brien", "McKay",
+    /// "J."; not "Laura's", "Nic...", "MyCiaes", "GoHighLevel"), no product words ("Google", "Studio"), and not
+    /// made only of everyday dictionary words unless one is a first name ("Will Brown" stays, "Contractor Hub"
+    /// goes). The word lists are macOS's `/usr/share/dict`; without them only the shape checks apply.
+    static func plausible(_ name: String) -> Bool {
+        let words = name.split(separator: " ").map(String.init)
+        guard words.allSatisfy(nameShaped), !words.contains(where: { notNames.contains($0.lowercased()) }) else { return false }
+        // A lone modern word the old dictionary lacks ("Offboarding", "Onboarding"); no one-word name ends like this.
+        if words.count == 1, name.count > 6, ["ing", "tion", "ment", "ness"].contains(where: { name.lowercased().hasSuffix($0) }) { return false }
+        let common = words.allSatisfy { w in
+            let l = w.lowercased()
+            return Dict.words.contains(l) || (l.hasSuffix("s") && Dict.words.contains(String(l.dropLast())))
+                || (l.hasSuffix("es") && Dict.words.contains(String(l.dropLast(2))))
+        }
+        return !common || words.contains(where: { Dict.firstNames.contains($0) })
+    }
+
+    private static func nameShaped(_ w: String) -> Bool {
+        if w.hasSuffix("'s") || w.hasSuffix("’s") { return false }   // "Laura's Loom Notetaker"
+        return w.wholeMatch(of: /\p{Lu}\p{Ll}+(?:['’-]\p{Lu}?\p{Ll}+)*/) != nil
+            || w.wholeMatch(of: /(?:Mc|Mac|De|Di|Da|La|Le|Van|Von|O['’])\p{Lu}\p{Ll}+/) != nil
+            || w.wholeMatch(of: /\p{Lu}\.?|Jr\.|Sr\./) != nil
+    }
+
+    private static let notNames: Set<String> = [
+        "google", "chrome", "gmail", "gemini", "loom", "studio", "manager", "password", "dashboard", "hub", "workspace",
+        "ventures", "solutions", "bookmarks", "inc", "llc", "app", "tab", "notet",
+    ]
+
+    /// Lowercase everyday words and capitalised first names, read once.
+    private enum Dict {
+        static let words: Set<String> = lines("/usr/share/dict/web2").reduce(into: []) { s, w in
+            if w.first?.isLowercase == true { s.insert(w) }
+        }
+        static let firstNames = Set(lines("/usr/share/dict/propernames"))
+        private static func lines(_ path: String) -> [String] {
+            ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+        }
     }
 
     /// One line of on-screen text → the name it is, or nil (the rules above, minus the cross-line ones).
