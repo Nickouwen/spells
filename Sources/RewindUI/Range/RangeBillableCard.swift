@@ -27,7 +27,7 @@ struct RangeBillableCard: View {
                             Text("\(ExportPeriodData.hours(data.invoiceHundredths(project: l.id))) h").textRole(.body)
                                 .help("\(Fmt.duration(ms: l.ms)) exact")
                         }
-                        RangeShareBar(fraction: Double(l.ms) / Double(top), fill: i == 0 ? Theme.ink : Theme.inkSecondary)
+                        RangeShareBar(fraction: Double(l.ms) / Double(top), fill: Theme.inkTertiary)   // a full-ink top bar read as a divider (as in Day's lists)
                     }
                 }
                 if lines.count > 6 {

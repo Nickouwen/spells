@@ -14,11 +14,9 @@ struct SettingsClassificationTab: View {
         let v = values ?? model.jevSettings
         SettingsPage {
             SettingsSection("Jev", detail: "Windows no rule matches are classified by TypeSafe's Jev model. Each kind of page is asked about once and cached. Rules and your edits always win; private windows and excluded apps are never sent.") {
-                Toggle("Classify unmatched windows with Jev", isOn: Binding(get: { v.enabled }, set: { on in
+                SettingsToggleRow("Classify unmatched windows with Jev", isOn: Binding(get: { v.enabled }, set: { on in
                     update(JevSettings.enabledKey, on ? "1" : "0") { $0.enabled = on }
                 }))
-                .toggleStyle(.switch)
-                .textRole(.body)
                 SettingsDivider()
                 HStack {
                     Text("Minimum confidence").textRole(.body)
@@ -33,11 +31,9 @@ struct SettingsClassificationTab: View {
                 }
                 SettingsDivider()
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                    Toggle("Send page titles", isOn: Binding(get: { v.sendTitles }, set: { on in
+                    SettingsToggleRow("Send page titles", isOn: Binding(get: { v.sendTitles }, set: { on in
                         update(JevSettings.sendTitlesKey, on ? "1" : "0") { $0.sendTitles = on }
                     }))
-                    .toggleStyle(.switch)
-                    .textRole(.body)
                     Text("Off: only the app, site and path template are sent (never query strings).")
                         .textRole(.label, Theme.inkSecondary)
                 }
@@ -51,7 +47,6 @@ struct SettingsClassificationTab: View {
                     Spacer()
                     Button("Clear Cache") { Task { await model.clearJevCache(); await reload() } }
                         .buttonStyle(RewindButtonStyle())
-                        .settingsDimsWhenDisabled()
                         .disabled(stats.count == 0)
                 }
             }
@@ -85,7 +80,6 @@ struct SettingsClassificationTab: View {
                 Task { await model.save(rule); await reload() }
             }
             .buttonStyle(RewindButtonStyle())
-            .settingsDimsWhenDisabled()
             .disabled(category == nil)
         }
     }

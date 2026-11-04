@@ -25,6 +25,8 @@ struct SpellsApp: App {
 /// The Modules section: installed and catalog modules with their actions.
 struct LauncherView: View {
     let model: LauncherModel
+    /// The module a Remove… click asked about, until the dialog answers.
+    @State private var removing: InstalledModule?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,6 +48,14 @@ struct LauncherView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.canvas)
         .tint(Theme.ink)
+        .confirmationDialog("Remove \(removing?.name ?? "this module")?",
+                            isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+                            presenting: removing) { m in
+            Button("Remove", role: .destructive) { model.remove(m); removing = nil }
+            Button("Cancel", role: .cancel) { removing = nil }
+        } message: { m in
+            Text("\(m.name) is moved to the Trash. Its data and settings stay, so reinstalling picks up where it left off.")
+        }
     }
 
     private var footer: some View {
@@ -86,14 +96,25 @@ struct LauncherView: View {
                         ProgressView().controlSize(.small)
                         Text(busy).textRole(.label, Theme.inkSecondary)
                     } else if let m = r.installed {
-                        Text(m.running ? "Running" : "Not running").textRole(.label, m.running ? Theme.inkSecondary : Theme.inkTertiary)
+                        if m.running {
+                            HStack(spacing: Theme.Space.xs + Theme.Space.xxs) {
+                                LiveDot()
+                                Text("Running").textRole(.label, Theme.inkSecondary)
+                            }
+                        } else {
+                            Text("Not running").textRole(.label, Theme.inkTertiary)
+                        }
                     } else {
                         Text("Not installed").textRole(.label, Theme.inkTertiary)
                     }
                 }
                 Text(r.summary).textRole(.body, Theme.inkSecondary).fixedSize(horizontal: false, vertical: true)
                 if let e = model.errors[r.id] {
-                    Text(e).textRole(.label, Theme.inkSecondary).fixedSize(horizontal: false, vertical: true)
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs + Theme.Space.xxs) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.StateLayer.warn)
+                        Text(e).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .textRole(.label, Theme.inkSecondary)
                 }
                 HStack(spacing: Theme.Space.s) {
                     if let m = r.installed, m.loginItem {
@@ -101,18 +122,22 @@ struct LauncherView: View {
                             .toggleStyle(.switch).textRole(.label)
                     }
                     Spacer()
+                    // Filled only for what you can act on (Update, Install); Open/Settings… outlined, Quit and
+                    // Remove quiet. A stopped app's Start and Open both launch it, so it shows just Open.
                     if let m = r.installed {
-                        Button("Remove") { model.remove(m) }.buttonStyle(RewindButtonStyle())
-                        if let u = r.update { Button("Update") { model.install(u) }.buttonStyle(RewindButtonStyle()) }
                         if m.running {
-                            Button("Quit") { model.quit(m) }.buttonStyle(RewindButtonStyle())
-                        } else {
+                            Button("Quit") { model.quit(m) }.buttonStyle(QuietButtonStyle())
+                        } else if m.loginItem {
                             Button("Start") { model.open(m) }.buttonStyle(RewindButtonStyle())
                         }
                         Button(m.loginItem ? "Settings…" : "Open") { m.loginItem ? model.settings(m) : model.open(m) }
                             .buttonStyle(RewindButtonStyle())
+                        if let u = r.update {
+                            Button("Update") { model.install(u) }.buttonStyle(PrimaryButtonStyle())
+                        }
+                        Button("Remove…") { removing = m }.buttonStyle(QuietButtonStyle())   // uninstalls: confirm first
                     } else if let a = r.available {
-                        Button("Install") { model.install(a) }.buttonStyle(RewindButtonStyle())
+                        Button("Install") { model.install(a) }.buttonStyle(PrimaryButtonStyle())
                     }
                 }
                 .disabled(busy != nil)
@@ -120,5 +145,12 @@ struct LauncherView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card()
+    }
+}
+
+/// The 7 pt "running" dot, `live`. Static: nothing on the page ticks.
+private struct LiveDot: View {
+    var body: some View {
+        Circle().fill(Theme.StateLayer.live).frame(width: 7, height: 7).accessibilityHidden(true)
     }
 }

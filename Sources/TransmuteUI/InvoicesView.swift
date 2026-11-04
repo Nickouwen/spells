@@ -30,7 +30,7 @@ public struct InvoicesView: View {
                         issued
                     }
                     .padding(Theme.Space.gutter)
-                    .frame(maxWidth: 820, alignment: .leading)
+                    .frame(maxWidth: Theme.Space.readable, alignment: .leading)
                 }
             }
         }
@@ -46,22 +46,25 @@ public struct InvoicesView: View {
         }
     }
 
+    /// Title left, controls right, as Rewind's Day/Week and Ward's Audit (the picker sat above the title).
     private var periodPicker: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            HStack(spacing: Theme.Space.m) {
+        VStack(alignment: .trailing, spacing: Theme.Space.s) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.m) {
+                Text(Invoice.periodTitle(model.period)).textRole(.title)
+                Spacer()
+                if model.loading, model.preview != nil { ProgressView().controlSize(.small) }   // first load: the card's placeholder spins
                 Picker("Period", selection: $model.preset) {
                     ForEach(InvoicePreset.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
-                if model.preset == .custom {
+            }
+            if model.preset == .custom {
+                HStack(spacing: Theme.Space.s) {
                     DatePicker("From", selection: dateBinding(\.customFrom), displayedComponents: .date).labelsHidden()
                     Text("to").textRole(.label, Theme.inkSecondary)
                     DatePicker("Through", selection: dateBinding(\.customThrough), displayedComponents: .date).labelsHidden()
                 }
-                Spacer()
-                if model.loading { ProgressView().controlSize(.small) }
             }
-            Text(Invoice.periodTitle(model.period)).textRole(.title)
         }
     }
 
@@ -113,6 +116,7 @@ public struct InvoicesView: View {
                     Spacer()
                     Text("Total").textRole(.label, Theme.inkSecondary)
                     Text(inv.amount).textRole(.metric).frame(minWidth: 100, alignment: .trailing)
+                        .accessibilityLabel("Total \(inv.amount)")
                 }
                 .padding(.top, Theme.Space.l)
                 HStack(spacing: Theme.Space.s) {
@@ -124,13 +128,21 @@ public struct InvoicesView: View {
                         Text(error).textRole(.label, Theme.StateLayer.distraction).lineLimit(2)
                     }
                     Spacer()
-                    Button("Make PDF") { model.issue() }.buttonStyle(RewindButtonStyle()).disabled(inv.days.isEmpty || model.loading)
+                    Button("Make PDF") { model.issue() }.buttonStyle(PrimaryButtonStyle()).disabled(inv.days.isEmpty || model.loading)
                 }
                 .padding(.top, Theme.Space.l)
             }
             .card()
         } else if let error = model.error {
             Text(error).textRole(.body, Theme.StateLayer.distraction).card()
+        } else {
+            // Pricing the period: hold the card's place instead of a lone spinner at the far edge.
+            HStack(spacing: Theme.Space.s) {
+                ProgressView().controlSize(.small)
+                Text("Pricing \(Invoice.periodTitle(model.period))…").textRole(.body, Theme.inkSecondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 120)
+            .card()
         }
     }
 
@@ -142,8 +154,10 @@ public struct InvoicesView: View {
                 Button("Show Folder") { model.revealFolder() }.buttonStyle(RewindButtonStyle())
             }
             if model.issued.isEmpty {
-                Text("Nothing yet. Each PDF you make lands in \(model.settings.folderURL.path(percentEncoded: false)) and is listed here.")
-                    .textRole(.body, Theme.inkTertiary)
+                // The folder by name; the full path is one click away (Show Folder) and in the tooltip.
+                Text("Nothing issued yet. Each PDF you make is saved to “\(model.settings.folderURL.lastPathComponent)” and listed here.")
+                    .textRole(.body, Theme.inkSecondary)
+                    .help(model.settings.folderURL.path(percentEncoded: false))
             } else {
                 VStack(spacing: 0) {
                     ForEach(model.issued) { e in

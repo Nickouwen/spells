@@ -264,7 +264,8 @@ struct DayTimelineCanvas: View {
             guard r.width > 2 else { return }
             let p = Path(roundedRect: r, cornerRadius: Theme.Radius.block, style: .continuous)
             ctx.fill(p, with: .style(Theme.surface))
-            ctx.stroke(p, with: .style(Theme.StateLayer.distraction),
+            // A pattern, not a hue (like idle's hatch): red here sat beside red categories in the same chart.
+            ctx.stroke(p, with: .style(Theme.inkSecondary),
                        style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
             drawLabels(&ctx, rect: r, title: "Not tracking", detail: Fmt.duration(ms: item.durationMs),
                        titleStyle: Theme.inkSecondary, inset: Theme.Space.s)
@@ -275,7 +276,13 @@ struct DayTimelineCanvas: View {
         case .active:
             let style = TimelineBlockStyle(slot: item.slot)
             if rect.width < 6 {
-                ctx.fill(Path(roundedRect: rect, cornerRadius: min(1.5, rect.width / 2)), with: .style(style.edge))
+                // Slivers: a short, half-strength tick at the lane's foot. Full-height saturated stripes made a
+                // run of short switches read as a barcode that outshouted the labelled blocks.
+                var c = ctx
+                c.opacity = 0.55
+                let h = max(rect.height * 0.4, 6)
+                c.fill(Path(roundedRect: CGRect(x: rect.minX, y: rect.maxY - h, width: rect.width, height: h),
+                            cornerRadius: min(1.5, rect.width / 2)), with: .style(style.edge))
                 return
             }
             style.draw(in: &ctx, rect: rect)
@@ -323,7 +330,7 @@ struct DayTimelineCanvas: View {
             ctx.draw(t, at: CGPoint(x: x, y: y), anchor: .topLeading)
         }
         if rect.height >= 40,
-           let d = fitted(ctx, detail, font: .system(size: 11).monospacedDigit(), style: Theme.inkSecondary,
+           let d = fitted(ctx, detail, font: TextRole.label.font, style: Theme.inkSecondary,
                           width: rect.maxX - Theme.Space.s - (rect.minX + inset), truncate: false) {
             ctx.draw(d, at: CGPoint(x: rect.minX + inset, y: rect.maxY - Theme.Space.s), anchor: .bottomLeading)
         }
@@ -342,7 +349,8 @@ struct DayTimelineCanvas: View {
             let mid = (lo + hi + 1) / 2
             if resolve(String(chars[..<mid]).trimmingCharacters(in: .whitespaces) + "…").measure(in: probe).width <= width { lo = mid } else { hi = mid - 1 }
         }
-        return lo >= 3 ? resolve(String(chars[..<lo]).trimmingCharacters(in: .whitespaces) + "…") : nil
+        // A word, or nothing: "zoom…" from three letters was noise (the edge colour and tooltip still name it).
+        return lo >= min(8, chars.count - 1) ? resolve(String(chars[..<lo]).trimmingCharacters(in: .whitespaces) + "…") : nil
     }
 
     /// Meeting marker: a stipple in the block's own hue — pattern, not a new colour.
@@ -391,9 +399,10 @@ struct DayTimelineCanvas: View {
         for run in projectRuns where run.endMs > vp.window.startMs && run.startMs < vp.endMs {
             let x0 = vp.x(run.startMs), x1 = vp.x(run.endMs)
             let r = CGRect(x: x0, y: barY, width: max(x1 - x0 - 1, 1), height: 3)
-            ctx.fill(Path(roundedRect: r, cornerRadius: 1.5), with: .style(Theme.inkDisabled))
+            ctx.fill(Path(roundedRect: r, cornerRadius: 1.5), with: .style(Theme.inkTertiary))   // inkDisabled vanished on white
+            // Whole names only: "client-…" / "operati…" fragments were noise, not labels (the run still shows).
             if r.width >= 36, let name = data.projectName(run.projectId),
-               let t = fitted(ctx, name, font: .system(size: 10, weight: .medium), style: Theme.inkTertiary, width: r.width - 2) {
+               let t = fitted(ctx, name, font: TextRole.label.font, style: Theme.inkSecondary, width: r.width - 2, truncate: false) {
                 ctx.draw(t, at: CGPoint(x: r.minX + 1, y: barY - 2), anchor: .bottomLeading)
             }
         }

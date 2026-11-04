@@ -6,7 +6,7 @@ import SwiftUI
 /// Style only — the Canvas timeline (layout, hit-testing, text) is the Day view's job.
 public struct TimelineBlockStyle: Hashable, Sendable {
     public static let edgeWidth: CGFloat = 3
-    public static let tintAlpha = 0.18
+    public static let tintAlpha = 0.24   // 0.18 left long blocks a pale wash (light) and near-black (dark)
     public static let minTextHeight: CGFloat = 14
     public static let radius = Theme.Radius.block
     /// Reserved top-right notch for item 8's "edited" glyph.
@@ -16,7 +16,7 @@ public struct TimelineBlockStyle: Hashable, Sendable {
     public static let focusBracketWidth: CGFloat = 2
     /// Idle hatch: 45°, 1 pt lines, 6 pt pitch, ink at 12 % over `surface`.
     public static let hatchPitch: CGFloat = 6
-    public static let hatchAlpha = 0.12
+    public static let hatchAlpha = 0.2   // 0.12 nearly vanished in dark mode
 
     public let edge: Swatch
     /// Opaque: the category composited at `tintAlpha` over `surface`.

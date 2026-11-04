@@ -222,7 +222,7 @@ struct DayBarList: View {
                                     .fill(Theme.Palette.swatch(slot: row.slot)).frame(width: 6, height: 6)
                             }
                             Text(row.name)
-                                .font(mono ? TextRole.label.font : (i == 0 ? TextRole.bodyEmph.font : TextRole.body.font))
+                                .font(i == 0 ? TextRole.bodyEmph.font : TextRole.body.font)   // sites in the list's own face (the SITES eyebrow separates them)
                                 .foregroundStyle(row.muted ? Theme.inkTertiary : (i == 0 ? Theme.ink : Theme.inkSecondary))
                                 .lineLimit(1).truncationMode(.middle)
                             Spacer(minLength: Theme.Space.s)
@@ -233,7 +233,7 @@ struct DayBarList: View {
                         GeometryReader { g in
                             ZStack(alignment: .leading) {
                                 Capsule().fill(Theme.surfaceRaised)
-                                Capsule().fill(row.muted ? Theme.inkDisabled : (i == 0 ? Theme.ink : Theme.inkTertiary))
+                                Capsule().fill(row.muted ? Theme.inkDisabled : Theme.inkTertiary)   // a full-ink top bar read as a divider
                                     .frame(width: max(2, g.size.width * Double(row.ms) / maxMs))
                             }
                         }
@@ -336,7 +336,7 @@ struct DayQualityMeter: View {
         let lit = Int((share * 5).rounded())
         HStack(spacing: 2) {
             ForEach(0..<5, id: \.self) { i in
-                RoundedRectangle(cornerRadius: 1).fill(i < lit ? Theme.ink : Theme.surfaceRaised).frame(width: 3, height: 8)
+                RoundedRectangle(cornerRadius: 1).fill(i < lit ? Theme.inkTertiary : Theme.surfaceRaised).frame(width: 3, height: 8)   // near-always 5/5: quiet
             }
         }
         .help("\(Fmt.percent(share)) productive")

@@ -93,12 +93,10 @@ struct RangeSegmented<T: Hashable & Identifiable>: View {
 struct RangeEditedMark: View {
     let deltaMs: Int64
     var body: some View {
+        // A bare tertiary mark: a boxed chip after every row competed with the row's own figures.
         Text(verbatim: "±")
-            .textRole(.label, Theme.inkSecondary)
-            .padding(.horizontal, Theme.Space.xs)
+            .textRole(.label, Theme.inkTertiary)
             .frame(height: 16)
-            .overlay(RoundedRectangle(cornerRadius: Theme.Space.xs, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: 1))
             .help("Adjusted \(RangeEditedMark.signed(deltaMs)) vs raw tracker record")
             .accessibilityLabel("Edited, \(RangeEditedMark.signed(deltaMs)) versus raw")
     }

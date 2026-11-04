@@ -26,25 +26,22 @@ public struct ScrySettingsView: View {
     public var body: some View {
         SettingsPage {
             SettingsSection("Recording", detail: "When a call app takes the mic, Scry offers to record. After the call it transcribes, summarises and writes a Markdown note. Nothing joins the call.") {
-                Toggle("Offer to record when a call starts", isOn: Binding(get: { saved.autoOffer }, set: { v in
+                SettingsToggleRow("Offer to record when a call starts", isOn: Binding(get: { saved.autoOffer }, set: { v in
                     var s = saved; s.autoOffer = v; persist(s)
                 }))
-                .toggleStyle(.switch).textRole(.body)
                 SettingsDivider()
-                Toggle("Record calls automatically (no offer)", isOn: Binding(get: { saved.autoRecord }, set: { v in
+                SettingsToggleRow("Record calls automatically (no offer)", isOn: Binding(get: { saved.autoRecord }, set: { v in
                     var s = saved; s.autoRecord = v; persist(s)
                 }))
-                .toggleStyle(.switch).textRole(.body)
                 SettingsDivider()
-                Toggle("Live transcript and \u{201C}What did I miss?\u{201D}", isOn: Binding(get: { saved.live }, set: { v in
+                SettingsToggleRow("Live transcript and \u{201C}What did I miss?\u{201D}", isOn: Binding(get: { saved.live }, set: { v in
                     var s = saved; s.live = v; persist(s)
                 }))
-                .toggleStyle(.switch).textRole(.body)
                 SettingsDivider()
                 HStack(spacing: Theme.Space.s) {
                     VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                         Text("Screen & System Audio Recording").textRole(.body)
-                        Text("Scry needs it to hear the other side of the call.").textRole(.label, Theme.inkSecondary)
+                        Text("Scry needs it to hear the other side of the call.").textRole(.detail)
                     }
                     Spacer()
                     Button("Open System Settings") { openURL(Self.screenRecordingPane) }.buttonStyle(RewindButtonStyle())
@@ -54,13 +51,13 @@ public struct ScrySettingsView: View {
                 HStack(spacing: Theme.Space.s) {
                     Text("Notes folder").textRole(.body)
                     Spacer()
-                    TextField(ScrySettings.defaultRoot, text: $root).textFieldStyle(.roundedBorder).frame(width: 240)
+                    TextField(ScrySettings.defaultRoot, text: $root).textFieldStyle(.roundedBorder).font(TextRole.mono.font).frame(width: 240)
                     Button("Choose…") { chooseFolder() }.buttonStyle(RewindButtonStyle())
                 }
                 let r = root.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !r.isEmpty, !r.hasPrefix("/"), !r.hasPrefix("~") {
                     Text("Use a full path (starting with / or ~). A relative one falls back to \(ScrySettings.defaultRoot).")
-                        .textRole(.label, Theme.inkTertiary)
+                        .textRole(.detail)
                 }
                 SettingsDivider()
                 HStack(spacing: Theme.Space.s) {
@@ -72,17 +69,11 @@ public struct ScrySettingsView: View {
                 editor("Never offer for these apps (bundle IDs, one per line)", $never, lines: 3)
                 SettingsDivider()
                 HStack(spacing: Theme.Space.s) {
-                    Text("claude CLI").textRole(.body)
+                    Text("Claude CLI").textRole(.body)
                     Spacer()
-                    TextField(SpellsClaude.defaultPath, text: $claudePath).textFieldStyle(.roundedBorder).frame(width: 240)
+                    TextField(SpellsClaude.defaultPath, text: $claudePath).textFieldStyle(.roundedBorder).font(TextRole.mono.font).frame(width: 240)
                 }
-                HStack {
-                    Spacer()
-                    Button("Save") { persist(edited); saveClaudePath() }
-                        .buttonStyle(RewindButtonStyle())
-                        .disabled(edited == saved && claudePath == savedClaudePath)
-                        .settingsDimsWhenDisabled()
-                }
+                SettingsSaveRow(dirty: edited != saved || claudePath != savedClaudePath) { persist(edited); saveClaudePath() }
             }
             SettingsSection("ElevenLabs", detail: "Scribe transcribes the recording. The key is kept in the Keychain (or ~/Library/Application Support/Spells/.env).") {
                 HStack(spacing: Theme.Space.s) {
@@ -95,7 +86,6 @@ public struct ScrySettingsView: View {
                     }
                     .buttonStyle(RewindButtonStyle())
                     .disabled(key.isEmpty)
-                    .settingsDimsWhenDisabled()
                 }
             }
             if let error { Text(error).textRole(.label, Theme.StateLayer.distraction) }

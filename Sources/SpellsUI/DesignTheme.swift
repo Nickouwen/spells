@@ -6,13 +6,19 @@ public enum Theme {
     // MARK: Surfaces & ink (monochrome base)
 
     public static let canvas        = Swatch(light: 0xFAFAF9, dark: 0x0E0E0F)
-    public static let surface       = Swatch(light: 0xFFFFFF, dark: 0x171719)
-    public static let surfaceRaised = Swatch(light: 0xF2F2F0, dark: 0x232326)
-    /// 0.5 pt borders and gridlines. Decorative, exempt from contrast.
-    public static let hairline      = Swatch(light: 0xE2E2DE, dark: 0x2E2E32)
+    /// Dark cards sit visibly above `canvas` (council 2026-11-04: 0x171719 read as one field with faint seams).
+    public static let surface       = Swatch(light: 0xFFFFFF, dark: 0x1B1B1E)   // lighter breaks 3:1 for Red marks
+    public static let surfaceRaised = Swatch(light: 0xF2F2F0, dark: 0x2A2A2E)
+    /// 0.5 pt borders and gridlines. Decorative, exempt from contrast — but it is the card edge in dark
+    /// mode, so it stays visible there.
+    public static let hairline      = Swatch(light: 0xE2E2DE, dark: 0x3A3A40)
     public static let ink           = Swatch(light: 0x111113, dark: 0xF5F5F4)
-    public static let inkSecondary  = Swatch(light: 0x5C5C61, dark: 0xA1A1A8)
+    /// Three distinct steps: secondary sits well clear of tertiary (they read as one before 2026-11-04).
+    public static let inkSecondary  = Swatch(light: 0x48484D, dark: 0xB8B8BE)
     public static let inkTertiary   = Swatch(light: 0x6E6E73, dark: 0x92929A)
+    /// Outlined buttons' edge: full ink made every Open/Settings… the darkest thing on its card; the
+    /// label stays ink, so the control still reads.
+    public static let controlEdge   = Swatch(light: 0xA0A0A6, dark: 0x5E5E65)
     /// Disabled controls and non-text marks only — never body text.
     public static let inkDisabled   = Swatch(light: 0xA8A8AD, dark: 0x5A5A60)
 
@@ -24,8 +30,12 @@ public enum Theme {
         ("canvas", canvas), ("surface", surface), ("surfaceRaised", surfaceRaised),
     ]
 
-    /// Monochrome heat ramp: ink at 6 → 90 % over `surface`, six opaque steps.
-    public static let heat: [Swatch] = [0.06, 0.20, 0.36, 0.52, 0.70, 0.90].map { ink.over(surface, alpha: $0) }
+    /// Monochrome heat ramp: ink at 10 → 72 % over `surface`, six opaque steps. The first step must show
+    /// against an empty cell; the last must not outweigh the hero number.
+    /// Dark mode caps lower: near-white top cells were the brightest block on the Week page.
+    public static let heat: [Swatch] = zip([0.10, 0.20, 0.32, 0.45, 0.58, 0.72], [0.10, 0.17, 0.25, 0.33, 0.42, 0.52]).map { l, d in
+        Swatch(light: ink.over(surface, alpha: l).light, dark: ink.over(surface, alpha: d).dark)
+    }
 
     // MARK: State layer — how it went. Never in the same chart as category colours.
 
@@ -39,6 +49,8 @@ public enum Theme {
         /// Tracker health dot only.
         public static let live        = breakTime
         public static let warn        = Swatch(light: 0xB45309, dark: 0xF2B134)
+        /// A capture in progress (Scry recording, Incant's error mark). Same hue as `distraction`, its own name.
+        public static let recording   = distraction
 
         /// Usable as text on `surface`/`canvas` (tested for AA).
         public static let all: [(name: String, swatch: Swatch)] = [
@@ -54,14 +66,14 @@ public enum Theme {
         /// each slot's hue (±14°). Every fill is ≥ 3:1 against `canvas` and `surface`.
         public static let slots: [(name: String, swatch: Swatch)] = [
             ("Blue",     Swatch(light: 0x085ED9, dark: 0x475CD5)),
-            ("Gold",     Swatch(light: 0x836500, dark: 0xF5C231)),
+            ("Gold",     Swatch(light: 0x836500, dark: 0xD9AA2A)),
             ("Green",    Swatch(light: 0x036446, dark: 0x25A085)),
             ("Red",      Swatch(light: 0x95221F, dark: 0xC91D2E)),
             ("Magenta",  Swatch(light: 0xB5249F, dark: 0x9C478E)),
             ("Lavender", Swatch(light: 0xA76EED, dark: 0xAE83FF)),
-            ("Cyan",     Swatch(light: 0x1A9AB0, dark: 0x0FE0F6)),
+            ("Cyan",     Swatch(light: 0x1A9AB0, dark: 0x12C2D6)),
             ("Olive",    Swatch(light: 0x607846, dark: 0xAFCC87)),
-            ("Rose",     Swatch(light: 0xE62B64, dark: 0xFF6597)),
+            ("Rose",     Swatch(light: 0xE62B64, dark: 0xFF6597)),   // darker collides with Uncategorized under protanopia
             ("Tan",      Swatch(light: 0xB7843D, dark: 0x9D8752)),
         ]
         public static let uncategorized = Swatch(light: 0x8E8E93, dark: 0x6E6E73)
@@ -85,6 +97,8 @@ public enum Theme {
         public static let xxs: CGFloat = 2, xs: CGFloat = 4, s: CGFloat = 8, m: CGFloat = 12
         public static let l: CGFloat = 16, xl: CGFloat = 24, xxl: CGFloat = 32, huge: CGFloat = 48
         public static let cardPadding = l, gridGap = m, sectionGap = xl, gutter = xl
+        /// Max width of document-style pages (settings, invoices, network, notes): readable line length.
+        public static let readable: CGFloat = 880
     }
 
     /// Rounded rects, never capsules. Concentric rule: inner = outer − padding.

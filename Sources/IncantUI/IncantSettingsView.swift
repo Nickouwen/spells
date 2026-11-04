@@ -43,22 +43,15 @@ public struct IncantSettingsView: View {
                     }
                 }
                 SettingsDivider()
-                HStack(spacing: Theme.Space.s) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Stream as I speak").textRole(.body)
-                        Text("Words are typed as you say them, about a second behind. Each sentence is corrected at the pause that ends it; earlier sentences are never changed.")
-                            .textRole(.label, Theme.inkSecondary)
-                    }
-                    Spacer()
-                    Toggle("Stream as I speak", isOn: Binding(get: { saved.stream }, set: { on in
-                        var s = saved; s.stream = on; persist(s, refresh: false)   // keep unsaved text edits
-                    }))
-                    .toggleStyle(.switch).labelsHidden()
-                }
+                SettingsToggleRow("Stream as I speak",
+                                  detail: "Words are typed as you say them, about a second behind. Each sentence is corrected at the pause that ends it; earlier sentences are never changed.",
+                                  isOn: Binding(get: { saved.stream }, set: { on in
+                    var s = saved; s.stream = on; persist(s, refresh: false)   // keep unsaved text edits
+                }))
             }
             SettingsSection("Correction", detail: "After you speak, a fast model applies spoken self-corrections (\"three, no, four\" → \"four\"). \"When needed\" runs it only when it hears a cue word.") {
                 HStack {
-                    Text("Correction").textRole(.body)
+                    Text("Mode").textRole(.body)
                     Spacer()
                     Picker("Correction", selection: Binding(get: { saved.mode }, set: { m in
                         var s = saved; s.mode = m; persist(s, refresh: false)   // keep unsaved text edits
@@ -70,7 +63,13 @@ public struct IncantSettingsView: View {
                     .pickerStyle(.segmented).labelsHidden().fixedSize()
                 }
                 SettingsDivider()
-                editor("Prompt", $prompt, lines: 6) { prompt = IncantSettings.defaultPrompt }
+                // The prompt is the model's internals: behind a disclosure, so the page leads with what you change often.
+                DisclosureGroup {
+                    editor("Prompt", $prompt, lines: 6) { prompt = IncantSettings.defaultPrompt }
+                        .padding(.top, Theme.Space.xs)
+                } label: {
+                    Text("Correction prompt").textRole(.body)
+                }
                 SettingsDivider()
                 editor("Cue words, one per line", $cues, lines: 4)
                 SettingsDivider()
@@ -81,13 +80,7 @@ public struct IncantSettingsView: View {
                     Spacer()
                     TextField(IncantSettings.defaultModel, text: $fixModel).textFieldStyle(.roundedBorder).frame(width: 240)
                 }
-                HStack {
-                    Spacer()
-                    Button("Save") { persist(edited) }
-                        .buttonStyle(RewindButtonStyle())
-                        .disabled(edited == saved)
-                        .settingsDimsWhenDisabled()
-                }
+                SettingsSaveRow(dirty: edited != saved) { persist(edited) }
             }
             SettingsSection("API keys", detail: "ElevenLabs Scribe transcribes; Cerebras runs the correction. Keys are kept in the Keychain (or ~/Library/Application Support/Spells/.env).") {
                 keyRow("ElevenLabs API key", $key, saved: $keySaved, service: SupportKeychain.elevenLabs)
@@ -151,7 +144,6 @@ public struct IncantSettingsView: View {
             }
             .buttonStyle(RewindButtonStyle())
             .disabled(text.wrappedValue.isEmpty)
-            .settingsDimsWhenDisabled()
         }
     }
 
@@ -169,6 +161,8 @@ public struct IncantSettingsView: View {
                 .padding(Theme.Space.xs)
                 .frame(height: CGFloat(lines) * 17 + 2 * Theme.Space.xs)   // ponytail: ~17 pt per body line
                 .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                    .strokeBorder(Theme.hairline, lineWidth: Theme.Stroke.hairline))   // the well's edge, or it melts into the card
                 .accessibilityLabel(title)
         }
     }

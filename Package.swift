@@ -65,5 +65,9 @@ let package = Package(
         .testTarget(name: "ScryCoreTests", dependencies: ["ScryCore", "ScryPipeline"]),
         .testTarget(name: "TransmuteCoreTests", dependencies: ["TransmuteCore"]),
         .testTarget(name: "WardCoreTests", dependencies: ["WardCore"]),
+        // Screenshots of every window and overlay against demo data; runs only with SPELLS_RENDER_DIR set.
+        .testTarget(name: "SpellsRenderTests", dependencies: ["Spells", "Incant", "Scry", "RewindCore", "RewindUI",
+                                                              "ScryCore", "SpellsKit", "SpellsUI", "WardUI", "TransmuteUI",
+                                                              "IncantUI", "ScryUI"]),
     ]
 )

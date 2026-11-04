@@ -149,7 +149,7 @@ struct WeekChart: View {
             let future = data.isFuture(d)
             VStack(spacing: 1) {
                 Text("\(d.rangeShortLabel.prefix(3)) \(d.day)")
-                    .textRole(.label, future || d == data.today ? (future ? Theme.inkDisabled : Theme.ink) : Theme.inkTertiary)
+                    .textRole(.label, future || d == data.today ? (future ? Theme.inkTertiary : Theme.ink) : Theme.inkSecondary)
                 HStack(spacing: Theme.Space.xxs) {
                     if data.hasGap(d) {
                         Image(systemName: "exclamationmark.triangle.fill").font(TextRole.micro.font).imageScale(.small)

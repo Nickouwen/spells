@@ -23,7 +23,7 @@ struct WeekHeatmap: View {
                     let d = dates[r]
                     HStack(spacing: Theme.Space.xxs + 1) {
                         Text("\(d.rangeShortLabel.prefix(3)) \(d.day)")
-                            .textRole(.label, data.isFuture(d) ? Theme.inkDisabled : Theme.inkTertiary)
+                            .textRole(.label, data.isFuture(d) ? Theme.inkTertiary : Theme.inkSecondary)
                             .frame(width: Self.labelWidth, alignment: .leading)
                         ForEach(0..<24, id: \.self) { c in
                             RoundedRectangle(cornerRadius: 2, style: .continuous)

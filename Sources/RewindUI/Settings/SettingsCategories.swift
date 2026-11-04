@@ -34,13 +34,14 @@ struct SettingsCategoryRow: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.m) {
-            SettingsSlotPicker(slot: category.colorSlot) { slot in var c = category; c.colorSlot = slot; onSave(c) }
-                .frame(width: 104, alignment: .leading)
+            // The category's name leads; its colour follows as a setting of it.
             TextField("Name", text: $name)
                 .textFieldStyle(.plain)
                 .textRole(.body)
                 .onSubmit(commitName)
                 .frame(maxWidth: .infinity)
+            SettingsSlotPicker(slot: category.colorSlot) { slot in var c = category; c.colorSlot = slot; onSave(c) }
+                .frame(width: 136, alignment: .leading)   // fits "Uncategorized ⌄"
             Picker("Level", selection: Binding(get: { category.level },
                                                set: { var c = category; c.level = $0; onSave(c) })) {
                 Text("Productive").tag(Productivity.productive)

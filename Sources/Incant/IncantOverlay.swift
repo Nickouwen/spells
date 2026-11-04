@@ -113,6 +113,7 @@ import SpellsKit
         pulse?.invalidate(); pulse = nil
         guard on else { if view.mode == .fixing { view.mode = .listening }; return }
         view.mode = .fixing
+        guard !reduceMotion else { view.phase = 0.25; return }   // Reduce Motion: three still dots
         pulse = Timer.scheduledTimer(withTimeInterval: 1 / 30, repeats: true) { [weak view] _ in
             MainActor.assumeIsolated { view?.phase += 1 / 30 }
         }
@@ -219,8 +220,9 @@ final class IncantIndicatorView: NSView {
                 NSBezierPath(ovalIn: NSRect(x: r.midX - 13 + CGFloat(i) * 10, y: midY - 2.5, width: 5, height: 5)).fill()
             }
         case .error:
+            // The one coloured mark: the error reads at a glance (Theme.StateLayer.recording, dark value).
             let s = NSAttributedString(string: "!", attributes: [.font: NSFont.systemFont(ofSize: 15, weight: .bold),
-                                                                  .foregroundColor: NSColor.white])
+                                                                  .foregroundColor: NSColor(srgbRed: 1, green: 0x6B / 255, blue: 0x4A / 255, alpha: 1)])
             let sz = s.size()
             s.draw(at: NSPoint(x: r.midX - sz.width / 2, y: midY - sz.height / 2))
         }

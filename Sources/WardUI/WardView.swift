@@ -22,7 +22,7 @@ public struct WardView: View {
                 audit
             }
             .padding(Theme.Space.gutter)
-            .frame(maxWidth: 900, alignment: .leading)
+            .frame(maxWidth: Theme.Space.readable, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.canvas)
@@ -41,7 +41,7 @@ public struct WardView: View {
         switch model.status.daemon {
         case .loaded(.some): Theme.StateLayer.live
         case .loaded(nil), .stopped: Theme.StateLayer.warn
-        case .notInstalled: Theme.inkTertiary
+        case .notInstalled: model.status.toolsInstalled ? Theme.inkTertiary : Theme.StateLayer.warn   // same warn as the sentence beside it
         }
     }
 
@@ -55,13 +55,19 @@ public struct WardView: View {
                     ProgressView().controlSize(.small)
                     Text(busy).textRole(.label, Theme.inkSecondary)
                 } else if !model.status.toolsInstalled {
-                    Text("Needs Wireshark's dumpcap and tshark (brew install wireshark)").textRole(.label, Theme.StateLayer.warn)
+                    EmptyView()   // the reason sits under the title, below
                 } else if model.status.installed {
                     Button("Remove…") { removing = true }.buttonStyle(RewindButtonStyle())
                 } else {
                     Button("Install…") { model.install() }.buttonStyle(RewindButtonStyle())
                 }
             }
+            // Status and its reason together; the capture facts only once there's a capture to describe
+            // (a full fact grid under "Not installed" read as a healthy capture).
+            if !model.status.toolsInstalled {
+                Text("Needs Wireshark's dumpcap and tshark: brew install wireshark").textRole(.body, Theme.StateLayer.warn)
+            }
+            if model.status.toolsInstalled || model.snapshot != nil {
             Grid(alignment: .leading, horizontalSpacing: Theme.Space.l, verticalSpacing: Theme.Space.xs) {
                 fact("Interface", Ward.interface)
                 fact("Ring", "\(Ward.files) files × \(Ward.fileKiB / 1024) MiB (\(bytes(Ward.ringBytes))), oldest dropped first")
@@ -73,9 +79,16 @@ public struct WardView: View {
                     }
                     fact("Last read", Self.relative(s.takenAt) + (s.window.isEmpty ? ", everything kept" : ", " + windowTitle(s.window)))
                 }
-                fact("Folder", Ward.captureDir + " (root only)")
+                fact("Folder", Ward.captureDir + " (root only)", mono: true)
             }
-            Text(Ward.whatItKeeps).textRole(.label, Theme.inkTertiary).fixedSize(horizontal: false, vertical: true)
+            }
+            // The mechanics are reference, not the page's lead: one line until asked.
+            DisclosureGroup {
+                Text(Ward.whatItKeeps).textRole(.detail).fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, Theme.Space.xs)
+            } label: {
+                Text("What the capture keeps").textRole(.label, Theme.inkSecondary)
+            }
             if let error = model.error {
                 Text(error).textRole(.label, Theme.StateLayer.distraction).lineLimit(3)
             }
@@ -83,10 +96,10 @@ public struct WardView: View {
         .card()
     }
 
-    private func fact(_ name: String, _ value: String) -> some View {
+    private func fact(_ name: String, _ value: String, mono: Bool = false) -> some View {
         GridRow {
             Text(name).textRole(.label, Theme.inkSecondary).gridColumnAlignment(.trailing)
-            Text(value).textRole(.body).lineLimit(2)
+            Text(value).textRole(mono ? .mono : .body).lineLimit(2)
         }
     }
 
@@ -100,7 +113,7 @@ public struct WardView: View {
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
                 Button("Read Captures…") { model.takeSnapshot() }
-                    .buttonStyle(RewindButtonStyle())
+                    .buttonStyle(PrimaryButtonStyle())
                     .disabled(model.busy != nil || !model.status.installed || !model.status.toolsInstalled)
                     .help("Runs tshark over the capture files as root (asks for your password) and lists what the Mac connected to.")
             }
@@ -117,6 +130,9 @@ public struct WardView: View {
 
     private func ioc(_ s: WardSnapshot) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
+            // Scope first: a past read's "no traffic" must not read as a live assurance.
+            Text("Last audit " + Self.relative(s.takenAt) + (s.window.isEmpty ? " · everything kept" : " · " + windowTitle(s.window)))
+                .textRole(.label, Theme.inkSecondary)   // a sentence, not an eyebrow
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: s.iocHits.isEmpty ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
                     .foregroundStyle(s.iocHits.isEmpty ? Theme.StateLayer.live : Theme.StateLayer.distraction)
@@ -126,13 +142,14 @@ public struct WardView: View {
             }
             if !s.iocHits.isEmpty {
                 ForEach(Array(s.iocHits.prefix(20).enumerated()), id: \.offset) { _, line in
-                    Text(line).textRole(.label, Theme.inkSecondary).font(.system(.caption, design: .monospaced)).lineLimit(1)
+                    Text(line).textRole(.mono, Theme.inkSecondary).lineLimit(1)
                 }
             }
             if !s.errors.isEmpty {
                 Text(s.errors.joined(separator: " · ")).textRole(.label, Theme.StateLayer.warn).lineLimit(2)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)   // spans the column like every other card
         .card(padding: Theme.Space.m)
     }
 
@@ -151,11 +168,16 @@ public struct WardView: View {
                 Text(model.query.isEmpty ? "Nothing in this window." : "No match.").textRole(.body, Theme.inkTertiary).padding(.vertical, Theme.Space.m)
             } else {
                 VStack(spacing: 0) {
+                    HStack(spacing: Theme.Space.m) {
+                        Text("Count").textRole(.micro).frame(width: 72, alignment: .trailing)
+                        Text(model.table == .destinations ? "Destination" : model.table == .dns ? "DNS name" : "TLS server name").textRole(.micro)
+                        Spacer()
+                    }
+                    .padding(.bottom, Theme.Space.xs)
                     ForEach(model.rows) { r in
                         HStack(spacing: Theme.Space.m) {
-                            Text(r.count.formatted()).textRole(.body, Theme.inkSecondary)
-                                .font(.system(.body, design: .monospaced)).frame(width: 72, alignment: .trailing)
-                            Text(r.name).textRole(.body).font(.system(.body, design: .monospaced)).textSelection(.enabled).lineLimit(1)
+                            Text(r.count.formatted()).textRole(.body, Theme.inkSecondary).frame(width: 72, alignment: .trailing)   // tabular digits
+                            Text(r.name).textRole(.mono, Theme.ink).textSelection(.enabled).lineLimit(1)
                             Spacer()
                         }
                         .padding(.vertical, Theme.Space.xs)
@@ -197,7 +219,8 @@ public struct WardSettingsView: View {
                 SettingsDivider()
                 row("Captures", Ward.captureDir)
                 SettingsDivider()
-                row("Tools", model.status.toolsInstalled ? "\(Ward.dumpcap), tshark, capinfos" : "dumpcap / tshark missing — brew install wireshark")
+                row("Tools", model.status.toolsInstalled ? "\(Ward.dumpcap), tshark, capinfos" : "dumpcap / tshark missing — brew install wireshark",
+                    warn: !model.status.toolsInstalled)
                 HStack {
                     Spacer()
                     if model.status.installed {
@@ -218,7 +241,7 @@ public struct WardSettingsView: View {
                 SettingsDivider()
                 script(Ward.uninstallScript, "stops and removes the daemon, keeps the captures")
                 HStack {
-                    Text(model.scriptsDir.path).textRole(.label, Theme.inkTertiary).lineLimit(1).truncationMode(.middle)
+                    Text(model.scriptsDir.path).textRole(.mono, Theme.inkTertiary).lineLimit(1).truncationMode(.middle)
                     Spacer()
                     Button("Show in Finder") { model.revealScripts() }.buttonStyle(RewindButtonStyle())
                 }
@@ -230,19 +253,22 @@ public struct WardSettingsView: View {
         .onAppear { model.refreshStatus() }
     }
 
-    private func row(_ name: String, _ value: String) -> some View {
+    /// `warn`: the same warn colour the Network page uses for the same problem.
+    private func row(_ name: String, _ value: String, warn: Bool = false) -> some View {
         HStack(spacing: Theme.Space.s) {
             Text(name).textRole(.body)
             Spacer()
-            Text(value).textRole(.body, Theme.inkSecondary).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+            if warn { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.StateLayer.warn) }
+            Text(value).textRole(.body, warn ? Theme.StateLayer.warn : Theme.inkSecondary).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
         }
     }
 
+    /// Name, then what it does right under it (a description a window-width away read as a separate column).
     private func script(_ name: String, _ what: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-            Text(name).textRole(.body).font(.system(.body, design: .monospaced))
-            Spacer()
-            Text(what).textRole(.label, Theme.inkSecondary).multilineTextAlignment(.trailing)
+        VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+            Text(name).textRole(.mono, Theme.ink)
+            Text(what).textRole(.detail).fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

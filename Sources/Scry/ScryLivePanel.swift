@@ -156,6 +156,7 @@ struct ScryLiveView: View {
     var onStop: () -> Void
     var onDiscard: () -> Void
     @State private var pulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -172,13 +173,16 @@ struct ScryLiveView: View {
         .frame(minWidth: 340, minHeight: 460)
         .background(Theme.canvas)
         .tint(Theme.ink)
-        .onAppear { withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true } }
+        .onAppear {
+            // Reduce Motion: a steady dot (the recording state is also spelled out beside it).
+            if reduceMotion { pulse = true } else { withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true } }
+        }
         .onChange(of: model.notes) { _, _ in onNotesChanged() }
     }
 
     private var header: some View {
         HStack(spacing: Theme.Space.s) {
-            Circle().fill(Theme.StateLayer.distraction).frame(width: 8, height: 8).opacity(pulse ? 1 : 0.3)
+            Circle().fill(Theme.StateLayer.recording).frame(width: 8, height: 8).opacity(pulse ? 1 : 0.3)
             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                 Text("Recording").textRole(.heading)
                 Text(model.app.map { "\($0) call" } ?? "In person").textRole(.label, Theme.inkTertiary)
@@ -186,7 +190,7 @@ struct ScryLiveView: View {
             Spacer()
             LevelMeter(level: model.level)
             TimelineView(.periodic(from: model.startedAt, by: 1)) { ctx in
-                Text(Self.clock(ctx.date.timeIntervalSince(model.startedAt))).textRole(.metric)
+                Text(Self.clock(ctx.date.timeIntervalSince(model.startedAt))).textRole(.title).monospacedDigit()   // .metric out-shouted the transcript; fixed digits so it doesn't jitter
             }
         }
     }
@@ -241,11 +245,13 @@ struct ScryLiveView: View {
     private func row(speaker: String, text: String, at start: TimeInterval?, partial: Bool) -> some View {
         let you = speaker == "You"
         return HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-            Text(start.map(Self.clock) ?? "now").textRole(.mono, Theme.inkTertiary).frame(width: 40, alignment: .trailing)
-            Text(speaker).textRole(.micro, you ? Theme.ink : Theme.StateLayer.meeting)
+            Text(start.map(Self.clock) ?? "now").textRole(.label, Theme.inkTertiary).frame(width: 40, alignment: .trailing)
+            // Neutral chips: a shared hue on every other speaker carried no meaning. You = full ink.
+            Text(speaker).textRole(.micro, you ? Theme.ink : Theme.inkSecondary).lineLimit(1)
                 .padding(.horizontal, Theme.Space.xs + 2).padding(.vertical, 2)
-                .background((you ? Theme.ink : Theme.StateLayer.meeting).over(Theme.surface, alpha: 0.12),
+                .background(Theme.ink.over(Theme.surface, alpha: you ? 0.14 : 0.07),
                             in: RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
+                .frame(minWidth: 64, alignment: .leading)   // one text column whatever the name's length
             Text(text).textRole(.body, partial ? Theme.inkTertiary : Theme.ink).italic(partial)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -284,22 +290,32 @@ struct ScryLiveView: View {
         }
     }
 
+    /// The three buttons don't fit the panel's 340 pt minimum with labels: the catch-up button drops to its
+    /// sparkles icon first, so "Stop & Make Notes" always shows whole.
     private var footer: some View {
+        ViewThatFits(in: .horizontal) {
+            footerRow(compact: false)
+            footerRow(compact: true)
+        }
+    }
+
+    private func footerRow(compact: Bool) -> some View {
         HStack(spacing: Theme.Space.s) {
             Button {
                 onCatchUp()
             } label: {
                 HStack(spacing: Theme.Space.xs) {
                     if model.busy { ProgressView().controlSize(.mini) } else { Image(systemName: "sparkles") }
-                    Text("What did I miss?")
+                    if !compact { Text("What did I miss?") }
                 }
                 .lineLimit(1).fixedSize()
             }
-            .buttonStyle(RewindButtonStyle())
+            .buttonStyle(QuietButtonStyle())
+            .help("What did I miss?")
             .disabled(model.busy || model.segments.isEmpty)
-            Spacer()
-            Button(action: onDiscard) { Text("Discard").lineLimit(1).fixedSize() }.buttonStyle(RewindButtonStyle())
-            Button(action: onStop) { Text("Stop & make notes").lineLimit(1).fixedSize() }.buttonStyle(ScryFilledButtonStyle())
+            Spacer(minLength: 0)
+            Button(action: onDiscard) { Text("Discard").lineLimit(1).fixedSize() }.buttonStyle(QuietButtonStyle())
+            Button(action: onStop) { Text("Stop & Make Notes").lineLimit(1).fixedSize() }.buttonStyle(PrimaryButtonStyle())
         }
     }
 
@@ -328,17 +344,6 @@ struct LevelMeter: View {
 }
 
 /// The primary action: ink on canvas, inverted.
-struct ScryFilledButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .textRole(.bodyEmph, Theme.canvas)
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, Theme.Space.xs + Theme.Space.xxs)
-            .background(Theme.ink.opacity(configuration.isPressed ? 0.8 : 1), in: RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
-            .contentShape(Rectangle())
-    }
-}
-
 /// One continuous Scribe v2 Realtime socket (VAD commits). Audio is sent in ~100 ms chunks; chunks sent
 /// before `session_started` are queued (up to ~30 s). A dropped connection reconnects after 2 s while
 /// running, except after `quota_exceeded`, which stops it and reports through `onFatal`. Never logs text —

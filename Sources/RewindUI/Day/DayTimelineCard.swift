@@ -103,7 +103,7 @@ struct DayTimelineCard: View {
             }
             key("Not tracking") {
                 RoundedRectangle(cornerRadius: 2)
-                    .strokeBorder(Theme.StateLayer.distraction, style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+                    .strokeBorder(Theme.inkSecondary, style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
                     .frame(width: 14, height: 9)
             }
             key("Edited") {
@@ -197,7 +197,7 @@ struct DayMiniStrip: View {
                     let t = data.bounds.lowerBound + Int64(h) * 3_600_000
                     let x = full.x(t)
                     let label = ctx.resolve(Text(Fmt.clock(ms: t, timeZone: data.timeZone))
-                        .font(.system(size: 9.5, weight: .medium).monospacedDigit()).foregroundStyle(Theme.inkTertiary))
+                        .font(TextRole.label.font).foregroundStyle(Theme.inkSecondary))   // on the scale, not a 9.5 pt literal
                     let anchor: UnitPoint = h == 0 ? .topLeading : (h == 24 ? .topTrailing : .top)
                     ctx.draw(label, at: CGPoint(x: x, y: Self.stripH + 5), anchor: anchor)
                 }

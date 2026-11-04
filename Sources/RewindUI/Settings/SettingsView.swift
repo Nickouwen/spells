@@ -68,7 +68,8 @@ struct SettingsSlotPicker: View {
                 Button(Theme.Palette.slots[i].name) { onPick(i) }
             }
         } label: {
-            Text(Theme.Palette.name(slot: slot)).textRole(.label)
+            // Tertiary: the colour's name read as a second name beside the category's own.
+            Text(Theme.Palette.name(slot: slot)).textRole(.label, Theme.inkTertiary)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()

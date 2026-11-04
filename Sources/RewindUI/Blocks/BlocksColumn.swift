@@ -586,7 +586,7 @@ struct BlocksColumn: View {
         if !away, box.height >= 6 {
             let p = Path(roundedRect: box, cornerRadius: min(Theme.Radius.block, box.height / 2), style: .continuous)
             ctx.fill(p, with: .style(Theme.surface))
-            ctx.stroke(p, with: .style(Theme.StateLayer.distraction), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            ctx.stroke(p, with: .style(Theme.inkSecondary), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))   // not-tracking: a pattern, not a hue
         }
         guard label, y1 - y0 >= 16 else { return }
         let text = Text(away ? "Break" : "Not tracking").font(TextRole.label.font).foregroundStyle(Theme.inkSecondary)

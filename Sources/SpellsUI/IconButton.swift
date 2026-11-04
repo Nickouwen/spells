@@ -7,6 +7,8 @@ public struct IconButton: View {
     var disabled = false
     let action: () -> Void
 
+    @State private var hovering = false
+
     public init(symbol: String, help: String, disabled: Bool = false, action: @escaping () -> Void) {
         self.symbol = symbol; self.help = help; self.disabled = disabled; self.action = action
     }
@@ -15,11 +17,13 @@ public struct IconButton: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(disabled ? Theme.inkDisabled : Theme.ink)
+                // Quiet at rest (a column of full-ink ×s outweighed the rows); ink while hovered.
+                .foregroundStyle(disabled ? Theme.inkDisabled : (hovering ? Theme.ink : Theme.inkTertiary))
                 .frame(width: 26, height: 26)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { hovering = $0 }
         .disabled(disabled)
         .help(help)
     }

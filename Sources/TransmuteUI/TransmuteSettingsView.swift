@@ -24,7 +24,6 @@ public struct TransmuteSettingsView: View {
                 editor("Address (one line per row)", $edited.fromAddress)
                 SettingsDivider()
                 field("Email", $edited.fromEmail, prompt: "you@example.com")
-                saveRow
             }
             SettingsSection("Client", detail: "Who the invoice bills.") {
                 field("Name", $edited.clientName, prompt: "Client or company")
@@ -32,7 +31,6 @@ public struct TransmuteSettingsView: View {
                 editor("Address (one line per row)", $edited.clientAddress)
                 SettingsDivider()
                 field("Email", $edited.clientEmail, prompt: "billing@client.com")
-                saveRow
             }
             SettingsSection("Billing", detail: "Hours come from Rewind's database, rounded to 0.01 h per day like its timesheet.") {
                 HStack(spacing: Theme.Space.s) {
@@ -55,11 +53,11 @@ public struct TransmuteSettingsView: View {
                         }
                         .labelsHidden().fixedSize()
                     }
-                    Text(edited.basis.detail).textRole(.label, Theme.inkSecondary)
+                    Text(edited.basis.detail).textRole(.detail).fixedSize(horizontal: false, vertical: true)
                 }
                 SettingsDivider()
                 field("Description", $edited.description, prompt: "For development {period}")
-                Text("{period} becomes the dates, e.g. \u{201C}October 1–15, 2026\u{201D}.").textRole(.label, Theme.inkTertiary)
+                Text("{period} becomes the dates, e.g. \u{201C}October 1–15, 2026\u{201D}.").textRole(.detail)
                 SettingsDivider()
                 field("Terms", $edited.terms, prompt: "Due on receipt.")
                 SettingsDivider()
@@ -71,17 +69,17 @@ public struct TransmuteSettingsView: View {
                         .onChange(of: next) { _, v in edited.nextNumber = max(1, Int(v) ?? saved.nextNumber) }
                     Text("next: \(edited.number)").textRole(.label, Theme.inkTertiary)
                 }
-                saveRow
             }
             SettingsSection("Files") {
                 HStack(spacing: Theme.Space.s) {
                     Text("Invoices folder").textRole(.body)
                     Spacer()
-                    TextField(InvoiceSettings.defaultFolder, text: $edited.folder).textFieldStyle(.roundedBorder).frame(width: 240)
+                    TextField(InvoiceSettings.defaultFolder, text: $edited.folder).textFieldStyle(.roundedBorder).font(TextRole.mono.font).frame(width: 240)
                     Button("Choose…") { chooseFolder() }.buttonStyle(RewindButtonStyle())
                 }
-                saveRow
             }
+            // One page-wide save: the per-card Saves each saved every card, which their placement hid.
+            saveRow
             if let error { Text(error).textRole(.label, Theme.StateLayer.distraction) }
         }
         .frame(minWidth: 560, minHeight: 400)
@@ -104,20 +102,13 @@ public struct TransmuteSettingsView: View {
                 .font(.body)
                 .frame(height: 56)
                 .padding(Theme.Space.xs)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
+                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))   // a visible well on the white card
                 .overlay(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous).strokeBorder(Theme.hairline, lineWidth: Theme.Stroke.hairline))
         }
     }
 
     private var saveRow: some View {
-        HStack {
-            Spacer()
-            Button("Save") { persist() }
-                .buttonStyle(RewindButtonStyle())
-                .disabled(edited == saved)
-                .settingsDimsWhenDisabled()
-        }
-        .padding(.top, Theme.Space.s)
+        SettingsSaveRow(dirty: edited != saved) { persist() }
     }
 
     private func load() {

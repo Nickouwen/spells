@@ -3,7 +3,7 @@ import SwiftUI
 /// Type scale. SF Pro + SF Mono only; distinctiveness comes from size contrast and unit
 /// styling (a Light hero with small secondary units), not a custom face. All numerals tabular.
 public enum TextRole: CaseIterable, Sendable {
-    case hero, heroUnit, metric, metricUnit, title, heading, body, bodyEmph, label, micro, mono
+    case hero, heroUnit, metric, metricUnit, title, heading, body, bodyEmph, detail, label, micro, mono
 
     public var font: Font {
         switch self {
@@ -16,6 +16,8 @@ public enum TextRole: CaseIterable, Sendable {
         // body/label map to text styles so the macOS text-size setting still applies.
         case .body:       .body.monospacedDigit()                       // 13 pt
         case .bodyEmph:   .body.weight(.medium).monospacedDigit()
+        /// Explanations that run past one line: regular weight (medium reads blotchy in grey paragraphs).
+        case .detail:     .system(size: 12, weight: .regular)
         case .label:      .subheadline.weight(.medium).monospacedDigit() // 11 pt (.caption is 10 on macOS)
         case .micro:      .system(size: 10, weight: .semibold)
         case .mono:       .system(size: 12, design: .monospaced)
@@ -33,7 +35,7 @@ public enum TextRole: CaseIterable, Sendable {
     /// Default ink for the role. Units and eyebrows recede; everything else is full ink.
     public var swatch: Swatch {
         switch self {
-        case .heroUnit, .metricUnit, .micro: Theme.inkSecondary
+        case .heroUnit, .metricUnit, .micro, .detail: Theme.inkSecondary
         default: Theme.ink
         }
     }

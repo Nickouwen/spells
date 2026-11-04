@@ -63,7 +63,6 @@ struct SettingsTrackingTab: View {
                     Spacer()
                     Button("Open Login Items") { model.openLoginItems?() }
                         .buttonStyle(RewindButtonStyle())
-                        .settingsDimsWhenDisabled()
                         .disabled(model.openLoginItems == nil)
                 }
             }

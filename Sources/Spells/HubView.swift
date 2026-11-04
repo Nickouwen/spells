@@ -89,9 +89,19 @@ struct HubView: View {
     /// pane (Rewind's with its tab strip under the tiles).
     private var settings: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: Theme.Space.m) {
-                ForEach(hub.settingsModules) { m in moduleTile(m) }
-                Spacer()
+            // Five 180 pt tiles need ~1000 pt; below that, a compact picker of the same modules.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Theme.Space.m) {
+                    ForEach(hub.settingsModules) { m in moduleTile(m) }
+                    Spacer(minLength: 0)
+                }
+                HStack {
+                    Picker("Module", selection: $hub.settingsModule) {
+                        ForEach(hub.settingsModules) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    Spacer(minLength: 0)
+                }
             }
             .padding(.horizontal, Theme.Space.gutter)
             .padding(.vertical, Theme.Space.l)
@@ -113,7 +123,7 @@ struct HubView: View {
                 case .ward: if let w = hub.ward { WardSettingsView(model: w) }
                 }
             }
-            .frame(maxWidth: 960, maxHeight: .infinity, alignment: .topLeading)   // readable line length; left-aligned with the tiles
+            .frame(maxWidth: Theme.Space.readable + 2 * Theme.Space.gutter, maxHeight: .infinity, alignment: .topLeading)   // readable line length; left-aligned with the tiles
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .navigationTitle("\(hub.settingsModule.rawValue) Settings")

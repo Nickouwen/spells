@@ -236,7 +236,7 @@ struct DayHeadline: View {
 
     private func editedPill(delta: Int64) -> some View {
         let sign = delta > 0 ? "+" : (delta < 0 ? "−" : "±")
-        return Text("± \(sign)\(Fmt.duration(ms: abs(delta)))")
+        return Text("Edited \(sign)\(Fmt.duration(ms: abs(delta)))")   // "± −20m" read as a typo
             .font(TextRole.label.font).foregroundStyle(Theme.inkSecondary)
             .padding(.horizontal, Theme.Space.s - 2)
             .frame(height: 20)

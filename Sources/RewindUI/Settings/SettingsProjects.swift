@@ -17,7 +17,6 @@ struct SettingsProjectsTab: View {
                     TextField("Client (optional)", text: $client).textFieldStyle(.roundedBorder)
                     Button("Add", action: add)
                         .buttonStyle(RewindButtonStyle())
-                        .settingsDimsWhenDisabled()
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 Toggle("Assign windows whose title contains the name", isOn: $autoRule)

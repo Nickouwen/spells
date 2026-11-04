@@ -30,8 +30,8 @@ public struct StatTile: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            // Eyebrow sits on its number; spare height goes below the comparator, not between them.
             Text(eyebrow).textRole(.micro).lineLimit(1)
-            Spacer(minLength: 0)
             // The number never truncates: the sparkline shrinks, then drops, to make room.
             ViewThatFits(in: .horizontal) {
                 valueRow(sparkWidth: 56)
@@ -42,6 +42,7 @@ public struct StatTile: View {
                 Text(comparator).textRole(.label, Theme.inkTertiary).lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            Spacer(minLength: 0)
         }
         .frame(minWidth: Self.minWidth - 2 * Theme.Space.cardPadding, maxWidth: .infinity, minHeight: 92, maxHeight: .infinity, alignment: .topLeading)
         .card()

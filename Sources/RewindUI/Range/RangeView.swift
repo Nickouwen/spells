@@ -140,14 +140,14 @@ struct RangeDailyChart: View {
                     AxisValueLabel(centered: true) {
                         if let s = v.as(String.self), let d = byKey[s] {
                             VStack(spacing: 1) {
-                                Text("\(d.day)").textRole(.label, d.isWeekend ? Theme.inkDisabled : Theme.inkTertiary)
+                                Text("\(d.day)").textRole(.label, d.isWeekend ? Theme.inkTertiary : Theme.inkSecondary)
                                 if gapDays.contains(d) {
                                     Image(systemName: "exclamationmark.triangle.fill")
                                         .font(TextRole.micro.font)
                                         .imageScale(.small)
                                         .foregroundStyle(Theme.StateLayer.warn)
                                 } else {
-                                    Text(d.weekdayLetter).textRole(.micro, Theme.inkDisabled)
+                                    Text(d.weekdayLetter).textRole(.micro, d.isWeekend ? Theme.inkTertiary : Theme.inkSecondary)
                                 }
                             }
                         }

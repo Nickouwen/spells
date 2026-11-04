@@ -12,11 +12,9 @@ struct SettingsGoalsTab: View {
         let goal = model.goal
         SettingsPage {
             SettingsSection("Daily work goal", detail: "Counts work time (work categories), not everything tracked.") {
-                Toggle("Track a daily goal", isOn: Binding(
+                SettingsToggleRow("Track a daily goal", isOn: Binding(
                     get: { goal != nil },
                     set: { on in Task { await model.setGoal(on ? Goal(dailyWorkMs: 6 * 3_600_000) : nil) } }))
-                    .toggleStyle(.switch)
-                    .textRole(.body)
                 if let goal {
                     SettingsDivider()
                     HStack {

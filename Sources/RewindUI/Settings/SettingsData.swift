@@ -62,7 +62,6 @@ struct SettingsDataTab: View {
                     }
                     .buttonStyle(RewindButtonStyle())
                     .animation(Theme.Motion.animation(Theme.Motion.swap, reduceMotion: reduceMotion), value: exported)
-                    .settingsDimsWhenDisabled()
                     .disabled(busy)
                 }
                 if let exportStatus {
@@ -79,7 +78,6 @@ struct SettingsDataTab: View {
                     }
                     .buttonStyle(RewindButtonStyle())
                     .animation(Theme.Motion.animation(Theme.Motion.swap, reduceMotion: reduceMotion), value: anchored)
-                    .settingsDimsWhenDisabled()
                     .disabled(busy)
                 }
             }

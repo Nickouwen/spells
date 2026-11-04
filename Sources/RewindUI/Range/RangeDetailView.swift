@@ -77,7 +77,7 @@ public struct RangeDetailView: View {
                     AxisMarks(values: data.days.map(\.date.description)) { v in
                         AxisValueLabel(centered: true) {
                             if let s = v.as(String.self), let day = days[s] {
-                                Text("\(day.day)").textRole(.label, day.isWeekend ? Theme.inkDisabled : Theme.inkTertiary)
+                                Text("\(day.day)").textRole(.label, day.isWeekend ? Theme.inkTertiary : Theme.inkSecondary)
                             }
                         }
                     }

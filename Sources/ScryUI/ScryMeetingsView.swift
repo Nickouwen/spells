@@ -40,6 +40,8 @@ public struct MeetingsView: View {
     /// The note a right-click asked to delete, until the alert answers.
     @State private var deleting: ScryNoteFile?
     @State private var newTask = ""
+    /// The open-action backlog shows its first few until asked; it grows with every meeting.
+    @State private var showAllOpen = false
 
     /// `notes`: preloaded (previews); otherwise loaded from the folder on appear.
     public init(model: ScryMeetingsModel, notes: [ScryNoteFile]? = nil, timeZone: TimeZone = .current, openSettings: (() -> Void)? = nil) {
@@ -104,7 +106,11 @@ public struct MeetingsView: View {
                             Spacer()
                             Text("\(open.count)").textRole(.label, Theme.inkTertiary)
                         }
-                        ForEach(open, id: \.id) { o in actionRow(o.note, o.item, meeting: true) }
+                        ForEach(showAllOpen ? open : Array(open.prefix(3)), id: \.id) { o in actionRow(o.note, o.item, meeting: true) }
+                        if open.count > 3 {
+                            Button(showAllOpen ? "Show fewer" : "Show all \(open.count)") { showAllOpen.toggle() }
+                                .buttonStyle(QuietButtonStyle())
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .card()
@@ -140,6 +146,11 @@ public struct MeetingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(selected ? Theme.surfaceRaised : Theme.surface,
                         in: RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
+            // Selection = fill + an ink bar on the leading edge (a full outline doubled up with the day card's border).
+            .overlay(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 1, style: .continuous).fill(Theme.ink)
+                    .frame(width: 2).padding(.vertical, Theme.Space.s).opacity(selected ? 1 : 0)
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -208,18 +219,21 @@ public struct MeetingsView: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text(s.title).textRole(.title)
                         Spacer(minLength: Theme.Space.s)
-                        Button("Open in editor") { NSWorkspace.shared.open(n.url) }.buttonStyle(RewindButtonStyle())
+                        Button("Open in Editor") { NSWorkspace.shared.open(n.url) }.buttonStyle(RewindButtonStyle())
                     }
                     FlowLayout(spacing: Theme.Space.s) {
                         chip("calendar", "\(Self.dayTitle(Date(timeIntervalSince1970: Double(n.startMs) / 1000), timeZone: timeZone)) · \(Fmt.clock(ms: n.startMs, timeZone: timeZone))–\(Fmt.clock(ms: n.endMs, timeZone: timeZone))")
                         chip("clock", Fmt.duration(ms: n.endMs - n.startMs))
                         chip(n.note.meta.app == nil ? "person.2" : "video", n.note.meta.app ?? "In person")
-                        ForEach(n.note.meta.participants, id: \.self) { chip("person", $0) }
+                        // People once: the Speakers row below names them when the transcript has them.
+                        if n.speakers.isEmpty { ForEach(n.note.meta.participants, id: \.self) { chip("person", $0) } }
                     }
                     if !n.speakers.isEmpty { speakers(n) }
                 }
+                // The summary is the note's lede, not one card among eight.
                 if !s.overview.isEmpty {
-                    card("Summary") { Text(s.overview).textRole(.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+                    Text(s.overview).textRole(.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: Theme.Space.readable, alignment: .leading)
                 } else if !s.recap.isEmpty {
                     card("Summary") {
                         ForEach(s.recap.indices, id: \.self) { i in
@@ -230,11 +244,23 @@ public struct MeetingsView: View {
                         }
                     }
                 }
-                if !s.decisions.isEmpty { card("Decisions") { bullets(s.decisions) } }
-                if !s.keyDates.isEmpty { card("Key dates") { bullets(s.keyDates) } }
                 actionsCard(n)
-                if !s.openQuestions.isEmpty { card("Open questions") { bullets(s.openQuestions) } }
-                if !s.insights.isEmpty { card("Insights") { bullets(s.insights) } }
+                // The short lists share one card, each under an eyebrow, instead of a card apiece.
+                let lists = [("Decisions", s.decisions), ("Key dates", s.keyDates), ("Open questions", s.openQuestions),
+                             ("Insights", s.insights)].filter { !$0.1.isEmpty }
+                if !lists.isEmpty {
+                    VStack(alignment: .leading, spacing: Theme.Space.l) {
+                        Text("Highlights").textRole(.heading)
+                        ForEach(lists, id: \.0) { title, items in
+                            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                                Text(title).textRole(.label, Theme.inkSecondary)   // in-card section label, not an eyebrow
+                                bullets(items)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .card()
+                }
                 if !n.note.userNotes.isEmpty {
                     card("Your notes") { Text(n.note.userNotes).textRole(.body).textSelection(.enabled) }
                 }
@@ -265,7 +291,7 @@ public struct MeetingsView: View {
 
     private func speakers(_ n: ScryNoteFile) -> some View {
         HStack(spacing: Theme.Space.s) {
-            Text("Speakers").textRole(.micro)
+            Text("Speakers").textRole(.label, Theme.inkSecondary)
             ForEach(n.speakers, id: \.self) { sp in
                 Menu {
                     Button("Rename…") { newName = sp; renaming = sp }
@@ -380,7 +406,6 @@ public struct MeetingsView: View {
                     Button("Ask", action: ask)
                         .buttonStyle(RewindButtonStyle())
                         .disabled(question.trimmingCharacters(in: .whitespaces).isEmpty)
-                        .settingsDimsWhenDisabled()
                 }
             }
             .padding(.leading, Theme.Space.m)

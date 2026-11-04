@@ -63,7 +63,7 @@ struct SettingsStandupTab: View {
                     update(StandupSettings.nameKey, name) { $0.name = name.isEmpty ? StandupSettings.defaultName : name }
                 }
                 SettingsDivider()
-                field("claude CLI", text: $claudePath, prompt: StandupSettings.defaultClaudePath) {
+                field("Claude CLI", text: $claudePath, prompt: StandupSettings.defaultClaudePath) {
                     update(StandupSettings.claudePathKey, claudePath) { $0.claudePath = claudePath.isEmpty ? StandupSettings.defaultClaudePath : claudePath }
                 }
             }

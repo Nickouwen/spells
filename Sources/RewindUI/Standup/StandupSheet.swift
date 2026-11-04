@@ -96,7 +96,6 @@ struct StandupSheet: View {
                     .onSubmit(revise)
                 Button("Revise", action: revise)
                     .buttonStyle(RewindButtonStyle())
-                    .settingsDimsWhenDisabled()
                     .disabled(fix.trimmingCharacters(in: .whitespaces).isEmpty || generating)
             }
             if let kept = stored?.corrections, !kept.isEmpty {
@@ -118,6 +117,7 @@ struct StandupSheet: View {
             ZStack {
                 TextEditor(text: $text)
                     .font(TextRole.body.font)
+                    .lineSpacing(6)   // plain-text sections read as one block at body leading
                     .foregroundStyle(Theme.ink)
                     .scrollContentBackground(.hidden)
                     .disabled(generating)
@@ -144,7 +144,6 @@ struct StandupSheet: View {
                     if stored?.editedMs != nil || dirty || !(stored?.corrections.isEmpty ?? true) { confirmReplace = true } else { generate(.clear) }
                 }
                 .buttonStyle(RewindButtonStyle())
-                .settingsDimsWhenDisabled()
                 .disabled(generating)
             }
             Spacer()
@@ -152,13 +151,11 @@ struct StandupSheet: View {
                 Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
                     .contentTransition(.symbolEffect(.replace))
             }
-            .buttonStyle(RewindButtonStyle())
+            .buttonStyle(PrimaryButtonStyle())   // copying it out is the sheet's job
             .animation(Theme.Motion.animation(Theme.Motion.swap, reduceMotion: reduceMotion), value: copied)
-            .settingsDimsWhenDisabled()
             .disabled(text.isEmpty || generating)
             Button("Save") { save() }
                 .buttonStyle(RewindButtonStyle())
-                .settingsDimsWhenDisabled()
                 .disabled(!dirty || text.isEmpty || generating)
                 .keyboardShortcut("s", modifiers: .command)
             Button("Done") { dismiss() }

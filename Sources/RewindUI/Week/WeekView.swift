@@ -208,7 +208,7 @@ struct WeekHeadline: View {
             HStack(alignment: .lastTextBaseline, spacing: Theme.Space.m) {
                 HeroNumber(ms: m.workMs, caption: data.isCurrentWeek ? "Work so far" : "Work")
                 if let delta = data.workDeltaMs {
-                    Text("± \(RangeEditedMark.signed(delta))")
+                    Text("Edited \(RangeEditedMark.signed(delta))")
                         .font(TextRole.label.font).foregroundStyle(Theme.inkSecondary)
                         .padding(.horizontal, Theme.Space.s - 2)
                         .frame(height: 20)
