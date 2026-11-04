@@ -490,13 +490,16 @@ public struct IncantGhost: Equatable, Sendable {
 public enum IncantCerebras {
     public enum Failure: Error, Equatable { case rateLimited, http(Int, String), malformed }
     /// POST https://api.cerebras.ai/v1/chat/completions, Bearer auth, temperature 0, max_tokens 400,
-    /// system = instructions, user = text.
+    /// system = instructions, user = text, reasoning off. Reasoning models otherwise spend all 400 tokens
+    /// thinking about the long correction prompt and return no content (qwen-3.8-27b, 2026-11-04:
+    /// `finish_reason` "length", `content` null). gpt-oss can't turn it off; "low" is its floor.
     public static func request(text: String, instructions: String, model: String, apiKey: String) -> URLRequest {
         var r = URLRequest(url: URL(string: "https://api.cerebras.ai/v1/chat/completions")!)
         r.httpMethod = "POST"
         r.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         r.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let body: [String: Any] = ["model": model, "temperature": 0, "max_tokens": 400,
+                                   "reasoning_effort": model.hasPrefix("gpt-oss") ? "low" : "none",
                                    "messages": [["role": "system", "content": instructions], ["role": "user", "content": text]]]
         r.httpBody = try? JSONSerialization.data(withJSONObject: body)
         return r

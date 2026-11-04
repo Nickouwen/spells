@@ -240,6 +240,9 @@ private let unexpected: @Sendable (String) async throws -> String = { _ in Issue
     #expect(r.value(forHTTPHeaderField: "Authorization") == "Bearer k")
     let j = try #require(JSONSerialization.jsonObject(with: r.httpBody ?? Data()) as? [String: Any])
     #expect(j["model"] as? String == "m" && j["temperature"] as? Int == 0 && j["max_tokens"] as? Int == 400)
+    #expect(j["reasoning_effort"] as? String == "none")
+    let oss = IncantCerebras.request(text: "t", instructions: "i", model: "gpt-oss-120b", apiKey: "k")
+    #expect((try JSONSerialization.jsonObject(with: oss.httpBody ?? Data()) as? [String: Any])?["reasoning_effort"] as? String == "low")
     let msgs = j["messages"] as? [[String: String]]
     #expect(msgs == [["role": "system", "content": "i"], ["role": "user", "content": "t"]])
 }
