@@ -111,7 +111,7 @@ public struct IncantSettings: Equatable, Sendable {
 
     Output hygiene:
     - Never prepend boilerplate such as "Here is the cleaned text".
-    - If the transcript is empty or only filler, return exactly: EMPTY
+    - If the transcript is empty or only hesitation sounds ("um", "uh", "hmm"), return exactly: EMPTY. A short reply is a complete message, not filler: "okay", "yeah", "no", "next", "continue" come back as they are.
     """
     public static let defaultCues = ["no,", "actually", "i mean", "scratch that", "sorry", "wait"]
     public static let defaultModel = "qwen-3.8-27b"
@@ -152,15 +152,20 @@ public struct IncantSettings: Equatable, Sendable {
         keyterms.isEmpty ? prompt : prompt + "\n\nVocabulary (spell these exactly as written): " + keyterms.joined(separator: ", ")
     }
 
-    /// Stream mode's live pass runs on the sentence while it's still being spoken: the same prompt, told
-    /// the text is cut off mid-way so it cleans what's there and never finishes it.
-    public static let livePrompt = """
-    Live mode: the text is one sentence still being spoken, cut off mid-way. Clean only what is there: remove filler, hesitations and abandoned starts, apply self-corrections that are already complete, fix recognition mistakes you are sure of, keep the vocabulary spelled as given. Do not finish the sentence, do not add words, do not end it with a period or other closing punctuation. If the last word looks cut off, keep it as it is. If nothing needs changing, return the text unchanged.
+    /// Stream mode's pause pass gets the settled text's tail (`IncantStream.context`) and the new words as two
+    /// labelled parts, and answers as JSON (`IncantCerebras.seamFormat`): the joiner between them and the new
+    /// words cleaned. Tested 2026-11-09 on qwen-3.8-27b: 20 of 22 seams right, against 17 of 22 for the free-text
+    /// answer this replaced (whose joiner was read back by matching words, and lost "--fix" to that).
+    public static let seamPrompt = """
+    Seam mode: the message has two parts. ALREADY_TYPED is on screen and cannot change: never repeat or reword it. NEW_WORDS is what was just spoken: clean only that, and keep its own first word ("and", "so", "but" stay). Answer with JSON.
+    "joiner" is what goes between ALREADY_TYPED and the cleaned NEW_WORDS. First read how ALREADY_TYPED ends. If NEW_WORDS starts a new sentence, the joiner ends the old one: "? " when ALREADY_TYPED is a question, "! " when it is an exclamation, otherwise ". ". If NEW_WORDS continues the same sentence, the joiner is " ", or ", " or ": " or "; " after a clause break. It is a line break when the speaker asked for a new line.
+    "text" is the cleaned NEW_WORDS: capitalized to match the joiner, with no final period, ending in "?" when it is a question, and empty when NEW_WORDS is only hesitation sounds.
+    Examples: ALREADY_TYPED "Did the backup finish" + NEW_WORDS "it was still running at noon" -> {"joiner": "? ", "text": "It was still running at noon"}. ALREADY_TYPED "I restarted the server" + NEW_WORDS "is it up now" -> {"joiner": ". ", "text": "Is it up now?"}. ALREADY_TYPED "restart the server and" + NEW_WORDS "check the logs" -> {"joiner": " ", "text": "check the logs"}.
     """
-    /// The live pass's settings: the prompt with the live rules, correcting every time (off stays off).
-    public var live: IncantSettings {
+    /// The pause pass's settings: per-sentence, plus the seam rule.
+    public var seam: IncantSettings {
         var s = perSentence
-        s.prompt = prompt + "\n\n" + Self.livePrompt
+        s.prompt = prompt + "\n\n" + Self.seamPrompt
         return s
     }
 
@@ -263,7 +268,10 @@ public enum IncantFix {
         let timer = Task { try? await Task.sleep(for: .milliseconds(cutoffMs)); race.yield(nil) }
         var first = stream.makeAsyncIterator()
         var won = await first.next() ?? nil
-        if won?.text == "EMPTY" { won?.text = "" }   // the prompt's "only filler" answer: paste nothing
+        // The prompt's "only hesitation sounds" answer. Those are stripped here before the model sees the text
+        // (`IncantFillers`), so an EMPTY for what's left is the model dropping real words — a one-word reply
+        // ("Okay", "Next", "No", "Continue" all came back EMPTY on qwen-3.8-27b, 2026-11-04) — and they stay.
+        if won?.text == "EMPTY" { won?.text = text }
         work.cancel(); timer.cancel(); race.finish()
         var result = won ?? IncantFixResult(text: text, source: .raw, ms: 0)
         result.text = withoutTrailingPeriod(result.text)
@@ -363,6 +371,34 @@ public enum IncantStream {
         return ".!?…:;,-—".contains(core) ? " " : ". "
     }
 
+    /// `text` cased for the joiner before it: capitalized after a sentence end (". ", "? ", "! ", a line break
+    /// or the start), else left as the model or Scribe gave it.
+    public static func cased(_ text: String, after joiner: String) -> String {
+        let ends = joiner.isEmpty || joiner.contains(where: \.isNewline) || [". ", "? ", "! "].contains(joiner)
+        guard ends, let f = text.first, f.isLowercase else { return text }
+        return f.uppercased() + text.dropFirst()
+    }
+
+    /// Words Scribe capitalizes only because a segment starts with them: shown lowercase while a sentence in
+    /// flight reads as continuing the last one ("…the tests so then we", not "…the tests So then we").
+    static let continuationWords: Set<String> = [
+        "so", "and", "but", "or", "then", "because", "which", "that", "the", "a", "an", "it", "this", "these", "those",
+        "we", "you", "they", "he", "she", "maybe", "probably", "also", "just", "now", "if", "when", "where", "while",
+        "to", "for", "with", "of", "in", "on", "at", "from", "by", "as", "like", "actually", "basically", "plus",
+        "since", "until", "unless", "though", "although", "otherwise", "instead", "especially", "including", "not",
+        "only", "even", "still", "too", "after", "before", "once", "what", "how", "why", "who", "is", "are", "was",
+        "were", "be", "can", "could", "should", "would", "will", "do", "does", "did", "have", "has", "had", "my", "our",
+        "your", "their", "his", "her", "its", "some", "any", "all", "more", "most", "there", "here",
+    ]
+
+    /// The first word lowercased when it's a `continuationWords` entry Scribe capitalized ("So then" → "so then").
+    public static func continuing(_ text: String) -> String {
+        let first = text.prefix { $0.isLetter }
+        guard first.count > 1, first.first!.isUppercase, first.dropFirst().allSatisfy(\.isLowercase),
+              continuationWords.contains(first.lowercased()) else { return text }
+        return first.lowercased() + text.dropFirst(first.count)
+    }
+
     /// Text held back after an app switch, for the clipboard: the joiner it starts with goes.
     public static func unjoined(_ held: String) -> String {
         var h = Substring(held)
@@ -370,44 +406,10 @@ public enum IncantStream {
         return h.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Whether a pause ended a sentence is the model's call, not the pause length's: a pass gets the
-    /// settled text's tail (`context`) in front of the new words and answers with them re-joined, and
-    /// `split` reads the joiner and the cleaned words back off that answer.
+    /// Whether a pause ended a sentence is the model's call, not the pause length's: the pause pass gets the
+    /// settled text's tail (`context`) next to the new words and names the joiner (`IncantSettings.seamPrompt`).
     public static func context(_ document: String, words: Int = 20) -> String {
         document.split(whereSeparator: \.isWhitespace).suffix(words).joined(separator: " ")
-    }
-
-    /// The answer for `context + " " + raw` → (joiner, cleaned words): the context's words must come
-    /// back first (compared without case or punctuation); what follows the last of them is the joiner
-    /// (". ", ", ", "? "…, a bare space, or a line break) and then the cleaned sentence. nil when the
-    /// model rewrote the context (then the sentence is cleaned on its own).
-    public static func split(answer: String, context: String) -> (joiner: String, text: String)? {
-        let ctx = context.split(whereSeparator: \.isWhitespace).map(core)
-        guard !ctx.isEmpty else { return nil }
-        var i = answer.startIndex, k = 0
-        var end = answer.startIndex   // just past the core of the last matched context word
-        while k < ctx.count {
-            while i < answer.endIndex, answer[i].isWhitespace { i = answer.index(after: i) }
-            guard i < answer.endIndex else { return nil }
-            var j = i
-            while j < answer.endIndex, !answer[j].isWhitespace { j = answer.index(after: j) }
-            let word = answer[i..<j]
-            guard core(word) == ctx[k] else { return nil }
-            end = word.lastIndex { $0.isLetter || $0.isNumber }.map { answer.index(after: $0) } ?? j
-            i = j; k += 1
-        }
-        let rest = answer[end...]
-        let marks = rest.prefix { !$0.isLetter && !$0.isNumber && $0 != "\"" && $0 != "(" && $0 != "'" }
-        let text = rest.dropFirst(marks.count).trimmingCharacters(in: .whitespacesAndNewlines)
-        let joiner: String
-        if marks.contains(where: \.isNewline) { joiner = "\n" }
-        else if let m = marks.first(where: { ".,;:!?".contains($0) }) { joiner = "\(m) " }
-        else { joiner = " " }
-        return (joiner, text)
-    }
-
-    private static func core<S: StringProtocol>(_ word: S) -> String {
-        word.lowercased().filter { $0.isLetter || $0.isNumber }
     }
 }
 
@@ -415,9 +417,7 @@ public enum IncantStream {
 /// after the previous sentence — included) and the edit that brings that to a new target. Scribe's
 /// partials are cumulative and only grow (measured 2026-11-02: no earlier word changed, only the trailing
 /// mark did — "all." became "all, which"), so a partial is typed minus that mark and the edit is nearly
-/// always an append. A live pass cleans the sentence so far while it's spoken: its answer stands in for
-/// the raw text it was given, with whatever arrived since appended raw, so corrections land mid-sentence
-/// without the next words undoing them. The commit's corrected sentence then revises only the tail that differs.
+/// always an append. The commit's corrected sentence then revises only the tail that differs.
 public struct IncantGhost: Equatable, Sendable {
     public struct Edit: Equatable, Sendable {
         /// Characters to delete from the end of what's typed, then `text` to type.
@@ -427,12 +427,12 @@ public struct IncantGhost: Equatable, Sendable {
         public init(delete: Int, text: String) { self.delete = delete; self.text = text }
     }
     public private(set) var lead: String
+    /// Typed as a continuation of the settled text until the commit decides (`IncantStream.continuing`).
+    public let continues: Bool
     public private(set) var typed = ""
-    /// The latest partial, fillers stripped and the trailing mark withheld: what a live pass is given.
+    /// The latest partial, fillers stripped and the trailing mark withheld.
     public private(set) var raw = ""
-    private var cleaned: Cleaned?
-    private struct Cleaned: Equatable, Sendable { var of: String, text: String }
-    public init(lead: String = "") { self.lead = lead }
+    public init(lead: String = "", continues: Bool = false) { self.lead = lead; self.continues = continues }
 
     /// A partial (the sentence so far). Empty ones (Scribe's keepalives) change nothing.
     public mutating func partial(_ text: String) -> Edit {
@@ -442,18 +442,9 @@ public struct IncantGhost: Equatable, Sendable {
         return retarget(composed)
     }
 
-    /// A live pass's answer for `rawSent` (an earlier value of `raw`), and the joiner it decided on, if
-    /// it saw the settled text. Nothing changes if the partials were revised underneath it since.
-    public mutating func live(_ text: String, of rawSent: String, lead: String? = nil) -> Edit {
-        guard raw.hasPrefix(rawSent) else { return Edit(delete: 0, text: "") }
-        if let lead { self.lead = lead }
-        cleaned = Cleaned(of: rawSent, text: Self.open(Self.withoutPauseDots(text)))
-        return retarget(composed)
-    }
-
     /// The sentence's final form, corrected and without its full stop; empty = it was only filler and goes.
     public mutating func commit(_ sentence: String, lead: String? = nil) -> Edit {
-        raw = ""; cleaned = nil
+        raw = ""
         if let lead { self.lead = lead }
         let s = Self.withoutPauseDots(sentence)
         return retarget(s.isEmpty ? "" : self.lead + s)
@@ -465,11 +456,7 @@ public struct IncantGhost: Equatable, Sendable {
         text.replacing(/\s*(\.{2,}|…)\s*/, with: " ").replacing(/\ {2,}/, with: " ").trimmingCharacters(in: .whitespaces)
     }
 
-    /// The cleaned prefix plus the raw words since, or the raw sentence so far.
-    private var composed: String {
-        if let c = cleaned, raw.hasPrefix(c.of) { return lead + c.text + raw.dropFirst(c.of.count) }
-        return lead + raw
-    }
+    private var composed: String { lead + (continues ? IncantStream.continuing(raw) : raw) }
 
     mutating func retarget(_ target: String) -> Edit {
         let common = zip(typed, target).prefix { $0 == $1 }.count
@@ -493,16 +480,34 @@ public enum IncantCerebras {
     /// system = instructions, user = text, reasoning off. Reasoning models otherwise spend all 400 tokens
     /// thinking about the long correction prompt and return no content (qwen-3.8-27b, 2026-11-04:
     /// `finish_reason` "length", `content` null). gpt-oss can't turn it off; "low" is its floor.
-    public static func request(text: String, instructions: String, model: String, apiKey: String) -> URLRequest {
+    /// `after` (the pause pass): the user message carries that already-typed text and `text` as two labelled
+    /// parts, and the answer must be `seamFormat` JSON (read it with `seam`).
+    public static func request(text: String, instructions: String, model: String, apiKey: String, after typed: String? = nil) -> URLRequest {
         var r = URLRequest(url: URL(string: "https://api.cerebras.ai/v1/chat/completions")!)
         r.httpMethod = "POST"
         r.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         r.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: Any] = ["model": model, "temperature": 0, "max_tokens": 400,
+        var body: [String: Any] = ["model": model, "temperature": 0, "max_tokens": 400,
                                    "reasoning_effort": model.hasPrefix("gpt-oss") ? "low" : "none",
-                                   "messages": [["role": "system", "content": instructions], ["role": "user", "content": text]]]
+                                   "messages": [["role": "system", "content": instructions],
+                                                ["role": "user", "content": typed.map { "ALREADY_TYPED: \($0)\nNEW_WORDS: \(text)" } ?? text]]]
+        if typed != nil { body["response_format"] = seamFormat }
         r.httpBody = try? JSONSerialization.data(withJSONObject: body)
         return r
+    }
+    public static let joiners = [" ", ". ", ", ", "? ", "! ", ": ", "; ", "\n"]
+    /// The pause pass's answer, held to this shape by the API: `{"joiner": one of `joiners`, "text": "…"}`.
+    static var seamFormat: [String: Any] {
+        ["type": "json_schema", "json_schema": ["name": "seam", "strict": true, "schema": [
+            "type": "object", "additionalProperties": false, "required": ["joiner", "text"],
+            "properties": ["joiner": ["type": "string", "enum": joiners], "text": ["type": "string"]]] as [String: Any]] as [String: Any]]
+    }
+    /// A pause pass's message content → (joiner, cleaned words).
+    public static func seam(_ content: String) throws -> (joiner: String, text: String) {
+        guard let j = try? JSONSerialization.jsonObject(with: Data(content.utf8)) as? [String: Any],
+              let joiner = j["joiner"] as? String, joiners.contains(joiner), let text = j["text"] as? String
+        else { throw Failure.malformed }
+        return (joiner, text)
     }
     /// 200 → the first choice's message content; 429 → `.rateLimited`; other status → `.http`.
     public static func parse(_ data: Data, status: Int) throws -> String {
@@ -512,6 +517,45 @@ public enum IncantCerebras {
               let msg = ((j["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any])?["content"] as? String
         else { throw Failure.malformed }
         return msg
+    }
+}
+
+// MARK: - History
+
+/// One finished dictation: when, the app it went into (bundle ID), what Scribe heard (one item per committed
+/// segment) and the final text.
+public struct IncantHistoryEntry: Codable, Equatable, Sendable {
+    public var at: Date
+    public var app: String
+    public var raw: [String]
+    public var text: String
+    public init(at: Date, app: String, raw: [String], text: String) { self.at = at; self.app = app; self.raw = raw; self.text = text }
+}
+
+/// The last `keep` dictations, oldest first, one JSON object per line in a file only the user can read. It's
+/// what a failed insert would otherwise lose ("Paste last dictation"), and real transcripts to test a prompt
+/// or model change against. It never leaves the Mac; delete the file to clear it.
+public enum IncantHistory {
+    public static let keep = 200
+
+    public static func append(_ entry: IncantHistoryEntry, to url: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let lines = (lines(url) + [String(decoding: try encoder.encode(entry), as: UTF8.self)]).suffix(keep)
+        let fm = FileManager.default
+        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if !fm.fileExists(atPath: url.path) { fm.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600]) }
+        try Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url)   // in place: the file keeps its 0600 mode
+    }
+
+    public static func last(in url: URL) -> IncantHistoryEntry? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return lines(url).last.flatMap { try? decoder.decode(IncantHistoryEntry.self, from: Data($0.utf8)) }
+    }
+
+    private static func lines(_ url: URL) -> [String] {
+        (try? String(contentsOf: url, encoding: .utf8))?.split(separator: "\n").map(String.init) ?? []
     }
 }
 

@@ -300,10 +300,12 @@ private let unexpected: @Sendable (String) async throws -> String = { _ in Issue
         #expect(none.instructions == none.prompt)
     }
 
-    @Test func emptyAnswerPastesNothing() async {
+    @Test func anEmptyAnswerNeverDropsRealWords() async {
         var always = IncantSettings(); always.mode = .always
-        let r = await IncantFix.run("the thing", settings: always, primary: { _ in "EMPTY" }, fallback: nil)
-        #expect(r.text.isEmpty)
+        let r = await IncantFix.run("Next.", settings: always, primary: { _ in "EMPTY" }, fallback: nil)
+        #expect(r.text == "Next" && r.source == .primary)
+        let um = await IncantFix.run("Um, uh.", settings: always, primary: { _ in "EMPTY" }, fallback: nil)
+        #expect(um.text.isEmpty)   // only hesitation sounds: stripped before the model, nothing typed
     }
 }
 
@@ -386,39 +388,40 @@ private let unexpected: @Sendable (String) async throws -> String = { _ in Issue
     }
 }
 
-@Suite struct IncantGhostLiveTests {
-    @Test func aLivePassReplacesTheRawWordsItWasGivenAndKeepsTheTail() {
-        var g = IncantGhost(lead: " ")
-        #expect(g.partial("um so let's fix the") == IncantGhost.Edit(delete: 0, text: " so let's fix the"))
-        #expect(g.raw == "so let's fix the")
-        // More words arrive while the pass runs; its answer then stands in for the words it saw.
-        #expect(g.partial("um so let's fix the auth module,") == IncantGhost.Edit(delete: 0, text: " auth module"))
-        #expect(g.live("So let's fix the", of: "so let's fix the") == IncantGhost.Edit(delete: 28, text: "So let's fix the auth module"))
-        #expect(g.typed == " So let's fix the auth module")
-        // The next partial appends after the cleaned prefix, never retyping it.
-        #expect(g.partial("um so let's fix the auth module, no, the billing") == IncantGhost.Edit(delete: 0, text: ", no, the billing"))
-        #expect(g.live("So let's fix the billing", of: "so let's fix the auth module, no, the billing")
-                == IncantGhost.Edit(delete: 28, text: "billing"))
-        #expect(g.typed == " So let's fix the billing")
-        // The commit's corrected sentence settles it.
-        #expect(g.commit("So let's fix the billing module").text == " module")
-        #expect(g.raw == "")
+@Suite struct IncantSeamTests {
+    @Test func aSentenceInFlightReadsAsAContinuationUntilThePause() {
+        var g = IncantGhost(lead: " ", continues: true)
+        #expect(g.partial("So then we") == IncantGhost.Edit(delete: 0, text: " so then we"))
+        #expect(g.partial("So then we can run the tests.") == IncantGhost.Edit(delete: 0, text: " can run the tests"))
+        // The pause decided it was a new sentence: the one rewrite.
+        #expect(g.commit("So then we can run the tests", lead: ". ")
+                == IncantGhost.Edit(delete: 29, text: ". So then we can run the tests"))
+        var c = IncantGhost(lead: " ", continues: true)
+        _ = c.partial("But only after the tests pass")
+        #expect(c.commit("but only after the tests pass", lead: ", ") == IncantGhost.Edit(delete: 30, text: ", but only after the tests pass"))
     }
 
-    @Test func aStaleLiveAnswerChangesNothing() {
-        var g = IncantGhost()
-        _ = g.partial("let's fix the auth")
-        _ = g.partial("let us fix the auth module")   // revised underneath (never seen from Scribe, but safe)
-        #expect(g.live("Let's fix the auth", of: "let's fix the auth").isEmpty)
-        #expect(g.typed == "let us fix the auth module")
-        #expect(g.live("", of: "let us fix the auth module") == IncantGhost.Edit(delete: 26, text: ""))   // only filler
+    @Test func onlyWordsScribeCapitalizedForTheSegmentAreLowered() {
+        #expect(IncantStream.continuing("So then we") == "so then we")
+        #expect(IncantStream.continuing("Probably wait") == "probably wait")
+        #expect(IncantStream.continuing("Priya wants it") == "Priya wants it")   // a name
+        #expect(IncantStream.continuing("I think so") == "I think so")
+        #expect(IncantStream.continuing("GitHub is down") == "GitHub is down")
+        #expect(IncantStream.continuing("OK so") == "OK so")
     }
 
-    @Test func liveSettingsCarryTheLiveRulesAndAlwaysCorrect() {
-        var s = IncantSettings(); s.mode = .whenNeeded
-        #expect(s.live.mode == .always && s.live.instructions.contains("still being spoken") && s.live.instructions.contains("Vocabulary"))
-        s.mode = .off
-        #expect(s.live.mode == .off)
+    @Test func aFallbackJoinCasesTheFirstWordToMatch() {
+        #expect(IncantStream.cased("so then we", after: ". ") == "So then we")
+        #expect(IncantStream.cased("so then we", after: "? ") == "So then we")
+        #expect(IncantStream.cased("so then we", after: "") == "So then we")
+        #expect(IncantStream.cased("so then we", after: "\n") == "So then we")
+        #expect(IncantStream.cased("so then we", after: ", ") == "so then we")
+        #expect(IncantStream.cased("so then we", after: " ") == "so then we")
+    }
+
+    @Test func thePausePassKeepsTheTypedWords() {
+        let s = IncantSettings()
+        #expect(s.seam.mode == .always && s.seam.instructions.contains("ALREADY_TYPED") && s.seam.instructions.contains("Vocabulary"))
     }
 }
 
@@ -437,23 +440,46 @@ private let unexpected: @Sendable (String) async throws -> String = { _ in Issue
 }
 
 @Suite struct IncantJoinerByModelTests {
-    @Test func theModelsAnswerCarriesTheJoiner() {
-        let ctx = "so let's fix the auth module"
-        #expect(IncantStream.split(answer: "So let's fix the auth module. Then run the tests", context: ctx)! == (". ", "Then run the tests"))
-        #expect(IncantStream.split(answer: "So let's fix the auth module and then run the tests", context: ctx)! == (" ", "and then run the tests"))
-        #expect(IncantStream.split(answer: "So, let's fix the auth module, then run the tests.", context: ctx)! == (", ", "then run the tests."))
-        #expect(IncantStream.split(answer: "So let's fix the auth module?\nYes", context: ctx)! == ("\n", "Yes"))
-        #expect(IncantStream.split(answer: "So let's fix the auth module", context: ctx)! == (" ", ""))   // the new words were only filler
-        #expect(IncantStream.split(answer: "Let's fix the billing module. Then run the tests", context: ctx) == nil)   // context rewritten
-        #expect(IncantStream.split(answer: "anything", context: "") == nil)
+    @Test func thePausePassAsksForTheJoinerAsJSON() throws {
+        let r = IncantCerebras.request(text: "then run the tests", instructions: "i", model: "m", apiKey: "k", after: "so let's fix the auth module")
+        let j = try #require(JSONSerialization.jsonObject(with: r.httpBody ?? Data()) as? [String: Any])
+        #expect((j["messages"] as? [[String: String]])?.last?["content"] == "ALREADY_TYPED: so let's fix the auth module\nNEW_WORDS: then run the tests")
+        let format = try #require((j["response_format"] as? [String: Any])?["json_schema"] as? [String: Any])
+        #expect(format["strict"] as? Bool == true)
+        // An ordinary pass carries no format.
+        let plain = IncantCerebras.request(text: "t", instructions: "i", model: "m", apiKey: "k")
+        #expect((try JSONSerialization.jsonObject(with: plain.httpBody ?? Data()) as? [String: Any])?["response_format"] == nil)
+    }
+
+    @Test func thePausePassAnswerCarriesTheJoiner() throws {
+        #expect(try IncantCerebras.seam(#"{"joiner": ". ", "text": "Then run the tests"}"#) == (". ", "Then run the tests"))
+        #expect(try IncantCerebras.seam(#"{"joiner": "\n", "text": ""}"#) == ("\n", ""))   // only filler
+        #expect(throws: IncantCerebras.Failure.malformed) { try IncantCerebras.seam(#"{"joiner": " — ", "text": "x"}"#) }
+        #expect(throws: IncantCerebras.Failure.malformed) { try IncantCerebras.seam("Then run the tests") }
         #expect(IncantStream.context("one two three four five", words: 3) == "three four five")
     }
 
-    @Test func aPassCanChangeTheLeadItWasTypedWith() {
+    @Test func aCommitCanChangeTheLeadItWasTypedWith() {
         var g = IncantGhost(lead: " ")
         _ = g.partial("then run the tests")
-        #expect(g.live("Then run the tests", of: "then run the tests", lead: ". ") == IncantGhost.Edit(delete: 19, text: ". Then run the tests"))
+        #expect(g.commit("Then run the tests", lead: ". ") == IncantGhost.Edit(delete: 19, text: ". Then run the tests"))
         #expect(g.lead == ". ")
-        #expect(g.commit("Then run the tests", lead: " ") == IncantGhost.Edit(delete: 20, text: " Then run the tests"))
+    }
+}
+
+@Suite struct IncantHistoryTests {
+    @Test func theLastDictationsAreKeptInAPrivateFile() throws {
+        let url = FileManager.default.temporaryDirectory.appending(path: "incant-history-\(UUID().uuidString)/history.jsonl")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        #expect(IncantHistory.last(in: url) == nil)
+        for i in 0..<(IncantHistory.keep + 3) {
+            try IncantHistory.append(IncantHistoryEntry(at: Date(timeIntervalSince1970: Double(i)), app: "com.example.app",
+                                                        raw: ["um line one", "line two"], text: "Line one.\nLine \(i)"), to: url)
+        }
+        let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n")
+        #expect(lines.count == IncantHistory.keep)   // one line each, the oldest dropped
+        let last = try #require(IncantHistory.last(in: url))
+        #expect(last.text == "Line one.\nLine \(IncantHistory.keep + 2)" && last.raw == ["um line one", "line two"] && last.app == "com.example.app")
+        #expect(try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int == 0o600)
     }
 }

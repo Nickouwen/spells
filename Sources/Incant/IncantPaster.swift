@@ -36,12 +36,8 @@ import AppKit
         generation += 1
         let gen = generation
 
-        let source = CGEventSource(stateID: .combinedSessionState)
-        for down in [true, false] {
-            let e = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: down)   // 9 = V
-            e?.flags = .maskCommand
-            e?.post(tap: .cghidEventTap)
-        }
+        // Marked like the typer's keys: mid-dictation, with Fn held, an unmarked ⌘V is a chord to the Fn tap.
+        IncantTyper.press(9, flags: .maskCommand)   // 9 = V
 
         Task {
             // Apps read the pasteboard asynchronously; Electron/remote-desktop ones can take well over 300 ms.

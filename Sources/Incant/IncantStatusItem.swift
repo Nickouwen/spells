@@ -1,5 +1,6 @@
 import AppKit
 import SpellsKit
+import IncantCore
 
 /// Menu-bar waveform glyph (Resources/Incant/MenuBar*.png): template = ready, painted green = listening,
 /// dimmed = a permission is missing. The menu lists both
@@ -32,6 +33,10 @@ import SpellsKit
         menu.addItem(info("Incant — dictation"))
         menu.addItem(permission("Microphone", ok: IncantPermissions.microphone == .authorized, pane: "Privacy_Microphone"))
         menu.addItem(permission("Accessibility", ok: IncantPermissions.accessibility, pane: "Privacy_Accessibility"))
+        menu.addItem(.separator())
+        let last = action("Paste last dictation", #selector(pasteLast))
+        last.isEnabled = IncantHistory.last(in: IncantSession.historyURL) != nil
+        menu.addItem(last)
         menu.addItem(.separator())
         menu.addItem(action("Settings…", #selector(openSettings)))
         menu.addItem(action("Open Spells", #selector(openSpells)))
@@ -66,6 +71,13 @@ import SpellsKit
     @objc private func openSpells() {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Spells.launcherBundleID) else { return }
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    /// The last dictation again, where the cursor is now (an insert that went wrong, a field that lost it).
+    @objc private func pasteLast() {
+        guard let text = IncantHistory.last(in: IncantSession.historyURL)?.text else { return }
+        // After the menu has closed, so the paste goes to the app in front.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { IncantPaster.paste(text) }
     }
 
     @objc private func openSettings() { IncantWindows.showSettings() }

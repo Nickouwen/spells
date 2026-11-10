@@ -9,11 +9,13 @@ import IncantCore
 @MainActor final class IncantKeyTap {
     private let onEvent: (IncantKeyEvent) -> Void
     private let isListening: () -> Bool
+    /// Every real key press (not Incant's own, not the Escape it swallows), before any chord it makes is reported.
+    private let onUserInput: () -> Void
     private var tap: CFMachPort?
     private var fnDown = false
 
-    init(onEvent: @escaping (IncantKeyEvent) -> Void, isListening: @escaping () -> Bool) {
-        self.onEvent = onEvent; self.isListening = isListening
+    init(onEvent: @escaping (IncantKeyEvent) -> Void, isListening: @escaping () -> Bool, onUserInput: @escaping () -> Void) {
+        self.onEvent = onEvent; self.isListening = isListening; self.onUserInput = onUserInput
     }
 
     /// Installs the tap; until Accessibility is granted that fails, so it retries every 2 s.
@@ -54,11 +56,11 @@ import IncantCore
             return false
         case .keyDown:
             if event.getIntegerValueField(.eventSourceUserData) == IncantTyper.marker { return false }   // our own typing
-            if event.getIntegerValueField(.keyboardEventKeycode) == 53 {
-                guard isListening() else { return false }
+            if event.getIntegerValueField(.keyboardEventKeycode) == 53, isListening() {
                 onEvent(.escape)
                 return true
             }
+            onUserInput()
             if fnDown { onEvent(.otherKeyDown) }
             return false
         default:

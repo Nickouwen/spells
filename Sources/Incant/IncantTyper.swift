@@ -31,7 +31,22 @@ import AppKit
         for _ in 0..<max(0, count) { press(51, flags: []) }   // 51 = Delete
     }
 
-    private static func press(_ key: CGKeyCode, flags: CGEventFlags, unicode: [UInt16]? = nil) {
+    /// Past this many keystrokes an edit is pasted instead (a sentence's rewrite at its pause is typically
+    /// 30–150 Deletes, which read as the text being eaten and retyped).
+    static let pasteOver = 20
+
+    /// An edit — delete `count` characters before the cursor, then `text` — as keystrokes when it's small;
+    /// past `pasteOver` the old text is still deleted key by key, and the new text pasted in one step.
+    /// ponytail: not selected with Shift+Left and pasted over — in T3 Code's composer (Electron) only the first
+    /// of ~100 Shift+Lefts took (2026-11-04), so the paste landed beside the old sentence, duplicating it.
+    static func replace(delete count: Int, with text: String) {
+        let keys = count + (text.utf16.count + 19) / 20 + text.filter(\.isNewline).count
+        delete(count)
+        guard keys > pasteOver, !text.isEmpty else { type(text); return }
+        IncantPaster.paste(text)
+    }
+
+    static func press(_ key: CGKeyCode, flags: CGEventFlags, unicode: [UInt16]? = nil) {
         let source = CGEventSource(stateID: .combinedSessionState)
         for down in [true, false] {
             guard let e = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down) else { continue }

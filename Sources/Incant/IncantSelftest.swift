@@ -3,7 +3,8 @@ import SpellsKit
 import IncantCore
 
 /// `Incant --selftest <file.wav>`: streams a 16 kHz mono 16-bit recording at real-time pace through the
-/// same socket and correction a dictation uses, then prints the texts and timings. No UI, key tap or
+/// same socket and corrections a dictation uses (the one pass, and stream mode's pause pass), then prints the
+/// texts and timings. No UI, key tap or
 /// paste. Printing the text is the point here; the app never logs it.
 enum IncantSelftest {
     static func run(_ path: String) async -> Int32 {
@@ -26,12 +27,15 @@ enum IncantSelftest {
         let committed = await socket.finish(last)
         let commitMs = incantNowMs() - released
         let result = await fix.run(committed, settings: settings)
+        // Stream mode's pause pass on the same words, after a sentence that's already typed.
+        let seam = await fix.seam(after: "I ran the build and it passed all the tests", committed, settings: settings.seam, cutoffMs: 1500)
         print("""
             committed: \(committed)
             commit_ms: \(commitMs)
             fixed: \(result.text)
             source: \(result.source.rawValue)
             fix_ms: \(result.ms)
+            seam: \((seam.lead ?? "none").debugDescription) + \(seam.result.text) (\(seam.result.source.rawValue), \(seam.result.ms) ms)
             total_ms: \(incantNowMs() - released)
             """)
         return committed.isEmpty ? 1 : 0
