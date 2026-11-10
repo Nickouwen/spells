@@ -3,7 +3,8 @@
 # dist/release/<App>-<version>.zip and writes dist/release/catalog.json, the file the launcher reads
 # (ModuleCatalog). Each module entry copies the app's SpellsModule manifest and adds version, url and
 # sha256. --base-url is where the zips will be served from (default: the GitHub release for TAG);
-# --publish creates that GitHub release with gh and uploads everything. A local test:
+# --publish creates that GitHub release with gh and uploads everything: TAG must be v<VERSION>, the tree
+# clean and the commit pushed, and afterwards VERSION moves to the next patch number. A local test:
 #   scripts/release.sh --base-url "file://$PWD/dist/release"   then point catalog_url at the json.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,6 +18,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -d "$DIST/Spells.app" ]] || { echo "release: run scripts/build.sh first" >&2; exit 1; }
+VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+fail() { echo "release: $1" >&2; exit 1; }
+if [[ -n "$TAG" ]]; then   # a published release is exactly one commit, pushed, at the version in VERSION
+  [[ "$TAG" == "v$VERSION" ]] || fail "the tag must be v$VERSION (the VERSION file names the release being built)"
+  [[ -z "$(git -C "$ROOT" status --porcelain)" ]] || fail "commit your changes first: the tag must point at the code that was built"
+  HEAD_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+  [[ -n "$(git -C "$ROOT" branch -r --contains "$HEAD_SHA")" ]] || fail "push this commit first: the tag needs it on GitHub"
+  gh release view "$TAG" >/dev/null 2>&1 && fail "$TAG is already published: raise VERSION"
+fi
 if [[ -z "$BASE" ]]; then
   [[ -n "$TAG" ]] || { echo "release: --base-url or --publish TAG is needed to know where the zips will live" >&2; exit 64; }
   BASE="https://github.com/Nickouwen/spells/releases/download/$TAG"
@@ -30,6 +40,7 @@ entries=(); launcher=""
 for app in "$DIST"/*.app; do
   name="$(basename "$app" .app)"
   version="$(plist "$app" CFBundleShortVersionString)"
+  [[ "$version" == "$VERSION" ]] || fail "dist/$name.app is $version, not $VERSION: run scripts/build.sh"
   zip="$OUT/$name-$version.zip"
   ditto -c -k --keepParent "$app" "$zip"   # keeps signatures, symlinks and resource forks intact
   sha="$(shasum -a 256 "$zip" | awk '{print $1}')"
@@ -61,6 +72,11 @@ done
 echo "wrote $OUT/catalog.json ($(( ${#entries[@]} )) modules + launcher, zips served from $BASE)"
 
 if [[ -n "$TAG" ]]; then
-  gh release create "$TAG" "$OUT"/*.zip "$OUT/catalog.json" --title "Spells $TAG" --generate-notes
+  gh release create "$TAG" "$OUT"/*.zip "$OUT/catalog.json" --title "Spells $TAG" --generate-notes --target "$HEAD_SHA"
   echo "published https://github.com/Nickouwen/spells/releases/tag/$TAG"
+  # The next build is the next version, so a development build never carries a published release's number
+  # (two weeks of builds shared 0.1.x with the 27 Oct release: reinstalling from the hub gave the old code).
+  next="${VERSION%.*}.$(( ${VERSION##*.} + 1 ))"
+  echo "$next" > "$ROOT/VERSION"
+  echo "VERSION is now $next: commit it"
 fi

@@ -19,7 +19,7 @@ files) and `SpellsUI` (design primitives, module windows and URL verbs); each mo
 
 ## Privacy model
 
-Time-tracking data is stored locally. Depending on which helpers you enable, the app can read window titles, browser URLs, microphone/system audio, and calendar metadata. Optional AI features send data to configured services: TypeSafe for activity classification, ElevenLabs for speech transcription, Cerebras for dictation correction, and Claude CLI for summaries and answers. Standup generation is off by default; when enabled it can read local Claude transcripts and meeting notes. Proof anchoring contacts DigiCert/FreeTSA with a chain digest, not raw activity records.
+Time-tracking data is stored locally. Depending on which helpers you enable, the app can read window titles, browser URLs, microphone/system audio, and calendar metadata. Optional AI features send data to configured services: TypeSafe for activity classification, ElevenLabs for speech transcription, Cerebras for dictation correction, and Claude CLI for summaries and answers. Standup generation is off by default; when enabled it can read local Claude transcripts and meeting notes. Proof anchoring contacts DigiCert/FreeTSA with a chain digest, not raw activity records. Incant keeps your last 200 dictations in a local file only you can read (`incant/history.jsonl`, for "Paste last dictation"); delete the file to clear it. Scry keeps a processed call's audio for 7 days (`scry/kept`), so a call can be transcribed again, then deletes it.
 
 No real user database, recordings, transcripts, exports, API keys, or private planning history are included in this public snapshot.
 
@@ -50,13 +50,17 @@ to the Trash, new copy in, relaunch); Remove quits it, turns its login item off 
 
 ```sh
 scripts/build.sh
-scripts/release.sh --publish v0.2.0          # zips dist/*.app, writes catalog.json, creates the GitHub release
+scripts/release.sh --publish "v$(cat VERSION)"   # zips dist/*.app, writes catalog.json, creates the GitHub release
 scripts/release.sh --base-url "file://$PWD/dist/release"   # a local catalog for testing
 ```
 
 Every app, the launcher included, also checks the catalog for itself 30 s after launch and every six
 hours. When its entry is newer it asks "Update / Later" (Later snoozes a day; a Scry recording or an
 Incant dictation defers the question). Update downloads, verifies, swaps its own bundle and relaunches.
+
+Every app carries the one suite version in `VERSION`, stamped in by `scripts/build.sh`. A release must be
+`v<VERSION>` from a clean, pushed commit; publishing then moves `VERSION` to the next patch number, so a
+development build never shares a number with the release before it.
 
 To test against a local or forked catalog, put its URL in `~/Library/Application Support/Spells/spells/settings.json`
 as `catalog_url`. Modules are signed with an Apple Development certificate for now; a Developer ID

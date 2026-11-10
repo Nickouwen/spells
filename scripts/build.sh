@@ -22,11 +22,14 @@ TRANSMUTE="${DIST:?}/Transmute.app"
 WARD="${DIST:?}/Ward.app"
 rm -rf "${DIST:?}/Spells.app" "${DIST:?}/Rewind.app" "${DIST:?}/Incant.app" "${DIST:?}/Scry.app" "${DIST:?}/Transmute.app" "${DIST:?}/Ward.app" "${DIST:?}/spellsctl"
 
+VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
 # bundle <dest.app> <executable>: Contents/{MacOS/<exe>, Info.plist, PkgInfo, Resources/}
 bundle() {
   mkdir -p "$1/Contents/MacOS" "$1/Contents/Resources"
   cp "$BIN/$2" "$1/Contents/MacOS/$2"
   cp "$ROOT/Resources/$2/Info.plist" "$1/Contents/Info.plist"
+  # One version for the whole suite (VERSION), stamped here: a module's number can't be forgotten or drift.
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" -c "Set :CFBundleVersion $VERSION" "$1/Contents/Info.plist"
   [[ -f "$ROOT/Resources/$2/AppIcon.icns" ]] && cp "$ROOT/Resources/$2/AppIcon.icns" "$1/Contents/Resources/"
   for f in "$ROOT/Resources/$2"/MenuBar*.png; do [[ -f "$f" ]] && cp "$f" "$1/Contents/Resources/"; done   # status item glyphs
   [[ -d "$ROOT/Resources/$2/scripts" ]] && cp -R "$ROOT/Resources/$2/scripts" "$1/Contents/Resources/scripts"   # shell scripts the module runs
