@@ -16,6 +16,31 @@ public enum ScryCaptures {
         paths.home.appending(path: "scry/captures", directoryHint: .isDirectory)
     }
 
+    /// Processed captures (audio, manifest, speakers) wait here for `keepDays`: the recording is the one thing
+    /// that can't be made again, so a call can be transcribed a second time after a failure that only shows in
+    /// the note (`spellsctl scry process <dir>`). About 230 MB per hour of call.
+    public static let keepDays = 7.0
+    public static func kept(_ paths: SupportPaths = .current()) -> URL {
+        paths.home.appending(path: "scry/kept", directoryHint: .isDirectory)
+    }
+
+    /// After a successful run: a capture from `root` moves to `kept`, and kept ones recorded more than `keepDays`
+    /// ago go. One already in `kept` (processed again) stays; one from anywhere else (`spellsctl`) is deleted.
+    static func retire(_ dir: URL, paths: SupportPaths = .current(), now: Date = Date()) {
+        let fm = FileManager.default, kept = kept(paths), parent = dir.deletingLastPathComponent().standardizedFileURL.path
+        if parent == root(paths).standardizedFileURL.path {
+            try? fm.createDirectory(at: kept, withIntermediateDirectories: true)
+            // Can't be kept → it goes, rather than be processed again at the next launch.
+            do { try fm.moveItem(at: dir, to: kept.appending(path: dir.lastPathComponent)) } catch { try? fm.removeItem(at: dir) }
+        } else if parent != kept.standardizedFileURL.path {
+            try? fm.removeItem(at: dir)
+        }
+        for d in dirs(kept) {   // a dir's modification date is when its last file was added: the end of the recording
+            let recorded = (try? d.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? now
+            if now.timeIntervalSince(recorded) > keepDays * 86400 { try? fm.removeItem(at: d) }
+        }
+    }
+
     /// `error.txt` = "attempts: N" then the message (capped at 500 chars; never transcript text).
     public static func attempts(_ dir: URL) -> Int {
         guard let s = try? String(contentsOf: dir.appending(path: "error.txt"), encoding: .utf8),

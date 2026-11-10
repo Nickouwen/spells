@@ -195,3 +195,26 @@ public enum ScryMeet {
         return Dictionary(uniqueKeysWithValues: claim.map { ($0.value.label, $0.key) })
     }
 }
+
+/// Is the far side of the call really being recorded? Judged against the Meet tab's speaking marker: while
+/// Meet shows someone else speaking, the system-audio channel must carry sound. `window` seconds of marked
+/// speech are judged at a time: `broken` when less than `floor` of that time had non-zero far-side samples.
+/// What it catches (measured 2026-11-04 and 11-06, a Bluetooth headset in its call profile): 24–33 % non-zero —
+/// bursts between 2 s gaps — and a silent or missing tap, 0 %. Healthy calls measured 84–99 %.
+public struct ScryFarSideCheck: Sendable {
+    public static let window = 20.0, floor = 0.5
+    private var speech = 0.0, heard = 0.0
+    public private(set) var broken = false
+    public init() {}
+
+    /// One poll: `dt` seconds since the last one, the non-zero far-side samples (16 kHz) recorded in them, and
+    /// whether Meet marks someone else as speaking now. Returns `broken` when a window completes, else nil.
+    public mutating func feed(dt: Double, nonZero: Int, remoteSpeaking: Bool) -> Bool? {
+        guard remoteSpeaking, dt > 0, dt < 5 else { return nil }   // a stalled poll says nothing about the audio
+        speech += dt; heard += Double(nonZero) / 16000
+        guard speech >= Self.window else { return nil }
+        broken = heard / speech < Self.floor
+        speech = 0; heard = 0
+        return broken
+    }
+}

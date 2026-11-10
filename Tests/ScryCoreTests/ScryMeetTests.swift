@@ -103,3 +103,23 @@ private func tile(_ id: String, _ name: String?, self isSelf: Bool = false, _ cl
     #expect(ScryMeet.script.contains("JSON.stringify"))
     #expect(ScryMeet.script.hasPrefix("(function") && ScryMeet.script.hasSuffix("})()"))
 }
+
+@Test func theFarSideCheckFlagsACallThatIsNotBeingRecorded() {
+    // One poll a second; `share` of each second carries far-side sound while Meet marks someone else as speaking.
+    func verdicts(_ share: Double, seconds: Int, speaking: Bool = true) -> [Bool] {
+        var check = ScryFarSideCheck()
+        return (0..<seconds).compactMap { _ in check.feed(dt: 1, nonZero: Int(16000 * share), remoteSpeaking: speaking) }
+    }
+    #expect(verdicts(0.9, seconds: 60) == [false, false, false])    // a healthy call
+    #expect(verdicts(0.28, seconds: 20) == [true])                  // bursts between gaps (the headset's call profile, 2026-11-06)
+    #expect(verdicts(0, seconds: 20) == [true])                     // a silent or missing tap
+    #expect(verdicts(0, seconds: 300, speaking: false).isEmpty)     // nobody else speaking: silence is fine
+    #expect(verdicts(0, seconds: 19).isEmpty)                       // not judged before a full window of speech
+    // It recovers: the next window of good audio clears it. A stalled poll (dt 30 s) is ignored.
+    var check = ScryFarSideCheck()
+    for _ in 0..<20 { _ = check.feed(dt: 1, nonZero: 0, remoteSpeaking: true) }
+    #expect(check.broken)
+    #expect(check.feed(dt: 30, nonZero: 0, remoteSpeaking: true) == nil)
+    for _ in 0..<20 { _ = check.feed(dt: 1, nonZero: 15000, remoteSpeaking: true) }
+    #expect(!check.broken)
+}

@@ -32,12 +32,13 @@ public enum ScryPipeline {
         return URLSession(configuration: c)
     }()
 
-    /// Processes `<dir>/capture.json` (+ its audio). On success the capture dir is deleted (unless
-    /// `SCRY_KEEP_CAPTURE=1`); on failure it stays, with the attempt count + error in `error.txt`.
+    /// Processes `<dir>/capture.json` (+ its audio). On success the capture dir is retired (`ScryCaptures.retire`:
+    /// kept for a week, unless `SCRY_KEEP_CAPTURE=1` leaves it where it is); on failure it stays, with the attempt
+    /// count + error in `error.txt`.
     public static func process(captureDir: URL, settings: ScrySettings, keyterms: [String]) async throws -> Result {
         do {
             let r = try await run(captureDir, settings, keyterms)
-            if ProcessInfo.processInfo.environment["SCRY_KEEP_CAPTURE"] != "1" { try? FileManager.default.removeItem(at: captureDir) }
+            if ProcessInfo.processInfo.environment["SCRY_KEEP_CAPTURE"] != "1" { ScryCaptures.retire(captureDir) }
             return r
         } catch {
             ScryCaptures.recordFailure(captureDir, error)

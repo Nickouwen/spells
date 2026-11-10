@@ -2,7 +2,7 @@ import AVFoundation
 import CoreAudio
 import SpellsKit
 
-/// One recording: your mic (AVAudioEngine) and the system audio (a process tap that leaves this process
+/// One recording: your mic (AVCaptureSession) and the system audio (a process tap that leaves this process
 /// out), both converted to 16 kHz mono s16le and stream-written as a 2-channel WAV (ch 0 mic, ch 1 system;
 /// ch 1 stays silent without the tap). The two sources are queued per channel and written in step; on
 /// stop the shorter is padded with silence. `onMic` / `onSystem` get the same PCM for the live sockets.
@@ -20,14 +20,12 @@ final class ScryRecorder: @unchecked Sendable {
     }
 
     private let q = DispatchQueue(label: "dev.nic.spells.scry.recorder")
-    /// Replaced on restart: after a device change the old engine's input keeps its stale format (-10868).
-    private var engine = AVAudioEngine()
+    private let micDevice = SupportMic()
     private let wav: ScryWAV
-    private var configObserver: (any NSObjectProtocol)?
     private var tap = AudioObjectID(kAudioObjectUnknown), agg = AudioObjectID(kAudioObjectUnknown), proc: AudioDeviceIOProcID?
     // On `q`:
     private var mic: [Int16] = [], sys: [Int16] = [], withSystem = false, running = true
-    private var sumSq = (0.0, 0.0), received = (0, 0), sysNonZero = false
+    private var sumSq = (0.0, 0.0), received = (0, 0), sysNonZero = 0   // sysNonZero: far-side samples that aren't 0
     private var lastLevel = (0.0, 0.0)   // the latest chunk's level per channel, 0…1 (for the pill's bars)
 
     /// The louder side right now (you or the call), 0…1 on a −50…0 dBFS scale.
@@ -58,11 +56,13 @@ final class ScryRecorder: @unchecked Sendable {
         watchdog = w
     }
 
+    /// Far-side samples recorded so far that carry sound (not 0), for `ScryFarSideCheck`.
+    var systemNonZero: Int { q.sync { sysNonZero } }
     /// False while the tap looks dead (the pill says "no call audio"): see `check`.
     var systemAlive: Bool { q.sync { !systemStale } }
     private var systemStale = false
 
-    /// Every 5 s on `q`: a source that stopped delivering is restarted — the mic engine in place, the tap
+    /// Every 5 s on `q`: a source that stopped delivering is restarted — the mic session reopened, the tap
     /// rebuilt on the current output device — at most once per `retryEvery`. The mic always delivers (silence
     /// included); the tap only delivers while some process plays, so it counts as dead only when another
     /// process is running output and nothing arrives for `staleAfter`.
@@ -81,45 +81,19 @@ final class ScryRecorder: @unchecked Sendable {
         }
     }
 
-    // MARK: Mic
+    // MARK: Mic (SupportMic: the built-in mic when the default input is a Bluetooth headset)
 
     func startMic() throws {
-        installMicTap()
-        observeConfigChanges()
-        try engine.start()
+        micDevice.onPCM = { [weak self] pcm in self?.q.async { self?.append(pcm, system: false) } }
+        try micDevice.start()
+        SupportLog.scry.info("mic: \(self.micDevice.deviceName, privacy: .public)")
     }
 
-    private func observeConfigChanges() {
-        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
-        configObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
-            // The system stopped the engine because a default device changed (AirPods in/out): start afresh.
-            self?.restartMic()
-            SupportLog.scry.info("audio devices changed; mic restarted")
-        }
-    }
-
-    /// Main thread: a fresh engine on the current default devices (the old one's input node keeps the old
-    /// hardware format and refuses to start). If this fails, the watchdog tries again in `retryEvery`.
+    /// Main thread. If this fails, the watchdog tries again in `retryEvery`.
     private func restartMic() {
         guard q.sync(execute: { running }) else { return }
-        engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
-        engine = AVAudioEngine()
-        installMicTap()
-        observeConfigChanges()
-        do { try engine.start() } catch { SupportLog.scry.error("mic restart failed: \(error.localizedDescription, privacy: .public)") }
-    }
-
-    /// Taps the input in whatever format it delivers (asking for a format after a device change raises
-    /// "Failed to create tap due to format mismatch"); the resampler follows the buffers' format.
-    private func installMicTap() {
-        nonisolated(unsafe) var resample: ScryResampler?   // the tap block runs serially on the render thread
-        engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: nil) { [weak self] buf, _ in
-            guard let self, buf.format.sampleRate > 0 else { return }
-            if resample?.input != buf.format { resample = ScryResampler(from: buf.format) }
-            guard let pcm = resample?.convert(buf) else { return }
-            q.async { self.append(pcm, system: false) }
-        }
+        micDevice.stop()
+        do { try micDevice.start() } catch { SupportLog.scry.error("mic restart failed: \(error.localizedDescription, privacy: .public)") }
     }
 
     // MARK: System audio (process tap → private aggregate device → IOProc)
@@ -219,6 +193,11 @@ final class ScryRecorder: @unchecked Sendable {
         st = AudioHardwareCreateAggregateDevice(aggDesc as CFDictionary, &agg)
         guard st == noErr else { stopSystem(); throw TapFailed(step: "create aggregate device", status: st) }
         var asbd = ScryAudioProcesses.prop(tap, kAudioTapPropertyFormat, AudioStreamBasicDescription())
+        // The tap reports 48 kHz, but the aggregate delivers it at the output device's clock: 16 kHz when
+        // a Bluetooth headset is in its call profile. Read at 48 kHz, that's a third of the audio at 3×
+        // speed (and the writer pads the shortfall with 2 s silences), which Scribe can't transcribe.
+        let rate = ScryAudioProcesses.prop(agg, kAudioDevicePropertyNominalSampleRate, Float64(0))
+        if rate > 0 { asbd.mSampleRate = rate }
         guard let format = AVAudioFormat(streamDescription: &asbd), let resample = ScryResampler(from: format) else {
             stopSystem(); throw TapFailed(step: "read tap format", status: -1)
         }
@@ -252,7 +231,7 @@ final class ScryRecorder: @unchecked Sendable {
         if system { lastLevel.1 = lv } else { lastLevel.0 = lv }
         if system {
             sys += pcm; sumSq.1 += ss; received.1 += pcm.count; lastSysAt = Date()
-            if !sysNonZero, pcm.contains(where: { $0 != 0 }) { sysNonZero = true }
+            sysNonZero += pcm.count { $0 != 0 }
             onSystem?(data)
         } else {
             mic += pcm; sumSq.0 += ss; received.0 += pcm.count; lastMicAt = Date()
@@ -279,9 +258,7 @@ final class ScryRecorder: @unchecked Sendable {
     /// Stops both sources, flushes (padding the shorter channel), patches the WAV header.
     func stop() -> Stats {
         watchdog?.cancel(); watchdog = nil
-        engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
-        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
+        micDevice.stop()
         // Not starting or rebuilding right now → tear down here; otherwise that job does it when it ends.
         if !tapLock.withLock({ tapStopped = true; return tapStarting }) { tapQ.sync { stopSystem() } }
         return q.sync {
@@ -290,7 +267,7 @@ final class ScryRecorder: @unchecked Sendable {
             wav.close()
             func rms(_ s: Double, _ n: Int) -> Double { n > 0 ? (s / Double(n)).squareRoot() / 32768 : 0 }
             return Stats(frames: wav.frames, micSamples: received.0, systemSamples: received.1,
-                         micRMS: rms(sumSq.0, received.0), systemRMS: rms(sumSq.1, received.1), systemAllZero: !sysNonZero)
+                         micRMS: rms(sumSq.0, received.0), systemRMS: rms(sumSq.1, received.1), systemAllZero: sysNonZero == 0)
         }
     }
 }
@@ -367,3 +344,4 @@ final class ScryWAV {
     private static func le32(_ v: Int) -> Data { withUnsafeBytes(of: UInt32(v).littleEndian) { Data($0) } }
     private static func le16(_ v: Int) -> Data { withUnsafeBytes(of: UInt16(v).littleEndian) { Data($0) } }
 }
+

@@ -1,7 +1,8 @@
 import Foundation
 import Testing
 import ScryCore
-import ScryPipeline
+@testable import ScryPipeline
+import SpellsKit
 
 @Suite struct ScryCapturesTests {
     @Test func crashedCaptureIsRecoveredAndFailuresAreCounted() throws {
@@ -28,5 +29,33 @@ import ScryPipeline
         #expect(ScryCaptures.retryable(root).isEmpty)
         let f = try #require(ScryCaptures.failed(root).first)
         #expect(f.attempts == 3 && f.error == "Scribe HTTP 503" && f.bytes == patched.count)
+    }
+
+    @Test func aProcessedCaptureIsKeptForAWeek() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appending(path: "scry-kept-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? fm.removeItem(at: home) }
+        let paths = SupportPaths(home: home, logs: home.appending(path: "logs"))
+        func capture(in parent: URL, _ name: String) throws -> URL {
+            let d = parent.appending(path: name, directoryHint: .isDirectory)
+            try fm.createDirectory(at: d, withIntermediateDirectories: true)
+            try Data("x".utf8).write(to: d.appending(path: "audio.wav"))
+            return d
+        }
+        let kept = ScryCaptures.kept(paths)
+        // A capture from the app's folder moves to `kept`, so the next launch doesn't process it again.
+        let done = try capture(in: ScryCaptures.root(paths), "today")
+        let old = try capture(in: kept, "old"), elsewhere = try capture(in: home.appending(path: "tmp"), "cli")
+        ScryCaptures.retire(done, paths: paths)
+        #expect(!fm.fileExists(atPath: done.path) && fm.fileExists(atPath: kept.appending(path: "today/audio.wav").path))
+        #expect(ScryCaptures.retryable(ScryCaptures.root(paths)).isEmpty)
+        // Processed again from `kept`: it stays. From anywhere else: deleted, as before.
+        ScryCaptures.retire(kept.appending(path: "today"), paths: paths)
+        ScryCaptures.retire(elsewhere, paths: paths)
+        #expect(fm.fileExists(atPath: kept.appending(path: "today").path) && !fm.fileExists(atPath: elsewhere.path))
+        // Eight days on, the kept ones go.
+        #expect(fm.fileExists(atPath: old.path))
+        ScryCaptures.retire(try capture(in: ScryCaptures.root(paths), "later"), paths: paths, now: Date().addingTimeInterval(8 * 86400))
+        #expect(!fm.fileExists(atPath: old.path) && !fm.fileExists(atPath: kept.appending(path: "today").path))
     }
 }

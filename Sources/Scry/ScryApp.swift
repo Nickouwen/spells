@@ -16,6 +16,8 @@ import UserNotifications
         var live: ScryLive?, screens: [[String]] = [], timer: Timer?, levels: Timer?, invite: ScryInvite?
         /// The Meet tab's participants and speaking indicator (Chromium browsers only).
         var meet: ScryMeetWatch?
+        /// Whether the far side is really being recorded, and the poll it was last fed at (`checkFarSide`).
+        var farSide = ScryFarSideCheck(), farSideAt = Date(), farSideHeard = 0
         init(dir: URL, app: String?, recorder: ScryRecorder, settings: ScrySettings, keyterms: [String]) {
             self.dir = dir; self.app = app; self.recorder = recorder; self.settings = settings; self.keyterms = keyterms
         }
@@ -117,13 +119,38 @@ import UserNotifications
         let now = ScryNames.completed(onScreen.isEmpty ? s.screens.last.map { ScryNames.fromOCR([$0], known: (s.invite?.invitees.map(\.name) ?? []) + [s.settings.userName]) } ?? [] : onScreen, s.invite)
         let who = ScryNames.pillLabel(now, userName: s.settings.userName,
                                       fallback: s.invite?.title ?? s.app.map(Self.name) ?? "In person")
-        // The tap stopped delivering (it's being rebuilt): say so, rather than record a one-sided call quietly.
-        let warn = s.recorder.systemAlive ? "" : " · no call audio"
+        // The tap stopped delivering (it's being rebuilt), or what it delivers isn't the call: say so, rather than
+        // record a one-sided call quietly.
+        checkFarSide(s)
+        let warn = !s.recorder.systemAlive ? " · no call audio" : s.farSide.broken ? " · call audio broken" : ""
         if let ms = stopsIn {
             pill.showRecording("Ending · \(Int((Double(ms) / 1000).rounded(.up)))s · \(who.short)", tooltip: who.full)
         } else {
             let secs = Int(Date().timeIntervalSince(s.startedAt))
             pill.showRecording(String(format: "● %02d:%02d · ", secs / 60, secs % 60) + who.short + warn, tooltip: who.full + warn)
+        }
+    }
+
+    /// Once a second: Meet shows someone else speaking — is that reaching the recording (`ScryFarSideCheck`)?
+    /// If not, say so during the call (the pill, a sound, a notification) and rebuild the tap, rather than
+    /// leave a one-sided note to be found afterwards (4 of the 6 long calls before 2026-11-06).
+    private func checkFarSide(_ s: Session) {
+        guard let meet = s.meet else { return }
+        let now = Date(), heard = s.recorder.systemNonZero
+        defer { s.farSideAt = now; s.farSideHeard = heard }
+        let was = s.farSide.broken
+        guard let broken = s.farSide.feed(dt: now.timeIntervalSince(s.farSideAt), nonZero: heard - s.farSideHeard,
+                                          remoteSpeaking: meet.speaking != nil) else { return }
+        if broken {
+            SupportLog.scry.error("the far side isn't being recorded while Meet shows speech; rebuilding the tap")
+            s.recorder.rebuildSystem(reason: "no far-side audio while Meet shows speech")
+        }
+        guard broken != was else { return }
+        if broken {
+            NSSound(named: "Basso")?.play()
+            Task { await Self.notify("Scry is not hearing the call", open: nil) }
+        } else {
+            SupportLog.scry.info("the far side is being recorded again")
         }
     }
 
