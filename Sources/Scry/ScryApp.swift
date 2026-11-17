@@ -31,6 +31,9 @@ import UserNotifications
     /// A recording is in progress (an update must wait).
     var isRecording: Bool { session != nil }
     private var sigterm: (any DispatchSourceSignal)?
+    /// The ops-brain step (`ScryOps`): what was offered and pushed, transcripts being read, the offer in the pill.
+    private var ops = ScryOps.State.load(), opsReading: Set<String> = [], opsShown: ScryOps.Offer?, opsTicks = 0
+    private var opsTimer: Timer?
     nonisolated private static let canNotify = Bundle.main.bundleIdentifier != nil   // UNUserNotificationCenter traps outside a bundle
 
     /// The running instance (the pipeline's completion hops back to it).
@@ -48,6 +51,8 @@ import UserNotifications
         pill.onOpenLive = { [weak self] in self?.session?.live?.show() }
         pill.onStop = { [weak self] in self?.stop() }
         pill.onOpenNote = { url in ScryWindows.showMeetings(url) }
+        pill.onPushOps = { [weak self] in self?.pushOps() }
+        pill.onSkipOps = { [weak self] in self?.skipOps() }
         watch.onTick = { [weak self] stopsIn in self?.tickRecording(stopsIn) }
         watch.detector.never = Set(Self.loadSettings().settings.never)
         ScryWindows.onSettingsChanged = { [weak self] in self?.watch.detector.never = Set(Self.loadSettings().settings.never) }
@@ -72,6 +77,10 @@ import UserNotifications
         source.resume()
         sigterm = source
         processLeftovers()
+        opsTick()
+        opsTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.opsTick() }
+        }
     }
 
     private func handle(_ action: ScryDetectAction) {
@@ -107,6 +116,8 @@ import UserNotifications
     func notesReady(_ r: ScryPipeline.Result) {
         if session == nil { pill.showReady(title: r.summary.title, note: r.noteURL) }
         Task { await Self.notify("Meeting notes ready: \(r.summary.title)", open: r.noteURL) }
+        let s = Self.loadSettings().settings
+        if s.opsPush, let vault = ScrySettings.folder(s.opsVault) { readForOps(r.noteURL, vault: vault, userName: s.userName) }
     }
 
     private func tickRecording(_ stopsIn: Int64?) {
@@ -289,6 +300,84 @@ import UserNotifications
             SupportLog.scry.error("couldn't save never-offer: \(error.localizedDescription, privacy: .public)")
         }
         watch.detector.never.insert(app)
+    }
+
+    // MARK: Ops brain
+
+    /// Every 30 s: a waiting offer goes up when the pill is free. Every 5 min (and at launch): new transcripts
+    /// in the watched folders are read. Nothing happens while the step is off or has no vault.
+    private func opsTick() {
+        let s = Self.loadSettings().settings
+        guard s.opsPush, let vault = ScrySettings.folder(s.opsVault) else { return }
+        defer { opsTicks += 1 }
+        if opsTicks % 10 == 0 {
+            for url in ops.newTranscripts(in: s.opsSources.compactMap(ScrySettings.folder)) {
+                readForOps(url, vault: vault, userName: s.userName)
+            }
+            saveOps()
+        }
+        showOpsOffer()
+    }
+
+    /// Claude reads the transcript once; its items wait in the state file for the click.
+    private func readForOps(_ url: URL, vault: URL, userName: String) {
+        let key = url.standardizedFileURL.path
+        guard ops.transcripts[key] == nil, !opsReading.contains(key) else { return }
+        opsReading.insert(key)
+        Task {
+            let entry: ScryOps.State.Entry
+            do {
+                let offer = try await ScryOps.extract(transcript: url, vault: vault, userName: userName)
+                entry = offer.items.isEmpty ? .init(status: .nothing) : .init(status: .offered, offer: offer)
+                SupportLog.scry.info("ops: \(offer.items.count, privacy: .public) item(s) found")
+            } catch {   // shortcut: not tried again; retry on a later scan if offline failures show up
+                SupportLog.scry.error("ops: reading a transcript failed: \(String(describing: error), privacy: .private)")
+                entry = .init(status: .failed)
+            }
+            opsReading.remove(key)
+            ops.transcripts[key] = entry
+            saveOps()
+            showOpsOffer()
+        }
+    }
+
+    private func showOpsOffer() {
+        guard session == nil, !pill.isShowing, let offer = ops.waiting.first else { return }
+        opsShown = offer
+        pill.showOps(count: offer.items.count, from: (offer.transcript as NSString).lastPathComponent,
+                     detail: offer.items.map { "• \($0.title) → \($0.path)" }.joined(separator: "\n"))
+    }
+
+    /// The click: write the items, then tell Nic (a notification, and a Slack DM when set up).
+    private func pushOps() {
+        guard let offer = opsShown else { return }
+        opsShown = nil
+        let s = Self.loadSettings().settings
+        guard let vault = ScrySettings.folder(s.opsVault) else { return }
+        do {
+            let written = try ScryOps.push(offer, vault: vault)
+            ops.transcripts[offer.transcript] = .init(status: .pushed, written: written)
+            SupportLog.scry.info("ops: pushed \(written.count, privacy: .public) note(s)")
+            Task {
+                await Self.notify("Pushed \(written.count) note\(written.count == 1 ? "" : "s") to the ops brain", open: nil)
+                await ScryOps.notifySlack(written: written, offer: offer, user: s.opsSlackUser)
+            }
+        } catch {   // still offered: it comes back at the next tick
+            SupportLog.scry.error("ops: push failed: \(error.localizedDescription, privacy: .public)")
+            Task { await Self.notify("Scry couldn't push to the ops brain", open: nil) }
+        }
+        saveOps()
+    }
+
+    private func skipOps() {
+        guard let offer = opsShown else { return }
+        opsShown = nil
+        ops.transcripts[offer.transcript] = .init(status: .dismissed)
+        saveOps()
+    }
+
+    private func saveOps() {
+        do { try ops.save() } catch { SupportLog.scry.error("ops: state not saved: \(error.localizedDescription, privacy: .public)") }
     }
 
     // MARK: Settings + notifications
