@@ -82,6 +82,10 @@ private func tempVault() throws -> URL {
     #expect(ScryOps.callDate("---\ntitle: \"x\"\ndate: 2026-11-17\nstart: …\n---\n") == "2026-11-17")
     let p = ScryOps.prompt(transcript: "T", name: "n.md", date: "2026-11-17", agents: nil, notes: ScryOps.index(v), userName: "Nic")
     #expect(p.contains("deals/142-lake-shore.md") && p.contains("asked Nic to do") && p.contains("(none)"))
+    // Your own rules replace the built-in list.
+    let own = ScryOps.prompt(transcript: "T", name: "n.md", date: "d", agents: nil, notes: [], userName: "Nic",
+                             rules: "- listing: a property and its asking price")
+    #expect(own.contains("- listing: a property and its asking price") && !own.contains("asked Nic to do"))
 }
 
 @Test func opsStateTakesEachNewTranscriptOnceAndNoBacklog() throws {
@@ -115,7 +119,7 @@ private func tempVault() throws -> URL {
     let s = ScrySettings()
     #expect(!s.opsPush && s.opsVault.isEmpty && s.opsSources.isEmpty && s.opsSlackUser.isEmpty)
     var t = s
-    t.opsPush = true; t.opsVault = "~/Ops"; t.opsSources = ["~/Gemini", "/tmp/Whisper"]; t.opsSlackUser = "U123"
+    t.opsPush = true; t.opsVault = "~/Ops"; t.opsSources = ["~/Gemini", "/tmp/Whisper"]; t.opsSlackUser = "U123"; t.opsRules = "- deal: x\n- ask: y"
     #expect(ScrySettings.load(t.rows) == t)
     #expect(ScrySettings.folder("relative") == nil && ScrySettings.folder("  ") == nil && ScrySettings.folder("~/Ops")?.path.hasSuffix("/Ops") == true)
 }

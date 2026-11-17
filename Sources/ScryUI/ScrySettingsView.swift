@@ -3,6 +3,7 @@ import SwiftUI
 import SpellsKit
 import SpellsUI
 import ScryCore
+import ScryPipeline
 
 /// Scry's settings window: recording behaviour, the notes folder, your name, never-offer apps, the
 /// ElevenLabs key and the claude CLI path. Writes Scry's own settings file; Scry re-reads it per event.
@@ -21,6 +22,7 @@ public struct ScrySettingsView: View {
     @State private var opsVault = ""
     @State private var opsSources = ""
     @State private var opsSlackUser = ""
+    @State private var opsRules = ""
     @State private var error: String?
     @Environment(\.openURL) private var openURL
 
@@ -92,6 +94,8 @@ public struct ScrySettingsView: View {
                 SettingsDivider()
                 editor("Other transcript folders to watch (one per line)", $opsSources, lines: 3)
                 SettingsDivider()
+                editor("What to look for (one kind per line: \u{201C}kind: what it is\u{201D})", $opsRules, lines: 7)
+                SettingsDivider()
                 HStack(spacing: Theme.Space.s) {
                     VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                         Text("Slack member ID for a DM").textRole(.body)
@@ -131,6 +135,9 @@ public struct ScrySettingsView: View {
         s.opsVault = opsVault.trimmingCharacters(in: .whitespacesAndNewlines)
         s.opsSources = opsSources.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         s.opsSlackUser = opsSlackUser.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The built-in list is stored as "" so later changes to it still reach this Mac.
+        let rules = opsRules.trimmingCharacters(in: .whitespacesAndNewlines)
+        s.opsRules = rules == defaultRules ? "" : rules
         return s
     }
 
@@ -149,6 +156,11 @@ public struct ScrySettingsView: View {
         opsVault = s.opsVault
         opsSources = s.opsSources.joined(separator: "\n")
         opsSlackUser = s.opsSlackUser
+        opsRules = s.opsRules.isEmpty ? defaultRules : s.opsRules
+    }
+
+    private var defaultRules: String {
+        ScryOps.defaultRules(userName: saved.userName).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Writes only the rows that changed.

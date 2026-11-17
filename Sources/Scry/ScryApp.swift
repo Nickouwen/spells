@@ -117,7 +117,7 @@ import UserNotifications
         if session == nil { pill.showReady(title: r.summary.title, note: r.noteURL) }
         Task { await Self.notify("Meeting notes ready: \(r.summary.title)", open: r.noteURL) }
         let s = Self.loadSettings().settings
-        if s.opsPush, let vault = ScrySettings.folder(s.opsVault) { readForOps(r.noteURL, vault: vault, userName: s.userName) }
+        if s.opsPush, let vault = ScrySettings.folder(s.opsVault) { readForOps(r.noteURL, vault: vault, userName: s.userName, rules: s.opsRules) }
     }
 
     private func tickRecording(_ stopsIn: Int64?) {
@@ -312,7 +312,7 @@ import UserNotifications
         defer { opsTicks += 1 }
         if opsTicks % 10 == 0 {
             for url in ops.newTranscripts(in: s.opsSources.compactMap(ScrySettings.folder)) {
-                readForOps(url, vault: vault, userName: s.userName)
+                readForOps(url, vault: vault, userName: s.userName, rules: s.opsRules)
             }
             saveOps()
         }
@@ -320,14 +320,14 @@ import UserNotifications
     }
 
     /// Claude reads the transcript once; its items wait in the state file for the click.
-    private func readForOps(_ url: URL, vault: URL, userName: String) {
+    private func readForOps(_ url: URL, vault: URL, userName: String, rules: String) {
         let key = url.standardizedFileURL.path
         guard ops.transcripts[key] == nil, !opsReading.contains(key) else { return }
         opsReading.insert(key)
         Task {
             let entry: ScryOps.State.Entry
             do {
-                let offer = try await ScryOps.extract(transcript: url, vault: vault, userName: userName)
+                let offer = try await ScryOps.extract(transcript: url, vault: vault, userName: userName, rules: rules)
                 entry = offer.items.isEmpty ? .init(status: .nothing) : .init(status: .offered, offer: offer)
                 SupportLog.scry.info("ops: \(offer.items.count, privacy: .public) item(s) found")
             } catch {   // shortcut: not tried again; retry on a later scan if offline failures show up
@@ -348,7 +348,7 @@ import UserNotifications
                      detail: offer.items.map { "• \($0.title) → \($0.path)" }.joined(separator: "\n"))
     }
 
-    /// The click: write the items, then tell Nic (a notification, and a Slack DM when set up).
+    /// The click: write the items, then say so (a notification, and a Slack DM when set up).
     private func pushOps() {
         guard let offer = opsShown else { return }
         opsShown = nil

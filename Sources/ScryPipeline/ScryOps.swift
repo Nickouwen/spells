@@ -9,7 +9,7 @@ import ScryCore
 /// on every text first. `State` remembers every transcript, so each one is processed one time only.
 public enum ScryOps {
     public struct Item: Codable, Equatable, Sendable {
-        /// deal, document, decision, process, person, number or ask.
+        /// One of the kinds in the rules (deal, document, decision… by default).
         public var kind: String, title: String
         /// Relative to the vault: an existing note gets `text` appended, a new path gets `text` as the note.
         public var path: String, text: String
@@ -27,31 +27,41 @@ public enum ScryOps {
 
     // MARK: - Extract
 
-    /// The transcript → Claude → the items, with unsafe paths dropped. `date` is the call's day (yyyy-MM-dd).
-    public static func extract(transcript: URL, vault: URL, userName: String) async throws -> Offer {
-        let text = String(try String(contentsOf: transcript, encoding: .utf8).prefix(400_000))
-        let agents = (try? String(contentsOf: vault.appending(path: "AGENTS.md"), encoding: .utf8)).map { String($0.prefix(30_000)) }
-        let date = callDate(text) ?? day((try? transcript.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date())
-        let reply = try await ScryPipeline.claude(prompt(transcript: text, name: transcript.lastPathComponent, date: date,
-                                                         agents: agents, notes: index(vault), userName: userName))
-        let items = try parse(reply).filter { target($0.path, in: vault) != nil }
-        return Offer(transcript: transcript.standardizedFileURL.path, date: date, items: items)
-    }
-
-    static func prompt(transcript: String, name: String, date: String, agents: String?, notes: [String], userName: String) -> String {
+    /// What to look for when `ScrySettings.opsRules` is empty.
+    public static func defaultRules(userName: String) -> String {
         """
-        You file the useful items from one meeting transcript into the team's shared Obsidian vault (the ops brain). \
-        Return ONLY one JSON object, nothing else:
-        {"items": [{"kind": "deal", "title": "short title", "path": "folder/note.md", "text": "markdown"}]}
-
-        What to take ("kind"):
-        - deal: a property, lead or transaction, and its status.
+        - deal: a sale, lead or customer, and its status.
         - document: a document, template or file that was named or shared.
         - decision: something the team decided.
         - process: how a task is done.
         - person: a new contact or team member, or a change in someone's role.
         - number: a price, count, rate or target that the team needs.
         - ask: something that someone asked \(userName) to do.
+        """
+    }
+
+    /// The transcript → Claude → the items, with unsafe paths dropped. `date` is the call's day (yyyy-MM-dd).
+    /// `rules` is what to look for (empty = `defaultRules`).
+    public static func extract(transcript: URL, vault: URL, userName: String, rules: String = "") async throws -> Offer {
+        let text = String(try String(contentsOf: transcript, encoding: .utf8).prefix(400_000))
+        let agents = (try? String(contentsOf: vault.appending(path: "AGENTS.md"), encoding: .utf8)).map { String($0.prefix(30_000)) }
+        let date = callDate(text) ?? day((try? transcript.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date())
+        let reply = try await ScryPipeline.claude(prompt(transcript: text, name: transcript.lastPathComponent, date: date,
+                                                         agents: agents, notes: index(vault), userName: userName, rules: rules))
+        let items = try parse(reply).filter { target($0.path, in: vault) != nil }
+        return Offer(transcript: transcript.standardizedFileURL.path, date: date, items: items)
+    }
+
+    static func prompt(transcript: String, name: String, date: String, agents: String?, notes: [String], userName: String,
+                       rules: String = "") -> String {
+        let take = rules.allSatisfy(\.isWhitespace) ? defaultRules(userName: userName) : rules
+        return """
+        You file the useful items from one meeting transcript into the team's shared Obsidian vault (the ops brain). \
+        Return ONLY one JSON object, nothing else:
+        {"items": [{"kind": "deal", "title": "short title", "path": "folder/note.md", "text": "markdown"}]}
+
+        What to take ("kind" is the word before the colon):
+        \(take.trimmingCharacters(in: .whitespacesAndNewlines))
         Take only what the team needs later. Skip small talk. Few items is fine. No items is fine: {"items": []}.
 
         Where it goes ("path"):

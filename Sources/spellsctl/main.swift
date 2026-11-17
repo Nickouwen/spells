@@ -37,6 +37,7 @@ usage: spellsctl export  [--period current|previous|YYYY-MM-DD..YYYY-MM-DD] [--m
        spellsctl settings <module> get|unset <key>
        spellsctl settings <module> set <key> <value>     (value - reads stdin, for multi-line prompts)
        spellsctl settings <module> add|remove <key> <item>   (one line of a list, e.g. incant incant_keyterms)
+       spellsctl settings <module> import <file.json>    (merge a shared config: {"key": "value", …})
                         (no rebuild: Incant, Scry and Transmute re-read on use, Rewind live; login_item,
                          Scry's never-record apps and Ward pick changes up at the next launch)
        spellsctl rules [list] [--all]

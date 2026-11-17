@@ -151,7 +151,7 @@ public struct ScrySettings: Equatable, Sendable {
     public static let autoOfferKey = "scry_auto_offer", liveKey = "scry_live", rootKey = "scry_root",
                       neverKey = "scry_never_apps", nameKey = "scry_user_name",
                       autoRecordKey = "scry_auto_record", opsPushKey = "scry_ops_push", opsVaultKey = "scry_ops_vault",
-                      opsSourcesKey = "scry_ops_sources", opsSlackUserKey = "scry_ops_slack_user"
+                      opsSourcesKey = "scry_ops_sources", opsSlackUserKey = "scry_ops_slack_user", opsRulesKey = "scry_ops_rules"
     public static let defaultRoot = "~/Documents/Scry"
     public var autoOffer = true
     /// Start recording on its own when a call starts, instead of offering (browsers: only with a call-titled window).
@@ -164,12 +164,15 @@ public struct ScrySettings: Equatable, Sendable {
     public var userName = "You"
     /// After a call, offer to push what the team needs into the ops vault (`ScryOps`). Off until set up.
     public var opsPush = false
-    /// The ops vault's folder (the Syncthing copy of bluepeak-operations); empty = not set up.
+    /// The ops vault's folder (a team's shared Obsidian vault); empty = not set up.
     public var opsVault = ""
     /// Folders where other tools save transcripts (Whisper Flow, Google Meet's Gemini notes), watched for new ones.
     public var opsSources: [String] = []
     /// Slack member ID that gets a DM listing the notes after a push (with a bot token set); empty = no DM.
     public var opsSlackUser = ""
+    /// What Claude looks for in a transcript, one kind per line ("deal: a sale or lead, and its status");
+    /// empty = `ScryOps.defaultRules`.
+    public var opsRules = ""
     public init() {}
     /// Missing or blank rows = defaults; booleans "1"/"0"; `never` one bundle ID per line.
     public static func load(_ settings: [String: String]) -> ScrySettings {
@@ -187,6 +190,7 @@ public struct ScrySettings: Equatable, Sendable {
         if let v = value(opsVaultKey) { s.opsVault = v }
         if let v = value(opsSourcesKey) { s.opsSources = lines(v) }
         if let v = value(opsSlackUserKey) { s.opsSlackUser = v }
+        if let v = value(opsRulesKey) { s.opsRules = v }
         return s
     }
     private static func lines(_ v: String) -> [String] {
@@ -205,7 +209,7 @@ public struct ScrySettings: Equatable, Sendable {
     public var rows: [String: String] {
         [Self.autoOfferKey: autoOffer ? "1" : "0", Self.autoRecordKey: autoRecord ? "1" : "0", Self.liveKey: live ? "1" : "0", Self.rootKey: root,
          Self.neverKey: never.joined(separator: "\n"), Self.nameKey: userName, Self.opsPushKey: opsPush ? "1" : "0",
-         Self.opsVaultKey: opsVault, Self.opsSourcesKey: opsSources.joined(separator: "\n"), Self.opsSlackUserKey: opsSlackUser]
+         Self.opsVaultKey: opsVault, Self.opsSourcesKey: opsSources.joined(separator: "\n"), Self.opsSlackUserKey: opsSlackUser, Self.opsRulesKey: opsRules]
     }
     /// A folder setting (`opsVault`, `opsSources`) as a URL, ~ expanded; nil when blank or relative.
     public static func folder(_ path: String) -> URL? {
