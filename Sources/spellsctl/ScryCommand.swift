@@ -70,7 +70,9 @@ import ScryPipeline
         for i in offer.items { say("[\(i.kind)] \(i.title) → \(i.path)\n\(i.text)\n") }
         say("\(offer.items.count) item(s) from \(url.lastPathComponent) (\(offer.date))")
         if flags.contains("--push") {
-            for p in try ScryOps.push(offer, vault: vault) { say("wrote \(vault.appending(path: p).path)") }
+            let r = ScryOps.push(offer, vault: vault)
+            for p in r.written { say("wrote \(vault.appending(path: p).path)") }
+            if r.failed > 0 { say("\(r.failed) item(s) not written (see the log)") }
         }
 
     case "list":

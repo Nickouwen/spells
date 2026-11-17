@@ -71,14 +71,14 @@ private let cases: [EchoCase] = [
 
 @Test func levelsMeasureTheLagAndTellSpeakersFromHeadphones() {
     // The far side talks in 1 s bursts; the mic hears it 6 frames (300 ms) later at −30 dB, over a −70 dB floor.
-    let far: [Float] = (0..<2000).map { ($0 / 20) % 2 == 0 ? 0.1 : 1e-9 }
+    let far: [Float] = (0..<4000).map { ($0 / 20) % 2 == 0 ? 0.1 : 1e-9 }
     let speakers = ScryLevels(mic: far.indices.map { $0 < 6 ? 1e-7 : far[$0 - 6] * 1e-3 + 1e-7 }, far: far)
     #expect(speakers.lag == 6 && speakers.throughSpeakers)
     #expect(abs(10 * log10(speakers.coupling!) + 30) < 1)
     let headphones = ScryLevels(mic: far.map { _ in 1e-7 }, far: far)
     #expect(!headphones.throughSpeakers)
     // Too little loud far side to measure: no coupling, so echo falls back to the 0.4 s word match.
-    let quiet = ScryLevels(mic: [Float](repeating: 1e-7, count: 2000), far: [Float](repeating: 1e-9, count: 2000))
+    let quiet = ScryLevels(mic: [Float](repeating: 1e-7, count: 4000), far: [Float](repeating: 1e-9, count: 4000))
     #expect(quiet.coupling == nil && !quiet.throughSpeakers)
     let you = ScrySegment(speaker: "You", start: 1, end: 1.2, text: "Yes"), them = ScrySegment(speaker: "Speaker A", start: 1, end: 1.2, text: "Yes")
     #expect(ScryTranscript.withoutEcho([them, you], levels: quiet) == [them])

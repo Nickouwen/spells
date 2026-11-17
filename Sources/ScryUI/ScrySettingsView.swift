@@ -78,7 +78,11 @@ public struct ScrySettingsView: View {
                     Spacer()
                     TextField(SpellsClaude.defaultPath, text: $claudePath).textFieldStyle(.roundedBorder).font(TextRole.mono.font).frame(width: 240)
                 }
-                SettingsSaveRow(dirty: edited != saved || claudePath != savedClaudePath) { persist(edited); saveClaudePath() }
+                SettingsSaveRow(dirty: edited != saved || claudePath != savedClaudePath) {
+                    let defaultShown = opsRules == defaultRules   // follows a new name in "asked <name> to do"
+                    persist(edited); showNotes(saved); saveClaudePath()
+                    if defaultShown { opsRules = defaultRules }
+                }
             }
             SettingsSection("Ops brain", detail: "After a call, Claude finds what the team needs: deals, documents, decisions, processes, people, numbers and asks. The pill offers to push them into the ops vault. Nothing is written until you click it.") {
                 SettingsToggleRow("Offer to push call items to the ops brain", isOn: Binding(get: { saved.opsPush }, set: { v in
@@ -104,7 +108,7 @@ public struct ScrySettingsView: View {
                     Spacer()
                     TextField("Not set", text: $opsSlackUser).textFieldStyle(.roundedBorder).font(TextRole.mono.font).frame(width: 240)
                 }
-                SettingsSaveRow(dirty: editedOps != saved) { persist(editedOps) }
+                SettingsSaveRow(dirty: editedOps != saved) { persist(editedOps); showOps(saved) }
             }
             SettingsSection("ElevenLabs", detail: "Scribe transcribes the recording. The key is kept in the Keychain (or ~/Library/Application Support/Spells/.env).") {
                 HStack(spacing: Theme.Space.s) {
@@ -143,16 +147,20 @@ public struct ScrySettingsView: View {
 
     private func load() {
         let rows = SpellSettingsFile.scry().all()
-        show(ScrySettings.load(rows))
+        saved = ScrySettings.load(rows)
+        showNotes(saved); showOps(saved)
         savedClaudePath = rows[SpellsClaude.key] ?? ""
         claudePath = savedClaudePath
     }
 
-    private func show(_ s: ScrySettings) {
-        saved = s
+    /// Each section's fields are reset only by its own Save, so a toggle or the other Save keeps unsaved typing.
+    private func showNotes(_ s: ScrySettings) {
         root = s.root
         name = s.userName
         never = s.never.joined(separator: "\n")
+    }
+
+    private func showOps(_ s: ScrySettings) {
         opsVault = s.opsVault
         opsSources = s.opsSources.joined(separator: "\n")
         opsSlackUser = s.opsSlackUser
@@ -167,7 +175,7 @@ public struct ScrySettingsView: View {
     private func persist(_ s: ScrySettings) {
         let old = saved.rows
         let changed = s.rows.filter { old[$0.key] != $0.value }
-        show(s)
+        saved = s
         write(changed)
     }
 

@@ -44,6 +44,12 @@ private func tempVault() throws -> URL {
     defer { try? FileManager.default.removeItem(at: outside) }
     try FileManager.default.createSymbolicLink(at: v.appending(path: "escape"), withDestinationURL: outside)
     #expect(ScryOps.target("escape/x.md", in: v) == nil)
+    // A note that is itself a symlink out of the vault.
+    try "x".write(to: outside.appending(path: "other.md"), atomically: true, encoding: .utf8)
+    try FileManager.default.createSymbolicLink(at: v.appending(path: "deals/link.md"), withDestinationURL: outside.appending(path: "other.md"))
+    #expect(ScryOps.target("deals/link.md", in: v) == nil)
+    // A vault folder that doesn't exist (a typo, not synced yet) gets nothing written, and no new folder.
+    #expect(ScryOps.target("deals/x.md", in: v.appending(path: "missing")) == nil)
 }
 
 @Test func opsPushAppendsOrCreatesWithASourceLineAndDeletesNothing() throws {
@@ -55,8 +61,8 @@ private func tempVault() throws -> URL {
         .init(kind: "deal", title: "Lake Shore again", path: "deals/142-lake-shore.md", text: "## Also\n\nClosing Friday."),
         .init(kind: "x", title: "bad", path: "../outside.md", text: "nope"),
     ])
-    let written = try ScryOps.push(offer, vault: v)
-    #expect(written == ["deals/142-lake-shore.md", "people/max.md"])
+    let (written, failed) = ScryOps.push(offer, vault: v)
+    #expect(written == ["deals/142-lake-shore.md", "people/max.md"] && failed == 1)   // the unsafe path counts as failed
     let deal = try String(contentsOf: v.appending(path: "deals/142-lake-shore.md"), encoding: .utf8)
     let source = "Source: 2026-11-17-1039-listing.md (2026-11-17), filed by Scry."
     #expect(deal == "# 142 Lake Shore\n\nListed.\n\n\n## Update\n\nOffer at $86,128. Seller SSN [removed].\n\n\(source)\n\n\n## Also\n\nClosing Friday.\n\n\(source)\n")
@@ -113,6 +119,12 @@ private func tempVault() throws -> URL {
     let url = folder.appending(path: "state.json")
     try state.save(url)
     #expect(ScryOps.State.load(url).waiting == [offer])
+    // A failed read is tried again, 10 minutes later, up to 3 times; a read that worked never.
+    state.transcripts["/f.md"] = .init(status: .failed, at: Date().addingTimeInterval(-900), attempts: 2)
+    #expect(state.mayRead("/f.md") && !state.mayRead("/t.md") && state.mayRead("/new.md"))
+    #expect(state.retries().map(\.path) == ["/f.md"])
+    state.transcripts["/f.md"]?.attempts = 3
+    #expect(!state.mayRead("/f.md") && state.retries().isEmpty)
 }
 
 @Test func opsSettingsAreOffAndEmptyByDefault() {

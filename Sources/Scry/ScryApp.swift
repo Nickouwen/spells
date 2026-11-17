@@ -304,25 +304,33 @@ import UserNotifications
 
     // MARK: Ops brain
 
-    /// Every 30 s: a waiting offer goes up when the pill is free. Every 5 min (and at launch): new transcripts
-    /// in the watched folders are read. Nothing happens while the step is off or has no vault.
+    /// Every 30 s: a waiting offer goes up when the pill is free. Every 5 min (and at launch): failed reads are
+    /// tried again and new transcripts in the watched folders are read (the folder walk runs off the main
+    /// thread). Nothing happens while the step is off or has no vault.
     private func opsTick() {
         let s = Self.loadSettings().settings
         guard s.opsPush, let vault = ScrySettings.folder(s.opsVault) else { return }
         defer { opsTicks += 1 }
         if opsTicks % 10 == 0 {
-            for url in ops.newTranscripts(in: s.opsSources.compactMap(ScrySettings.folder)) {
-                readForOps(url, vault: vault, userName: s.userName, rules: s.opsRules)
+            for url in ops.retries() { readForOps(url, vault: vault, userName: s.userName, rules: s.opsRules) }
+            let folders = s.opsSources.compactMap(ScrySettings.folder), snapshot = ops
+            Task {
+                let (found, since) = await Task.detached {
+                    var st = snapshot
+                    return (st.newTranscripts(in: folders), st.watchedSince)
+                }.value
+                ops.watchedSince.merge(since) { kept, _ in kept }
+                for url in found { readForOps(url, vault: vault, userName: s.userName, rules: s.opsRules) }
+                saveOps()
             }
-            saveOps()
         }
         showOpsOffer()
     }
 
-    /// Claude reads the transcript once; its items wait in the state file for the click.
+    /// Claude reads the transcript once (a failed read up to 3 times); its items wait in the state file for the click.
     private func readForOps(_ url: URL, vault: URL, userName: String, rules: String) {
         let key = url.standardizedFileURL.path
-        guard ops.transcripts[key] == nil, !opsReading.contains(key) else { return }
+        guard ops.mayRead(key), !opsReading.contains(key) else { return }
         opsReading.insert(key)
         Task {
             let entry: ScryOps.State.Entry
@@ -330,9 +338,9 @@ import UserNotifications
                 let offer = try await ScryOps.extract(transcript: url, vault: vault, userName: userName, rules: rules)
                 entry = offer.items.isEmpty ? .init(status: .nothing) : .init(status: .offered, offer: offer)
                 SupportLog.scry.info("ops: \(offer.items.count, privacy: .public) item(s) found")
-            } catch {   // shortcut: not tried again; retry on a later scan if offline failures show up
+            } catch {   // tried again by `opsTick` until `maxAttempts`
                 SupportLog.scry.error("ops: reading a transcript failed: \(String(describing: error), privacy: .private)")
-                entry = .init(status: .failed)
+                entry = .init(status: .failed, attempts: (ops.transcripts[key]?.attempts ?? 0) + 1)
             }
             opsReading.remove(key)
             ops.transcripts[key] = entry
@@ -354,19 +362,17 @@ import UserNotifications
         opsShown = nil
         let s = Self.loadSettings().settings
         guard let vault = ScrySettings.folder(s.opsVault) else { return }
-        do {
-            let written = try ScryOps.push(offer, vault: vault)
-            ops.transcripts[offer.transcript] = .init(status: .pushed, written: written)
-            SupportLog.scry.info("ops: pushed \(written.count, privacy: .public) note(s)")
-            Task {
-                await Self.notify("Pushed \(written.count) note\(written.count == 1 ? "" : "s") to the ops brain", open: nil)
-                await ScryOps.notifySlack(written: written, offer: offer, user: s.opsSlackUser)
-            }
-        } catch {   // still offered: it comes back at the next tick
-            SupportLog.scry.error("ops: push failed: \(error.localizedDescription, privacy: .public)")
-            Task { await Self.notify("Scry couldn't push to the ops brain", open: nil) }
-        }
+        // Never offered again, even when some items fail: a second click would write the others twice.
+        let (written, failed) = ScryOps.push(offer, vault: vault)
+        ops.transcripts[offer.transcript] = .init(status: .pushed, written: written)
         saveOps()
+        SupportLog.scry.info("ops: pushed \(written.count, privacy: .public) note(s), \(failed, privacy: .public) item(s) failed")
+        Task {
+            let notes = "\(written.count) note\(written.count == 1 ? "" : "s")"
+            await Self.notify(failed == 0 ? "Pushed \(notes) to the ops brain"
+                                          : "Pushed \(notes) to the ops brain. \(failed) item(s) couldn't be written.", open: nil)
+            await ScryOps.notifySlack(written: written, offer: offer, user: s.opsSlackUser)
+        }
     }
 
     private func skipOps() {

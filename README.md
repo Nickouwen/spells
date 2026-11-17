@@ -25,7 +25,7 @@ No real user database, recordings, transcripts, exports, API keys, or private pl
 
 ## Scry: push call items to a team vault
 
-Off by default. After a call, Claude picks out what your team needs from the transcript and says where each item goes in a shared Obsidian vault. The pill offers "Push N items"; nothing is written until you click it. A write only adds a note or a section at the end of a note, with a source line. Sensitive numbers, passwords and keys become `[removed]`.
+Off by default. After a call, Claude picks out what your team needs from the transcript and says where each item goes in a shared Obsidian vault. The pill offers "Push N items". Nothing is written until you click it. A write only adds a note or a section at the end of a note, with a source line. Sensitive numbers, passwords and keys become `[removed]`.
 
 Each person keeps their own config. Set it in Scry's settings page, or put it in a JSON file and import it:
 

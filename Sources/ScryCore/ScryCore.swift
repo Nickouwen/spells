@@ -289,7 +289,7 @@ public struct ScryLevels: Sendable {
     public let lag: Int
     /// Mic power ÷ far-side power, the median over frames where the far side is loud (> −30 dBFS): about −30 dB
     /// on speakers and −45 to −52 dB on headphones (the calls of 2026-11-10…17). nil when the far side was loud
-    /// for less than 5 s: too little to measure.
+    /// for less than 60 s: too little to tell echo from you talking over it.
     public let coupling: Double?
     /// The loudest far-side frame within 100 ms of `lag` before each frame: what the mic hears of it now.
     private let recent: [Float]
@@ -307,7 +307,7 @@ public struct ScryLevels: Sendable {
         self.recent = recent
         let loud = Self.loud
         let ratios = zip(mic, recent).filter { $0.1 > loud }.map { Double($0.0 / $0.1) }.sorted()
-        self.coupling = coupling ?? (ratios.count < 100 ? nil : ratios[ratios.count / 2])
+        self.coupling = coupling ?? (ratios.count < 1200 ? nil : ratios[ratios.count / 2])
     }
 
     private static func measuredLag(mic: [Float], far: [Float]) -> Int {
@@ -398,7 +398,7 @@ public enum ScryTranscript {
         let score = mine.map { levels.score(start: segments[$0].start, end: segments[$0].end) }
         var verdict: [Verdict] = mine.indices.map { k in
             let w = segments[mine[k]]
-            guard !farWords(w.start - 2, w.start + 1).isEmpty else { return .mine }
+            guard !farWords(w.start - 3, w.start + 3).isEmpty else { return .mine }
             return score[k] >= 20 ? .mine : score[k] < 0 ? .echo : .unsure
         }
         for k in mine.indices.dropLast() where verdict[k] == .unsure || verdict[k + 1] == .unsure {

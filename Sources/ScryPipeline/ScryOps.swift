@@ -43,6 +43,7 @@ public enum ScryOps {
     /// The transcript → Claude → the items, with unsafe paths dropped. `date` is the call's day (yyyy-MM-dd).
     /// `rules` is what to look for (empty = `defaultRules`).
     public static func extract(transcript: URL, vault: URL, userName: String, rules: String = "") async throws -> Offer {
+        guard FileManager.default.fileExists(atPath: vault.path) else { throw Failure.noVault(vault.path) }
         let text = String(try String(contentsOf: transcript, encoding: .utf8).prefix(400_000))
         let agents = (try? String(contentsOf: vault.appending(path: "AGENTS.md"), encoding: .utf8)).map { String($0.prefix(30_000)) }
         let date = callDate(text) ?? day((try? transcript.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date())
@@ -110,15 +111,12 @@ public enum ScryOps {
     }
 
     /// The vault's notes as relative paths (hidden folders skipped), at most `limit`, for the prompt.
-    static func index(_ vault: URL, limit: Int = 4000) -> [String] {
+    static func index(_ vault: URL, limit: Int = 10_000) -> [String] {
         let root = vault.standardizedFileURL.path + "/"
         guard let e = FileManager.default.enumerator(at: vault, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return [] }
         var out: [String] = []
-        for case let url as URL in e where url.pathExtension == "md" {
-            out.append(String(url.standardizedFileURL.path.dropFirst(root.count)))
-            if out.count >= limit { break }
-        }
-        return out.sorted()
+        for case let url as URL in e where url.pathExtension == "md" { out.append(String(url.standardizedFileURL.path.dropFirst(root.count))) }
+        return Array(out.sorted().prefix(limit))
     }
 
     /// `date: 2026-11-17` in a Scry note's frontmatter.
@@ -138,47 +136,63 @@ public enum ScryOps {
 
     // MARK: - Push
 
-    /// Where `path` may be written in `vault`, or nil: relative, ends in .md, no ".." or hidden folder
-    /// (.obsidian, .stfolder), not an AGENTS.md, and inside the vault once symlinks are resolved.
+    /// Where `path` may be written in `vault`, or nil: the vault exists, and the path is relative, ends in .md,
+    /// has no ".." or hidden folder (.obsidian, .stfolder), is not an AGENTS.md, and stays inside the vault once
+    /// symlinks are resolved (the note itself too, when it exists).
     static func target(_ path: String, in vault: URL) -> URL? {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
         guard !path.hasPrefix("/"), !path.hasPrefix("~"), path.lowercased().hasSuffix(".md"), path.count < 300,
               !parts.contains(where: { $0.isEmpty || $0.hasPrefix(".") || $0 == ".." }),
               parts.last?.lowercased() != "agents.md" else { return nil }
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: vault.path) else { return nil }   // a wrong or unsynced path gets no new folder
         let root = vault.resolvingSymlinksInPath().standardizedFileURL
         let url = root.appending(path: path).standardizedFileURL
-        // The deepest folder that exists, with its symlinks resolved, must still be inside the vault.
-        var dir = url.deletingLastPathComponent()
-        while !FileManager.default.fileExists(atPath: dir.path), dir.path.count > root.path.count { dir = dir.deletingLastPathComponent() }
-        let real = dir.resolvingSymlinksInPath().standardizedFileURL.path
+        // The deepest part that exists (the note, else a folder), with its symlinks resolved, must be inside the vault.
+        var probe = url
+        while !fm.fileExists(atPath: probe.path), probe.path.count > root.path.count { probe = probe.deletingLastPathComponent() }
+        let real = probe.resolvingSymlinksInPath().standardizedFileURL.path
         guard real == root.path || real.hasPrefix(root.path + "/") else { return nil }
         return url
     }
 
     /// Writes the offer's items into `vault`: appended to the note at the path when it exists, else a new
-    /// note. Each gets the source line. Returns the vault-relative paths written, once each.
-    public static func push(_ offer: Offer, vault: URL) throws -> [String] {
-        var written: [String] = []
+    /// note. Each gets the source line. An item that fails is counted and skipped, so a second click never
+    /// writes the others twice. Returns the vault-relative paths written (once each) and the items not written.
+    public static func push(_ offer: Offer, vault: URL) -> (written: [String], failed: Int) {
+        var written: [String] = [], failed = 0
         for item in offer.items {
-            guard let url = target(item.path, in: vault) else {
-                SupportLog.scry.error("ops: skipped an unsafe path")
-                continue
+            do {
+                guard let url = target(item.path, in: vault) else { throw Failure.unsafePath }
+                let body = redacted(item.text).trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n" + offer.sourceLine + "\n"
+                let fm = FileManager.default
+                try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if fm.fileExists(atPath: url.path) {
+                    // Appended, never rewritten: a change synced in meanwhile is kept.
+                    let h = try FileHandle(forWritingTo: url)
+                    defer { try? h.close() }
+                    try h.seekToEnd()
+                    try h.write(contentsOf: Data(("\n\n" + body).utf8))
+                } else {
+                    try Data(body.utf8).write(to: url, options: .withoutOverwriting)
+                }
+                if !written.contains(item.path) { written.append(item.path) }
+            } catch {
+                failed += 1
+                SupportLog.scry.error("ops: an item was not written: \(String(describing: error), privacy: .public)")
             }
-            let body = redacted(item.text).trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n" + offer.sourceLine + "\n"
-            let fm = FileManager.default
-            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if fm.fileExists(atPath: url.path) {
-                // Appended, never rewritten: a change synced in meanwhile is kept.
-                let h = try FileHandle(forWritingTo: url)
-                defer { try? h.close() }
-                try h.seekToEnd()
-                try h.write(contentsOf: Data(("\n\n" + body).utf8))
-            } else {
-                try Data(body.utf8).write(to: url, options: .withoutOverwriting)
-            }
-            if !written.contains(item.path) { written.append(item.path) }
         }
-        return written
+        return (written, failed)
+    }
+
+    enum Failure: Error, CustomStringConvertible {
+        case noVault(String), unsafePath
+        var description: String {
+            switch self {
+            case .noVault(let p): "no vault folder at \(p)"
+            case .unsafePath: "the path leaves the vault or isn't a note"
+            }
+        }
     }
 
     // MARK: - Redaction
@@ -232,9 +246,24 @@ public enum ScryOps {
             public var offer: Offer?
             /// After `pushed`: the vault-relative paths written.
             public var written: [String]?
-            public init(status: Status, at: Date = Date(), offer: Offer? = nil, written: [String]? = nil) {
-                self.status = status; self.at = at; self.offer = offer; self.written = written
+            /// Reads that failed so far (offline, a claude timeout).
+            public var attempts: Int?
+            public init(status: Status, at: Date = Date(), offer: Offer? = nil, written: [String]? = nil, attempts: Int? = nil) {
+                self.status = status; self.at = at; self.offer = offer; self.written = written; self.attempts = attempts
             }
+        }
+        public static let maxAttempts = 3
+
+        /// May `path` be read (again)? Never seen, or failed fewer than `maxAttempts` times.
+        public func mayRead(_ path: String) -> Bool {
+            guard let e = transcripts[path] else { return true }
+            return e.status == .failed && (e.attempts ?? 1) < Self.maxAttempts
+        }
+
+        /// Failed reads to try again: fewer than `maxAttempts`, the last one at least 10 minutes ago.
+        public func retries(now: Date = Date()) -> [URL] {
+            transcripts.filter { $0.value.status == .failed && mayRead($0.key) && now.timeIntervalSince($0.value.at) > 600 }
+                .keys.sorted().map { URL(filePath: $0) }
         }
         public var transcripts: [String: Entry] = [:]
         public var watchedSince: [String: Date] = [:]
