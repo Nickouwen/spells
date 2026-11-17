@@ -80,7 +80,9 @@ public enum ScryPipeline {
             json = try merged(you: try await you, farSide: them); diarized = them != nil
         }
         let scribeMs = ms(clock.now - t0)
-        let raw = try ScryTranscript.segments(fromScribeJSON: json)
+        // On a call, how loud each side was tells the far side's echo in the mic from what you said.
+        let levels = capture.app == nil ? nil : levels(wav)
+        let raw = try ScryTranscript.segments(fromScribeJSON: json, levels: levels)
         // Named before the summary, so its recap says "Alex", not "Speaker A": Meet's speaking indicator votes
         // first; with nothing from it, a lone far-side speaker is the one other person named.
         let fromMeet = capture.app == nil ? [:] : ScryMeet.names(for: raw, hints: meet.hints, owner: settings.userName)
@@ -96,7 +98,10 @@ public enum ScryPipeline {
                                         userName: settings.userName, appName: appName, startedAt: capture.startedAt,
                                         keyterms: terms, invite: capture.invite)
         t0 = clock.now
-        let summary = try ScryPrompt.parseSummary(try await claude(prompt))
+        var summary = try ScryPrompt.parseSummary(try await claude(prompt))
+        if levels?.throughSpeakers == true {
+            summary.insights.append("The call played through speakers, so the mic also heard the far side. Scry removed that echo from your lines.")
+        }
         let claudeMs = ms(clock.now - t0)
 
         let speakers = known.merging(summary.speakers) { a, _ in a }
@@ -198,37 +203,62 @@ public enum ScryPipeline {
     /// empty (RMS 0).
     static func mono(_ wav: Data, channel: Int? = nil) -> (wav: Data, rms: Double) {
         wav.withUnsafeBytes { (b: UnsafeRawBufferPointer) -> (wav: Data, rms: Double) in
-            func u16(_ i: Int) -> Int { Int(b[i]) | Int(b[i + 1]) << 8 }
-            func u32(_ i: Int) -> Int { u16(i) | u16(i + 2) << 16 }
-            func s16(_ i: Int) -> Int { Int(Int16(bitPattern: UInt16(u16(i)))) }
-            var i = 12, channels = 0, bits = 0, rate = 0
-            while i + 8 <= b.count {
-                let id = String(decoding: b[i..<i + 4], as: UTF8.self), size = u32(i + 4), body = i + 8
-                if id == "fmt ", body + 16 <= b.count { channels = u16(body + 2); rate = u32(body + 4); bits = u16(body + 14) }
-                if id == "data" {
-                    guard channels > 0, bits == 16 else { return (wav, 1) }
-                    if let c = channel, c >= channels { return (Data(), 0) }
-                    let frames = min(size, b.count - body) / (2 * channels)
-                    var samples = [Int16](repeating: 0, count: frames), sq = 0.0
-                    for f in 0..<frames {
-                        let at = body + f * channels * 2
-                        var v = 0
-                        if let c = channel { v = s16(at + c * 2) } else { for c in 0..<channels { v += s16(at + c * 2) }; v /= channels }
-                        samples[f] = Int16(v); sq += Double(v * v)
-                    }
-                    var out = Data(capacity: 44 + frames * 2)
-                    func put(_ v: Int, _ n: Int) { for k in 0..<n { out.append(UInt8((v >> (8 * k)) & 0xFF)) } }
-                    out.append(contentsOf: Array("RIFF".utf8)); put(36 + frames * 2, 4); out.append(contentsOf: Array("WAVEfmt ".utf8))
-                    put(16, 4); put(1, 2); put(1, 2); put(rate, 4); put(rate * 2, 4); put(2, 2); put(16, 2)
-                    out.append(contentsOf: Array("data".utf8)); put(frames * 2, 4)
-                    samples.withUnsafeBytes { out.append(contentsOf: $0) }   // little-endian host
-                    return (out, frames == 0 ? 0 : (sq / Double(frames)).squareRoot() / 32768)
-                }
-                i = body + size + (size & 1)
+            guard let p = pcm(b) else { return (wav, 1) }
+            if let c = channel, c >= p.channels { return (Data(), 0) }
+            var samples = [Int16](repeating: 0, count: p.frames), sq = 0.0
+            for f in 0..<p.frames {
+                let at = p.body + f * p.channels * 2
+                var v = 0
+                if let c = channel { v = s16(b, at + c * 2) } else { for c in 0..<p.channels { v += s16(b, at + c * 2) }; v /= p.channels }
+                samples[f] = Int16(v); sq += Double(v * v)
             }
-            return (wav, 1)
+            var out = Data(capacity: 44 + p.frames * 2)
+            func put(_ v: Int, _ n: Int) { for k in 0..<n { out.append(UInt8((v >> (8 * k)) & 0xFF)) } }
+            out.append(contentsOf: Array("RIFF".utf8)); put(36 + p.frames * 2, 4); out.append(contentsOf: Array("WAVEfmt ".utf8))
+            put(16, 4); put(1, 2); put(1, 2); put(p.rate, 4); put(p.rate * 2, 4); put(2, 2); put(16, 2)
+            out.append(contentsOf: Array("data".utf8)); put(p.frames * 2, 4)
+            samples.withUnsafeBytes { out.append(contentsOf: $0) }   // little-endian host
+            return (out, p.frames == 0 ? 0 : (sq / Double(p.frames)).squareRoot() / 32768)
         }
     }
+
+    /// A call's 2-channel 16-bit WAV → the mic's and the far side's power per `ScryLevels.frame`; nil for any
+    /// other shape (then echo falls back to the word match).
+    static func levels(_ wav: Data) -> ScryLevels? {
+        wav.withUnsafeBytes { (b: UnsafeRawBufferPointer) -> ScryLevels? in
+            guard let p = pcm(b), p.channels == 2 else { return nil }
+            let n = max(1, Int(Double(p.rate) * ScryLevels.frame)), count = p.frames / n
+            var mic = [Float](repeating: 0, count: count), far = mic
+            for i in 0..<count {
+                var m = 0.0, f = 0.0
+                for s in 0..<n {
+                    let at = p.body + (i * n + s) * 4
+                    let a = Double(s16(b, at)) / 32768, c = Double(s16(b, at + 2)) / 32768
+                    m += a * a; f += c * c
+                }
+                mic[i] = Float(m / Double(n)); far[i] = Float(f / Double(n))
+            }
+            return ScryLevels(mic: mic, far: far)
+        }
+    }
+
+    /// The `data` chunk of a 16-bit PCM WAV: where its samples start, whole frames in it, channels, rate.
+    private static func pcm(_ b: UnsafeRawBufferPointer) -> (body: Int, frames: Int, channels: Int, rate: Int)? {
+        func u32(_ i: Int) -> Int { u16(b, i) | u16(b, i + 2) << 16 }
+        var i = 12, channels = 0, bits = 0, rate = 0
+        while i + 8 <= b.count {
+            let id = String(decoding: b[i..<i + 4], as: UTF8.self), size = u32(i + 4), body = i + 8
+            if id == "fmt ", body + 16 <= b.count { channels = u16(b, body + 2); rate = u32(body + 4); bits = u16(b, body + 14) }
+            if id == "data" {
+                guard channels > 0, bits == 16 else { return nil }
+                return (body, min(size, b.count - body) / (2 * channels), channels, rate)
+            }
+            i = body + size + (size & 1)
+        }
+        return nil
+    }
+    private static func u16(_ b: UnsafeRawBufferPointer, _ i: Int) -> Int { Int(b[i]) | Int(b[i + 1]) << 8 }
+    private static func s16(_ b: UnsafeRawBufferPointer, _ i: Int) -> Int { Int(Int16(bitPattern: UInt16(u16(b, i)))) }
 
     /// Scribe vocabulary: Incant's keyterms row, or its built-in defaults when none is saved.
     public static func keyterms(_ rows: [String: String]) -> [String] { IncantSettings.load(rows).keyterms }
