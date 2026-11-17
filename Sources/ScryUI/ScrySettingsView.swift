@@ -3,6 +3,7 @@ import SwiftUI
 import SpellsKit
 import SpellsUI
 import ScryCore
+import ScryPipeline
 
 /// Scry's settings window: recording behaviour, the notes folder, your name, never-offer apps, the
 /// ElevenLabs key and the claude CLI path. Writes Scry's own settings file; Scry re-reads it per event.
@@ -18,6 +19,10 @@ public struct ScrySettingsView: View {
     @State private var claudePath = ""
     @State private var key = ""
     @State private var keySaved = SupportKeychain.read(SupportKeychain.elevenLabs) != nil
+    @State private var opsVault = ""
+    @State private var opsSources = ""
+    @State private var opsSlackUser = ""
+    @State private var opsRules = ""
     @State private var error: String?
     @Environment(\.openURL) private var openURL
 
@@ -73,7 +78,37 @@ public struct ScrySettingsView: View {
                     Spacer()
                     TextField(SpellsClaude.defaultPath, text: $claudePath).textFieldStyle(.roundedBorder).font(TextRole.mono.font).frame(width: 240)
                 }
-                SettingsSaveRow(dirty: edited != saved || claudePath != savedClaudePath) { persist(edited); saveClaudePath() }
+                SettingsSaveRow(dirty: edited != saved || claudePath != savedClaudePath) {
+                    let defaultShown = opsRules == defaultRules   // follows a new name in "asked <name> to do"
+                    persist(edited); showNotes(saved); saveClaudePath()
+                    if defaultShown { opsRules = defaultRules }
+                }
+            }
+            SettingsSection("Ops brain", detail: "After a call, Claude finds what the team needs: deals, documents, decisions, processes, people, numbers and asks. The pill offers to push them into the ops vault. Nothing is written until you click it.") {
+                SettingsToggleRow("Offer to push call items to the ops brain", isOn: Binding(get: { saved.opsPush }, set: { v in
+                    var s = saved; s.opsPush = v; persist(s)
+                }))
+                SettingsDivider()
+                HStack(spacing: Theme.Space.s) {
+                    Text("Ops vault folder").textRole(.body)
+                    Spacer()
+                    TextField("Not set", text: $opsVault).textFieldStyle(.roundedBorder).font(TextRole.mono.font).frame(width: 240)
+                    Button("Choose…") { chooseFolder(into: $opsVault) }.buttonStyle(RewindButtonStyle())
+                }
+                SettingsDivider()
+                editor("Other transcript folders to watch (one per line)", $opsSources, lines: 3)
+                SettingsDivider()
+                editor("What to look for (one kind per line: \u{201C}kind: what it is\u{201D})", $opsRules, lines: 7)
+                SettingsDivider()
+                HStack(spacing: Theme.Space.s) {
+                    VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                        Text("Slack member ID for a DM").textRole(.body)
+                        Text("Needs a bot token in SLACK_BOT_TOKEN (.env) or the Keychain.").textRole(.detail)
+                    }
+                    Spacer()
+                    TextField("Not set", text: $opsSlackUser).textFieldStyle(.roundedBorder).font(TextRole.mono.font).frame(width: 240)
+                }
+                SettingsSaveRow(dirty: editedOps != saved) { persist(editedOps); showOps(saved) }
             }
             SettingsSection("ElevenLabs", detail: "Scribe transcribes the recording. The key is kept in the Keychain (or ~/Library/Application Support/Spells/.env).") {
                 HStack(spacing: Theme.Space.s) {
@@ -99,25 +134,48 @@ public struct ScrySettingsView: View {
 
     private var edited: ScrySettings { ScrySettings.edited(saved, root: root, name: name, never: never) }
 
+    private var editedOps: ScrySettings {
+        var s = saved
+        s.opsVault = opsVault.trimmingCharacters(in: .whitespacesAndNewlines)
+        s.opsSources = opsSources.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        s.opsSlackUser = opsSlackUser.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The built-in list is stored as "" so later changes to it still reach this Mac.
+        let rules = opsRules.trimmingCharacters(in: .whitespacesAndNewlines)
+        s.opsRules = rules == defaultRules ? "" : rules
+        return s
+    }
+
     private func load() {
         let rows = SpellSettingsFile.scry().all()
-        show(ScrySettings.load(rows))
+        saved = ScrySettings.load(rows)
+        showNotes(saved); showOps(saved)
         savedClaudePath = rows[SpellsClaude.key] ?? ""
         claudePath = savedClaudePath
     }
 
-    private func show(_ s: ScrySettings) {
-        saved = s
+    /// Each section's fields are reset only by its own Save, so a toggle or the other Save keeps unsaved typing.
+    private func showNotes(_ s: ScrySettings) {
         root = s.root
         name = s.userName
         never = s.never.joined(separator: "\n")
+    }
+
+    private func showOps(_ s: ScrySettings) {
+        opsVault = s.opsVault
+        opsSources = s.opsSources.joined(separator: "\n")
+        opsSlackUser = s.opsSlackUser
+        opsRules = s.opsRules.isEmpty ? defaultRules : s.opsRules
+    }
+
+    private var defaultRules: String {
+        ScryOps.defaultRules(userName: saved.userName).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Writes only the rows that changed.
     private func persist(_ s: ScrySettings) {
         let old = saved.rows
         let changed = s.rows.filter { old[$0.key] != $0.value }
-        show(s)
+        saved = s
         write(changed)
     }
 
@@ -141,13 +199,13 @@ public struct ScrySettingsView: View {
         }
     }
 
-    private func chooseFolder() {
+    private func chooseFolder(into field: Binding<String>? = nil) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
-        panel.directoryURL = edited.rootURL
-        if panel.runModal() == .OK, let url = panel.url { root = (url.path as NSString).abbreviatingWithTildeInPath }
+        panel.directoryURL = field.flatMap { ScrySettings.folder($0.wrappedValue) } ?? edited.rootURL
+        if panel.runModal() == .OK, let url = panel.url { (field ?? $root).wrappedValue = (url.path as NSString).abbreviatingWithTildeInPath }
     }
 
     private func editor(_ title: String, _ text: Binding<String>, lines: Int) -> some View {

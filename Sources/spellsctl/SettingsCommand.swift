@@ -82,8 +82,20 @@ private struct SettingsTarget {
         }
         try target.set(key, items.joined(separator: "\n"))
         say("\(module).\(key): \(items.joined(separator: ", "))")
+    case "import":
+        // A shared config: a flat JSON object of keys and string values, merged over what is set.
+        guard let path = key else { need("<file.json>") }
+        let url = URL(filePath: (path as NSString).expandingTildeInPath)
+        guard let rows = try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: url)) else {
+            die("\(path): not a JSON object of string values, like {\"key\": \"value\"}")
+        }
+        for (k, v) in rows.sorted(by: { $0.key < $1.key }) {
+            try target.set(k, v)
+            say("\(module).\(k) = \(v.replacingOccurrences(of: "\n", with: " | "))")
+        }
+        say("\(module): imported \(rows.count) setting(s) from \(url.lastPathComponent)")
     default:
-        die("unknown settings verb '\(verb)' (list, get, set, unset, add, remove)")
+        die("unknown settings verb '\(verb)' (list, get, set, unset, add, remove, import)")
     }
 }
 

@@ -29,12 +29,15 @@ usage: spellsctl export  [--period current|previous|YYYY-MM-DD..YYYY-MM-DD] [--m
        spellsctl scry tidy <note.md>…         (rebuild a note's transcript: echo lines dropped, words joined into turns)
        spellsctl scry list [--root DIR]
        spellsctl scry meet [--seconds N] [--dump]  (what the Google Meet tab in Chrome reports: people, who's speaking)
+       spellsctl scry ops <transcript> [--vault DIR] [--push]  (the items Scry would push to the ops brain; --push
+                         writes them; --vault defaults to scry_ops_vault; no state file, no Slack DM)
                         (Scry meeting notes: Scribe + claude -p → a Markdown note under --root, default
                          ~/Documents/Scry; --keep leaves the capture dir in place)
        spellsctl settings [<module>]                     (show stored settings; modules: incant scry transmute ward spells rewind)
        spellsctl settings <module> get|unset <key>
        spellsctl settings <module> set <key> <value>     (value - reads stdin, for multi-line prompts)
        spellsctl settings <module> add|remove <key> <item>   (one line of a list, e.g. incant incant_keyterms)
+       spellsctl settings <module> import <file.json>    (merge a shared config: {"key": "value", …})
                         (no rebuild: Incant, Scry and Transmute re-read on use, Rewind live; login_item,
                          Scry's never-record apps and Ward pick changes up at the next launch)
        spellsctl rules [list] [--all]
@@ -62,7 +65,7 @@ let (options, flags, positional) = { () -> ([String: String], Set<String>, [Stri
             if ["scry", "settings", "rules"].contains(argv[0]) { positional.append(a); i += 1; continue }
             die("unexpected argument '\(a)'\n\n\(usage)")
         }
-        if ["--force", "--dry-run", "--regenerate", "--print", "--keep", "--clear-fixes", "--all"].contains(a) { flags.insert(a); i += 1; continue }
+        if ["--force", "--dry-run", "--regenerate", "--print", "--keep", "--clear-fixes", "--all", "--push"].contains(a) { flags.insert(a); i += 1; continue }
         guard i + 1 < argv.count else { die("\(a) needs a value") }
         options[a] = argv[i + 1]
         i += 2
@@ -202,7 +205,7 @@ do {
         try await classify()
 
     case "scry":
-        allow("--root", "--keep", "--limit", "--seconds", "--dump", "--browser")   // per subcommand would need `command` inside ScryCommand.swift
+        allow("--root", "--keep", "--limit", "--seconds", "--dump", "--browser", "--vault", "--push")   // per subcommand would need `command` inside ScryCommand.swift
         try await scry()
 
     case "settings":

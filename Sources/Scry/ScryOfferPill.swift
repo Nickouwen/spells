@@ -16,6 +16,8 @@ import SpellsKit
     private var bars: ScryBarsView?
     private var readyURL: URL?
     var onOpenNote: (URL) -> Void = { _ in }
+    var onPushOps: () -> Void = {}
+    var onSkipOps: () -> Void = {}
     private let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
     private var generation = 0
 
@@ -77,25 +79,44 @@ import SpellsKit
     /// "✓ Meeting notes ready · <title>" after the pipeline: clicking opens the note in Spells. Hides after 10 s
     /// unless a recording has taken the pill since.
     func showReady(title: String, note: URL) {
-        recordingLabel = nil; bars = nil; readyURL = note
-        generation += 1
-        let mine = generation
+        readyURL = note
         let short = title.count > 34 ? String(title.prefix(33)) + "…" : title
-        let open = button("✓ Meeting notes ready · \(short)", size: 12, #selector(openReady))
-        let close = button("×", size: 14, #selector(dismiss))
-        let width = open.intrinsicContentSize.width + close.intrinsicContentSize.width + 26
-        let full = Self.frame(width: width)
-        let body = ScryPillView(frame: NSRect(origin: .zero, size: full.size))
-        open.frame = NSRect(x: 10, y: 0, width: open.intrinsicContentSize.width, height: full.height)
-        close.frame = NSRect(x: width - 8 - close.intrinsicContentSize.width, y: 0, width: close.intrinsicContentSize.width, height: full.height)
-        body.addSubview(open); body.addSubview(close)
-        body.setAccessibilityLabel("Scry: meeting notes ready, \(title)")
-        panel.contentView = body
-        present(full)
+        showTwo(button("✓ Meeting notes ready · \(short)", size: 12, #selector(openReady)), close: #selector(dismiss),
+                label: "Scry: meeting notes ready, \(title)")
+        let mine = generation
         Task { try? await Task.sleep(for: .seconds(10)); if self.generation == mine { self.hide() } }
     }
 
+    /// "↑ Push N items to ops brain  ×": nothing reaches the ops vault without this click. × skips the transcript.
+    /// Hovering lists the items (`detail`). Stays up until one is clicked or a recording takes the pill.
+    func showOps(count: Int, from transcript: String, detail: String) {
+        let push = button("↑ Push \(count) item\(count == 1 ? "" : "s") to ops brain", size: 12, #selector(pushOps))
+        push.toolTip = "From \(transcript):\n\(detail)"
+        showTwo(push, close: #selector(skipOps), label: "Scry: push \(count) items from \(transcript) to the ops brain?")
+    }
+
+    /// The pill is up (or still going away).
+    var isShowing: Bool { panel.isVisible }
+
+    /// A main button and × in the pill.
+    private func showTwo(_ main: NSButton, close sel: Selector, label: String) {
+        recordingLabel = nil; bars = nil
+        generation += 1
+        let close = button("×", size: 14, sel)
+        let width = main.intrinsicContentSize.width + close.intrinsicContentSize.width + 26
+        let full = Self.frame(width: width)
+        let body = ScryPillView(frame: NSRect(origin: .zero, size: full.size))
+        main.frame = NSRect(x: 10, y: 0, width: main.intrinsicContentSize.width, height: full.height)
+        close.frame = NSRect(x: width - 8 - close.intrinsicContentSize.width, y: 0, width: close.intrinsicContentSize.width, height: full.height)
+        body.addSubview(main); body.addSubview(close)
+        body.setAccessibilityLabel(label)
+        panel.contentView = body
+        present(full)
+    }
+
     @objc private func openReady() { if let u = readyURL { hide(); onOpenNote(u) } }
+    @objc private func pushOps() { hide(); onPushOps() }
+    @objc private func skipOps() { hide(); onSkipOps() }
 
     @objc private func openLive() { onOpenLive() }
     @objc private func stopRecording() { onStop() }

@@ -23,6 +23,37 @@ Time-tracking data is stored locally. Depending on which helpers you enable, the
 
 No real user database, recordings, transcripts, exports, API keys, or private planning history are included in this public snapshot.
 
+## Scry: push call items to a team vault
+
+Off by default. After a call, Claude picks out what your team needs from the transcript and says where each item goes in a shared Obsidian vault. The pill offers "Push N items". Nothing is written until you click it. A write only adds a note or a section at the end of a note, with a source line. Sensitive numbers, passwords and keys become `[removed]`.
+
+Each person keeps their own config. Set it in Scry's settings page, or put it in a JSON file and import it:
+
+```json
+{
+  "scry_ops_push": "1",
+  "scry_ops_vault": "~/Obsidian/team-ops",
+  "scry_ops_sources": "~/Documents/Gemini notes\n~/Documents/Notetaker",
+  "scry_ops_slack_user": "U0123456789",
+  "scry_ops_rules": "- deal: a property, lead or transaction, and its status.\n- decision: something the team decided.\n- ask: something someone asked me to do."
+}
+```
+
+```sh
+spellsctl settings scry import my-scry.json
+spellsctl scry ops "<a transcript.md>" --vault <a copy of the vault>   # see the items first
+```
+
+| Key | Meaning | Default |
+|---|---|---|
+| `scry_ops_push` | `1` turns the step on | `0` |
+| `scry_ops_vault` | The vault folder (full path or `~/…`) | empty: off |
+| `scry_ops_sources` | Other folders to watch for transcripts, one per line | none |
+| `scry_ops_slack_user` | Slack member ID that gets a DM after a push | none |
+| `scry_ops_rules` | What to look for, one `kind: description` per line | deal, document, decision, process, person, number, ask |
+
+The vault's own `AGENTS.md` sets folders and frontmatter. The Slack DM also needs a bot token with `chat:write`, in `SLACK_BOT_TOKEN` (`~/Library/Application Support/Spells/.env`) or the Keychain item `slack-bot-token`.
+
 ## Build
 
 Requires macOS 26 and Swift 6.2+.

@@ -150,7 +150,8 @@ public struct ScryInvite: Codable, Equatable, Sendable {
 public struct ScrySettings: Equatable, Sendable {
     public static let autoOfferKey = "scry_auto_offer", liveKey = "scry_live", rootKey = "scry_root",
                       neverKey = "scry_never_apps", nameKey = "scry_user_name",
-                      autoRecordKey = "scry_auto_record"
+                      autoRecordKey = "scry_auto_record", opsPushKey = "scry_ops_push", opsVaultKey = "scry_ops_vault",
+                      opsSourcesKey = "scry_ops_sources", opsSlackUserKey = "scry_ops_slack_user", opsRulesKey = "scry_ops_rules"
     public static let defaultRoot = "~/Documents/Scry"
     public var autoOffer = true
     /// Start recording on its own when a call starts, instead of offering (browsers: only with a call-titled window).
@@ -161,6 +162,17 @@ public struct ScrySettings: Equatable, Sendable {
     public var never: [String] = []
     /// How you appear in notes ("You" is the label; this is the name the summary uses for you).
     public var userName = "You"
+    /// After a call, offer to push what the team needs into the ops vault (`ScryOps`). Off until set up.
+    public var opsPush = false
+    /// The ops vault's folder (a team's shared Obsidian vault); empty = not set up.
+    public var opsVault = ""
+    /// Folders where other tools save transcripts (Whisper Flow, Google Meet's Gemini notes), watched for new ones.
+    public var opsSources: [String] = []
+    /// Slack member ID that gets a DM listing the notes after a push (with a bot token set); empty = no DM.
+    public var opsSlackUser = ""
+    /// What Claude looks for in a transcript, one kind per line ("deal: a sale or lead, and its status");
+    /// empty = `ScryOps.defaultRules`.
+    public var opsRules = ""
     public init() {}
     /// Missing or blank rows = defaults; booleans "1"/"0"; `never` one bundle ID per line.
     public static func load(_ settings: [String: String]) -> ScrySettings {
@@ -172,11 +184,17 @@ public struct ScrySettings: Equatable, Sendable {
         if let v = value(autoRecordKey) { s.autoRecord = v == "1" }
         if let v = value(liveKey) { s.live = v == "1" }
         if let v = value(rootKey) { s.root = v }
-        if let v = value(neverKey) {
-            s.never = v.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        }
+        if let v = value(neverKey) { s.never = lines(v) }
         if let v = value(nameKey) { s.userName = v }
+        if let v = value(opsPushKey) { s.opsPush = v == "1" }
+        if let v = value(opsVaultKey) { s.opsVault = v }
+        if let v = value(opsSourcesKey) { s.opsSources = lines(v) }
+        if let v = value(opsSlackUserKey) { s.opsSlackUser = v }
+        if let v = value(opsRulesKey) { s.opsRules = v }
         return s
+    }
+    private static func lines(_ v: String) -> [String] {
+        v.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
     /// The settings window's text fields → settings. Blank folder/name fall back to the defaults; the app list drops blank lines.
     public static func edited(_ base: ScrySettings, root: String, name: String, never: String) -> ScrySettings {
@@ -190,7 +208,14 @@ public struct ScrySettings: Equatable, Sendable {
 
     public var rows: [String: String] {
         [Self.autoOfferKey: autoOffer ? "1" : "0", Self.autoRecordKey: autoRecord ? "1" : "0", Self.liveKey: live ? "1" : "0", Self.rootKey: root,
-         Self.neverKey: never.joined(separator: "\n"), Self.nameKey: userName]
+         Self.neverKey: never.joined(separator: "\n"), Self.nameKey: userName, Self.opsPushKey: opsPush ? "1" : "0",
+         Self.opsVaultKey: opsVault, Self.opsSourcesKey: opsSources.joined(separator: "\n"), Self.opsSlackUserKey: opsSlackUser, Self.opsRulesKey: opsRules]
+    }
+    /// A folder setting (`opsVault`, `opsSources`) as a URL, ~ expanded; nil when blank or relative.
+    public static func folder(_ path: String) -> URL? {
+        let p = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard p.hasPrefix("/") || p.hasPrefix("~") else { return nil }
+        return URL(filePath: (p as NSString).expandingTildeInPath, directoryHint: .isDirectory)
     }
     /// `root` with ~ expanded.
     /// A relative path (not starting with / or ~) would resolve against the app's working directory: default instead.
@@ -253,13 +278,76 @@ public struct ScrySegment: Codable, Equatable, Sendable {
     }
 }
 
+/// How loud each side of a call was, per 50 ms frame (mean power, full scale = 1): the mic (channel 0 of
+/// `audio.wav`) and the far side (channel 1). On speakers the far side reaches the mic `coupling` times as loud,
+/// `lag` frames later; your own voice is far louder on the mic than that. `withoutEcho(_:levels:)` uses it.
+public struct ScryLevels: Sendable {
+    public static let frame = 0.05
+    public let mic: [Float], far: [Float]
+    /// Frames from the far side playing to the mic hearing it: where mic minus far side (dB) varies least while
+    /// the far side is loud, 0–1 s. It differs per recording: 200 ms and 550 ms on two calls of 2026-11-17.
+    public let lag: Int
+    /// Mic power ÷ far-side power, the median over frames where the far side is loud (> −30 dBFS): about −30 dB
+    /// on speakers and −45 to −52 dB on headphones (the calls of 2026-11-10…17). nil when the far side was loud
+    /// for less than 60 s: too little to tell echo from you talking over it.
+    public let coupling: Double?
+    /// The loudest far-side frame within 100 ms of `lag` before each frame: what the mic hears of it now.
+    private let recent: [Float]
+    private static let loud = Float(pow(10, -30.0 / 10))
+
+    /// `lag` and `coupling` nil → measured from the levels.
+    public init(mic: [Float], far: [Float], lag: Int? = nil, coupling: Double? = nil) {
+        self.mic = mic; self.far = far
+        let lag = lag ?? Self.measuredLag(mic: mic, far: far)
+        self.lag = lag
+        let recent = far.indices.map { i in
+            let a = max(0, i - lag - 2), b = i - lag + 2
+            return b < 0 ? 0 : far[a...min(b, far.count - 1)].max()!
+        }
+        self.recent = recent
+        let loud = Self.loud
+        let ratios = zip(mic, recent).filter { $0.1 > loud }.map { Double($0.0 / $0.1) }.sorted()
+        self.coupling = coupling ?? (ratios.count < 1200 ? nil : ratios[ratios.count / 2])
+    }
+
+    private static func measuredLag(mic: [Float], far: [Float]) -> Int {
+        let micDB = mic.map { 10 * log10($0 + 1e-12) }, farDB = far.map { 10 * log10($0 + 1e-12) }, loudDB = Float(-30)
+        var best = (lag: 0, spread: Float.infinity)
+        for lag in 0...20 where lag < mic.count {
+            var n: Float = 0, sum: Float = 0, sq: Float = 0
+            for i in lag..<mic.count where farDB[i - lag] > loudDB {
+                let d = micDB[i] - farDB[i - lag]
+                n += 1; sum += d; sq += d * d
+            }
+            guard n > 0 else { continue }
+            let spread = sq / n - (sum / n) * (sum / n)
+            if spread < best.spread { best = (lag, spread) }
+        }
+        return best.lag
+    }
+
+    /// The far side played through speakers, not headphones: the mic heard it at more than −38 dB.
+    public var throughSpeakers: Bool { coupling.map { 10 * log10($0) > -38 } ?? false }
+
+    /// dB the mic was louder, from `start` to `end` (s), than the far side's echo alone would make it: about 0 or
+    /// below for echo, 30–60 for you talking. Infinity where the far side was silent or there are no levels.
+    public func score(start: Double, end: Double) -> Double {
+        guard let coupling else { return .infinity }
+        let a = max(0, Int(start / Self.frame)), b = min(mic.count, max(Int(end / Self.frame), a + 1))
+        guard a < b else { return .infinity }
+        let m = mic[a..<b].reduce(0, +), e = recent[a..<b].reduce(0, +)
+        return e > 0 ? 10 * log10(Double(m) / (coupling * Double(e))) : .infinity
+    }
+}
+
 public enum ScryTranscript {
     /// ElevenLabs Scribe v2 batch JSON (multichannel, `multichannel_output_style=combined`, diarized):
     /// `words[]` with `text`, `start`, `end`, `type` ("word"/"spacing"/"audio_event"), `channel_index`,
     /// `speaker_id`. Channel 0 → "You"; channel 1 speakers → "Speaker A", "B"… in order of first word.
     /// Mic-side words that echo the far side (`withoutEcho`) are dropped, then words become turns
     /// (`turns`). Audio events are dropped. Also accepts the non-multichannel shape (all one channel → speakers).
-    public static func segments(fromScribeJSON data: Data) throws -> [ScrySegment] {
+    /// With `levels` (the call's audio), echo is judged by `withoutEcho(_:levels:)`; without, by the 0.4 s word match.
+    public static func segments(fromScribeJSON data: Data, levels: ScryLevels? = nil) throws -> [ScrySegment] {
         let d = JSONDecoder(); d.keyDecodingStrategy = .convertFromSnakeCase
         let r = try d.decode(Scribe.self, from: data)
         // ponytail: also flattens the per-channel `transcripts[]` shape, in case "combined" isn't honoured.
@@ -279,7 +367,62 @@ public enum ScryTranscript {
             let start = w.start ?? out.last?.end ?? 0
             out.append(ScrySegment(speaker: speaker, start: start, end: w.end ?? start, text: w.text))
         }
-        return turns(multichannel ? withoutEcho(out) : out)
+        return turns(multichannel ? withoutEcho(out, levels: levels) : out)
+    }
+
+    /// Drops "You" words that are the far side heard through the speakers, judged by how loud each side was
+    /// (`levels`) and by what the far side said. Most echo comes back late or transcribed differently (far side
+    /// "Claude web", mic "clock lab"), so the 0.4 s word match below missed it (2026-11-17: 900–3500 echo words
+    /// a call). A "You" word is:
+    /// - yours when the far side said nothing from 2 s before to 1 s after it, or when the mic was ≥ 20 dB louder
+    ///   than the far side's echo could make it (`ScryLevels.score`): you speaking over the far side stays;
+    /// - echo when the mic was no louder than that echo (< 0 dB);
+    /// - in between: echo when it and the next word repeat two far-side words in a row (3 s before to 4 s after:
+    ///   the channels' word times can be 3 s apart), or when a run of them sits between echo on both sides
+    ///   (within 3 s) and averages < 8 dB. A short "Yeah." or "I agree." said over the far side scores 10–20 and stays.
+    /// No `levels` (or a far side never loud enough to measure) → the 0.4 s word match.
+    public static func withoutEcho(_ segments: [ScrySegment], levels: ScryLevels?) -> [ScrySegment] {
+        guard let levels, levels.coupling != nil else { return withoutEcho(segments) }
+        let far = segments.filter { $0.speaker != "You" }   // in time order, like `segments`
+        func farWords(_ from: Double, _ to: Double) -> ArraySlice<ScrySegment> {
+            func first(_ t: Double) -> Int {   // binary search: the first far word starting at or after t
+                var lo = 0, hi = far.count
+                while lo < hi { let mid = (lo + hi) / 2; if far[mid].start < t { lo = mid + 1 } else { hi = mid } }
+                return lo
+            }
+            let a = first(from), b = first(to.nextUp)
+            return far[a..<max(a, b)]
+        }
+        enum Verdict { case mine, echo, unsure }
+        let mine = segments.indices.filter { segments[$0].speaker == "You" }
+        let score = mine.map { levels.score(start: segments[$0].start, end: segments[$0].end) }
+        var verdict: [Verdict] = mine.indices.map { k in
+            let w = segments[mine[k]]
+            guard !farWords(w.start - 3, w.start + 3).isEmpty else { return .mine }
+            return score[k] >= 20 ? .mine : score[k] < 0 ? .echo : .unsure
+        }
+        for k in mine.indices.dropLast() where verdict[k] == .unsure || verdict[k + 1] == .unsure {
+            let a = normalized(segments[mine[k]].text), b = normalized(segments[mine[k + 1]].text)
+            guard !a.isEmpty, !b.isEmpty else { continue }
+            let f = farWords(segments[mine[k]].start - 3, segments[mine[k]].start + 4).map { normalized($0.text) }
+            guard f.indices.dropLast().contains(where: { f[$0] == a && f[$0 + 1] == b }) else { continue }
+            for j in [k, k + 1] where verdict[j] == .unsure { verdict[j] = .echo }
+        }
+        var k = 0
+        while k < mine.count {
+            guard verdict[k] == .unsure else { k += 1; continue }
+            var end = k
+            while end + 1 < mine.count, verdict[end + 1] == .unsure { end += 1 }
+            func echo(_ j: Int, near i: Int) -> Bool {
+                mine.indices.contains(j) && verdict[j] == .echo && abs(segments[mine[j]].start - segments[mine[i]].start) < 3
+            }
+            let mean = score[k...end].reduce(0, +) / Double(end - k + 1)
+            let isEcho = echo(k - 1, near: k) && echo(end + 1, near: end) && mean < 8
+            for j in k...end { verdict[j] = isEcho ? .echo : .mine }
+            k = end + 1
+        }
+        let drop = Set(mine.indices.filter { verdict[$0] == .echo }.map { mine[$0] })
+        return segments.indices.filter { !drop.contains($0) }.map { segments[$0] }
     }
 
     /// Drops "You" segments that repeat another speaker's words within `window` s: on a call, the far side

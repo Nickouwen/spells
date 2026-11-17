@@ -62,6 +62,19 @@ import ScryPipeline
             try await Task.sleep(for: .milliseconds(500))
         }
 
+    case "ops":
+        guard positional.count == 2 else { die(usage) }
+        guard let vault = ScrySettings.folder(options["--vault"] ?? settings.opsVault) else { die("no vault: pass --vault DIR or set scry_ops_vault") }
+        let url = URL(filePath: (positional[1] as NSString).expandingTildeInPath)
+        let offer = try await ScryOps.extract(transcript: url, vault: vault, userName: settings.userName, rules: settings.opsRules)
+        for i in offer.items { say("[\(i.kind)] \(i.title) → \(i.path)\n\(i.text)\n") }
+        say("\(offer.items.count) item(s) from \(url.lastPathComponent) (\(offer.date))")
+        if flags.contains("--push") {
+            let r = ScryOps.push(offer, vault: vault)
+            for p in r.written { say("wrote \(vault.appending(path: p).path)") }
+            if r.failed > 0 { say("\(r.failed) item(s) not written (see the log)") }
+        }
+
     case "list":
         guard positional.count == 1 else { die(usage) }
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"
