@@ -17,7 +17,7 @@ import UserNotifications
         /// The Meet tab's participants and speaking indicator (Chromium browsers only).
         var meet: ScryMeetWatch?
         /// Whether the far side is really being recorded, and the poll it was last fed at (`checkFarSide`).
-        var farSide = ScryFarSideCheck(), farSideAt = Date(), farSideHeard = 0
+        var farSide = ScryFarSideCheck(), farSideSeen = (mic: 0, system: 0)
         init(dir: URL, app: String?, recorder: ScryRecorder, settings: ScrySettings, keyterms: [String]) {
             self.dir = dir; self.app = app; self.recorder = recorder; self.settings = settings; self.keyterms = keyterms
         }
@@ -130,8 +130,8 @@ import UserNotifications
         let now = ScryNames.completed(onScreen.isEmpty ? s.screens.last.map { ScryNames.fromOCR([$0], known: (s.invite?.invitees.map(\.name) ?? []) + [s.settings.userName]) } ?? [] : onScreen, s.invite)
         let who = ScryNames.pillLabel(now, userName: s.settings.userName,
                                       fallback: s.invite?.title ?? s.app.map(Self.name) ?? "In person")
-        // The tap stopped delivering (it's being rebuilt), or what it delivers isn't the call: say so, rather than
-        // record a one-sided call quietly.
+        // The tap stopped delivering (it's being rebuilt), or it delivers too little of the call: say so, rather
+        // than record a one-sided call quietly.
         checkFarSide(s)
         let warn = !s.recorder.systemAlive ? " · no call audio" : s.farSide.broken ? " · call audio broken" : ""
         if let ms = stopsIn {
@@ -142,19 +142,16 @@ import UserNotifications
         }
     }
 
-    /// Once a second: Meet shows someone else speaking — is that reaching the recording (`ScryFarSideCheck`)?
-    /// If not, say so during the call (the pill, a sound, a notification) and rebuild the tap, rather than
-    /// leave a one-sided note to be found afterwards (4 of the 6 long calls before 2026-11-06).
+    /// Once a second: is the tap delivering the far side whole (`ScryFarSideCheck`)? If not, say so during the
+    /// call (the pill, a sound, a notification) and rebuild the tap, rather than leave a one-sided note to be
+    /// found afterwards (4 of the 6 long calls before 2026-11-06). Silence is never a fault: see the check.
     private func checkFarSide(_ s: Session) {
-        guard let meet = s.meet else { return }
-        let now = Date(), heard = s.recorder.systemNonZero
-        defer { s.farSideAt = now; s.farSideHeard = heard }
-        let was = s.farSide.broken
-        guard let broken = s.farSide.feed(dt: now.timeIntervalSince(s.farSideAt), nonZero: heard - s.farSideHeard,
-                                          remoteSpeaking: meet.speaking != nil) else { return }
+        let now = s.recorder.delivered, was = s.farSide.broken
+        defer { s.farSideSeen = now }
+        guard let broken = s.farSide.feed(mic: now.mic - s.farSideSeen.mic, system: now.system - s.farSideSeen.system) else { return }
         if broken {
-            SupportLog.scry.error("the far side isn't being recorded while Meet shows speech; rebuilding the tap")
-            s.recorder.rebuildSystem(reason: "no far-side audio while Meet shows speech")
+            SupportLog.scry.error("the tap delivers too little of the far side; rebuilding it")
+            s.recorder.rebuildSystem(reason: "the tap delivers too little of the far side")
         }
         guard broken != was else { return }
         if broken {
@@ -279,6 +276,8 @@ import UserNotifications
             do {
                 let r = try await ScryPipeline.process(captureDir: dir, settings: settings, keyterms: keyterms)
                 await MainActor.run { ScryApp.shared?.notesReady(r) }
+            } catch ScryPipeline.Failure.nothingSaid {
+                await notify("Nobody spoke in that recording, so Scry made no note", open: nil)
             } catch {   // the pipeline already recorded the attempt in error.txt; the error may quote model output
                 SupportLog.scry.error("pipeline failed (capture kept at \(dir.lastPathComponent, privacy: .public)): \(String(describing: error), privacy: .private)")
                 await notify("Scry couldn't finish the notes", open: nil)

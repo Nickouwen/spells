@@ -103,6 +103,33 @@ extension ScryDetector {
 
 public enum ScryRecording: Equatable, Sendable { case none, call(String), inPerson }
 
+/// Is the far side of the call being recorded whole? Judged on the recording alone, with the mic as the clock:
+/// while the tap delivers, it must deliver as many samples as the mic does. `window` samples of mic time are
+/// judged at a time: `broken` when the far side got less than `floor` of them (a Bluetooth headset in its call
+/// profile, 2026-11-06: a third). Silence proves nothing either way — a quiet call delivers zeros at the full
+/// rate, or nothing at all — so a call where nobody talks is never flagged. (Until 2026-11-10 this was judged
+/// against Meet's speaking marker, which sat on a silent guest for 20 s and raised a false alarm.)
+/// shortcut: a tap that delivers silence at the full rate while people talk isn't caught; that needs a
+/// trustworthy "someone is speaking now" signal, which Meet's marker isn't.
+public struct ScryFarSideCheck: Sendable {
+    public static let window = 20 * 16000, floor = 0.75
+    private var clock = 0, got = 0
+    public private(set) var broken = false
+    public init() {}
+
+    /// One poll: the samples (16 kHz) the mic and the tap delivered since the last one. Returns `broken` when
+    /// a window completes, else nil. A poll where either delivered nothing starts the window again: the tap is
+    /// idle (nothing plays) or being rebuilt, or the mic stalled.
+    public mutating func feed(mic: Int, system: Int) -> Bool? {
+        guard mic > 0, system > 0 else { clock = 0; got = 0; return nil }
+        clock += mic; got += system
+        guard clock >= Self.window else { return nil }
+        broken = Double(got) / Double(clock) < Self.floor
+        clock = 0; got = 0
+        return broken
+    }
+}
+
 // MARK: - Calendar invite
 
 /// The calendar event behind a call: its title and who was invited (not who showed up — the screen says that).
@@ -949,7 +976,7 @@ public enum ScryNames {
     private static let chromeVerbs: Set<String> = [
         "mute", "unmute", "stop", "start", "share", "leave", "end", "join", "turn", "raise", "lower", "show", "hide",
         "invite", "copy", "pause", "resume", "record", "open", "close", "exit", "enter", "meeting", "call", "switch",
-        "present", "admit", "remove", "allow", "view", "add", "search", "send", "type", "click", "waiting", "breakout",
+        "present", "admit", "deny", "reframe", "remove", "allow", "view", "add", "search", "send", "type", "click", "waiting", "breakout",
     ]
     /// On-screen names completed from the invite: "Alex" → "Alex Client" when exactly one invitee has
     /// that first name. Multi-word names stay as shown.

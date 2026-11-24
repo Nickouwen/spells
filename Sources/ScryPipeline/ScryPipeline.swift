@@ -16,8 +16,11 @@ public enum ScryPipeline {
         case noKey
         case scribe(Int, String)
         case claude(String)
+        /// Not a fault: no words on either side and no notes typed, so there is nothing to write up.
+        case nothingSaid
         public var description: String {
             switch self {
+            case .nothingSaid: "nobody spoke in the recording, so no note was made"
             case .noKey: "no ElevenLabs key (ELEVENLABS_API_KEY, Spells/.env or Keychain \(SupportKeychain.elevenLabs))"
             case let .scribe(status, body): "Scribe HTTP \(status): \(body)"
             case .claude(let s): "claude -p failed: \(s)"
@@ -34,12 +37,18 @@ public enum ScryPipeline {
 
     /// Processes `<dir>/capture.json` (+ its audio). On success the capture dir is retired (`ScryCaptures.retire`:
     /// kept for a week, unless `SCRY_KEEP_CAPTURE=1` leaves it where it is); on failure it stays, with the attempt
-    /// count + error in `error.txt`.
+    /// count + error in `error.txt`. A recording nobody spoke in throws `Failure.nothingSaid`: no note, and the
+    /// capture is retired like a finished one (there is nothing to try again).
     public static func process(captureDir: URL, settings: ScrySettings, keyterms: [String]) async throws -> Result {
+        let retire = { if ProcessInfo.processInfo.environment["SCRY_KEEP_CAPTURE"] != "1" { ScryCaptures.retire(captureDir) } }
         do {
             let r = try await run(captureDir, settings, keyterms)
-            if ProcessInfo.processInfo.environment["SCRY_KEEP_CAPTURE"] != "1" { ScryCaptures.retire(captureDir) }
+            retire()
             return r
+        } catch Failure.nothingSaid {
+            retire()
+            SupportLog.scry.info("nobody spoke in the recording: no note")
+            throw Failure.nothingSaid
         } catch {
             ScryCaptures.recordFailure(captureDir, error)
             SupportLog.scry.error("pipeline failed: \(String(describing: error), privacy: .private)")
@@ -83,6 +92,9 @@ public enum ScryPipeline {
         // On a call, how loud each side was tells the far side's echo in the mic from what you said.
         let levels = capture.app == nil ? nil : levels(wav)
         let raw = try ScryTranscript.segments(fromScribeJSON: json, levels: levels)
+        // A call nobody spoke in (2026-11-10): asked for a summary of nothing, the model writes a note about an
+        // empty transcript and a follow-up email asking what was said. Notes you typed are still worth a note.
+        if raw.isEmpty, capture.userNotes.allSatisfy(\.isWhitespace) { throw Failure.nothingSaid }
         // Named before the summary, so its recap says "Alex", not "Speaker A": Meet's speaking indicator votes
         // first; with nothing from it, a lone far-side speaker is the one other person named.
         let fromMeet = capture.app == nil ? [:] : ScryMeet.names(for: raw, hints: meet.hints, owner: settings.userName)

@@ -56,8 +56,8 @@ final class ScryRecorder: @unchecked Sendable {
         watchdog = w
     }
 
-    /// Far-side samples recorded so far that carry sound (not 0), for `ScryFarSideCheck`.
-    var systemNonZero: Int { q.sync { sysNonZero } }
+    /// Samples each source has delivered so far (mic, tap), for `ScryFarSideCheck`.
+    var delivered: (mic: Int, system: Int) { q.sync { (received.0, received.1) } }
     /// False while the tap looks dead (the pill says "no call audio"): see `check`.
     var systemAlive: Bool { q.sync { !systemStale } }
     private var systemStale = false
