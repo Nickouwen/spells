@@ -51,12 +51,12 @@ public enum SupportKeychain {
         return key
     }
 
-    /// Replaces the item; an empty value deletes it.
+    /// Replaces the item; an empty value deletes it. `file: false` keeps it out of the plain-text `.env`.
     @discardableResult
-    public static func write(_ service: String, _ value: String, account: String = NSUserName()) -> Bool {
+    public static func write(_ service: String, _ value: String, account: String = NSUserName(), file: Bool = true) -> Bool {
         let match: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
                                     kSecAttrAccount as String: account]
-        writeFile(service, value)
+        if file { writeFile(service, value) }
         SecItemDelete(match as CFDictionary)
         let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !v.isEmpty else { return true }

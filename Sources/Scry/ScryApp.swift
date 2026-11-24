@@ -26,6 +26,7 @@ import UserNotifications
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let pill = ScryOfferPill()
     private let watch = ScryMicWatch()
+    private let alarm = ScryAlarm()
     private var offered: String?
     private var session: Session?
     /// A recording is in progress (an update must wait).
@@ -62,6 +63,8 @@ import UserNotifications
         }
         watch.onAction = { [weak self] in self?.handle($0) }
         watch.start()
+        alarm.call = { [weak self] in self.flatMap { $0.watch.callApp ?? ($0.session == nil ? nil : "in person") } }
+        alarm.start()
         if Self.canNotify {
             UNUserNotificationCenter.current().delegate = self
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -439,6 +442,7 @@ import UserNotifications
             menu.addItem(action("Record call", #selector(recordCall)))
             menu.addItem(action("Record in person", #selector(recordInPerson)))
             menu.addItem(action("Meetings", #selector(openMeetings)))
+            menu.addItem(action("Meeting reminders…", #selector(openReminders)))
             menu.addItem(action("Open notes folder", #selector(openNotes)))
             menu.addItem(.separator())
             menu.addItem(action("Settings…", #selector(openSettings)))
@@ -462,6 +466,7 @@ import UserNotifications
         NSWorkspace.shared.open(root)
     }
 
+    @objc private func openReminders() { ScryWindows.showReminders() }
     @objc private func openMeetings() { ScryWindows.showMeetings() }
     @objc private func openSettings() { ScryWindows.showSettings() }
 

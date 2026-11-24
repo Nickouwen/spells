@@ -177,12 +177,16 @@ public struct ScryInvite: Codable, Equatable, Sendable {
 public struct ScrySettings: Equatable, Sendable {
     public static let autoOfferKey = "scry_auto_offer", liveKey = "scry_live", rootKey = "scry_root",
                       neverKey = "scry_never_apps", nameKey = "scry_user_name",
-                      autoRecordKey = "scry_auto_record", opsPushKey = "scry_ops_push", opsVaultKey = "scry_ops_vault",
+                      autoRecordKey = "scry_auto_record", meetingAlarmKey = "scry_meeting_alarm", googleClientIDKey = "scry_google_client_id", opsPushKey = "scry_ops_push", opsVaultKey = "scry_ops_vault",
                       opsSourcesKey = "scry_ops_sources", opsSlackUserKey = "scry_ops_slack_user", opsRulesKey = "scry_ops_rules"
     public static let defaultRoot = "~/Documents/Scry"
     public var autoOffer = true
     /// Start recording on its own when a call starts, instead of offering (browsers: only with a call-titled window).
     public var autoRecord = false
+    /// Pop up "Your meeting is starting now" when a meeting starts and you're in no call.
+    public var meetingAlarm = true
+    /// Your Google Cloud OAuth client (type iOS, bundle ID dev.nic.spells.scry) for Google Calendar; not a secret.
+    public var googleClientID = ""
     /// Live transcript + "What did I miss?" during the call (two realtime sockets, $0.39/h each).
     public var live = true
     public var root = defaultRoot
@@ -209,6 +213,8 @@ public struct ScrySettings: Equatable, Sendable {
         var s = ScrySettings()
         if let v = value(autoOfferKey) { s.autoOffer = v == "1" }
         if let v = value(autoRecordKey) { s.autoRecord = v == "1" }
+        if let v = value(meetingAlarmKey) { s.meetingAlarm = v == "1" }
+        if let v = value(googleClientIDKey) { s.googleClientID = v }
         if let v = value(liveKey) { s.live = v == "1" }
         if let v = value(rootKey) { s.root = v }
         if let v = value(neverKey) { s.never = lines(v) }
@@ -234,7 +240,7 @@ public struct ScrySettings: Equatable, Sendable {
     }
 
     public var rows: [String: String] {
-        [Self.autoOfferKey: autoOffer ? "1" : "0", Self.autoRecordKey: autoRecord ? "1" : "0", Self.liveKey: live ? "1" : "0", Self.rootKey: root,
+        [Self.autoOfferKey: autoOffer ? "1" : "0", Self.autoRecordKey: autoRecord ? "1" : "0", Self.meetingAlarmKey: meetingAlarm ? "1" : "0", Self.googleClientIDKey: googleClientID, Self.liveKey: live ? "1" : "0", Self.rootKey: root,
          Self.neverKey: never.joined(separator: "\n"), Self.nameKey: userName, Self.opsPushKey: opsPush ? "1" : "0",
          Self.opsVaultKey: opsVault, Self.opsSourcesKey: opsSources.joined(separator: "\n"), Self.opsSlackUserKey: opsSlackUser, Self.opsRulesKey: opsRules]
     }

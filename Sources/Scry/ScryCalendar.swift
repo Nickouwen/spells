@@ -3,8 +3,9 @@ import Foundation
 import SpellsKit
 import ScryCore
 
-/// The calendar event behind a recording, via EventKit (whatever accounts macOS Calendar has — add Google
-/// under Internet Accounts). Who was invited, with emails; the screen says who actually came.
+/// The calendar event behind a recording, and the meetings for the alarm: Google Calendar when connected
+/// (`ScryGoogle`), plus EventKit (whatever accounts macOS Calendar has). Who was invited, with emails; the
+/// screen says who actually came.
 @MainActor enum ScryCalendar {
     private static let store = EKEventStore()
 
@@ -16,10 +17,20 @@ import ScryCore
     }
 
     static func invite(app: String?, now: Date) -> ScryInvite? {
-        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return nil }
-        let events = store.events(matching: store.predicateForEvents(withStart: now.addingTimeInterval(-4 * 3600),
-                                                                     end: now.addingTimeInterval(900), calendars: nil))
-        let candidates = events.filter { !$0.isAllDay }.map { e in
+        ScryInvite.pick(events(now: now).map(\.candidate), app: app, now: now)
+    }
+
+    /// The meetings around now, for the alarm.
+    static func meetings(now: Date) -> [ScryMeeting] {
+        ScryGoogle.shared.refreshIfDue()
+        return events(now: now).compactMap(\.meeting)
+    }
+
+    private static func events(now: Date) -> [ScryCalendarEvent] {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return ScryGoogle.shared.events }
+        let local = store.events(matching: store.predicateForEvents(withStart: now.addingTimeInterval(-4 * 3600),
+                                                                    end: now.addingTimeInterval(900), calendars: nil))
+        return ScryGoogle.shared.events + local.filter { !$0.isAllDay }.map { e in
             let people = (e.attendees ?? []) + [e.organizer].compactMap { $0 }
             var invitees: [ScryInvite.Invitee] = []
             for p in people where !p.isCurrentUser && p.participantType == .person {
@@ -28,8 +39,18 @@ import ScryCore
                 invitees.append(.init(name: name, email: email))
             }
             let text = [e.url?.absoluteString, e.location, e.notes].compactMap { $0 }.joined(separator: " ")
-            return ScryInvite.Candidate(title: e.title ?? "", start: e.startDate, end: e.endDate, text: text, invitees: invitees)
+            let declined = e.attendees?.contains { $0.isCurrentUser && $0.participantStatus == .declined } == true
+            return ScryCalendarEvent(candidate: .init(title: e.title ?? "", start: e.startDate, end: e.endDate, text: text, invitees: invitees),
+                                     off: e.status == .canceled || declined)
         }
-        return ScryInvite.pick(candidates, app: app, now: now)
+    }
+
+    /// Whether Scry can read macOS Calendar, in words.
+    static var status: String {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
+            return "Scry isn't allowed to read macOS Calendar (System Settings \u{203A} Privacy & Security \u{203A} Calendars). It doesn't need to when Google is connected."
+        }
+        let names = Set(store.calendars(for: .event).map(\.source.title)).sorted().joined(separator: ", ")
+        return "Scry also reads macOS Calendar: \(names)."
     }
 }

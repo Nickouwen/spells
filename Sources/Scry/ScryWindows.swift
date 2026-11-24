@@ -3,11 +3,11 @@ import SpellsKit
 import SpellsUI
 import ScryUI
 
-/// Scry's two windows (Meetings, Settings) and its URL verbs. A menu-bar app: windows are made on first
+/// Scry's windows (Meetings, Settings, Meeting Reminders) and its URL verbs. A menu-bar app: windows are made on first
 /// show and kept.
 @MainActor enum ScryWindows {
     static let meetingsModel = ScryMeetingsModel(root: ScryApp.loadSettings().settings.rootURL)
-    private static let meetings = ModuleWindow(), settings = ModuleWindow()
+    private static let meetings = ModuleWindow(), settings = ModuleWindow(), reminders = ModuleWindow()
     /// Set by ScryApp: re-reads what the detector caches (the never-offer list).
     static var onSettingsChanged: @MainActor () -> Void = {}
 
@@ -25,11 +25,18 @@ import ScryUI
         }
     }
 
-    /// `scry://settings`, `scry://meetings`, `scry://meeting?path=<note.md>` (`quit` is answered by ModuleURLs).
+    static func showReminders() {
+        reminders.show(title: "Meeting Reminders", size: NSSize(width: 520, height: 520), minSize: NSSize(width: 440, height: 400)) {
+            ScryRemindersView()
+        }
+    }
+
+    /// `scry://settings`, `scry://meetings`, `scry://reminders`, `scry://meeting?path=<note.md>` (`quit` is answered by ModuleURLs).
     static func handle(_ verb: String, _ query: [String: String]) {
         switch verb {
         case "settings": showSettings()
         case "meetings": showMeetings()
+        case "reminders": showReminders()
         case "meeting": showMeetings(query["path"].map { URL(filePath: $0) })
         default: SupportLog.scry.info("unknown URL verb \(verb, privacy: .public)")
         }
