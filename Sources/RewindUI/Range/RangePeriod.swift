@@ -7,6 +7,7 @@ import RewindCore
 /// - A period is an inclusive `ClosedRange<LocalDate>`. Each `LocalDate` is the store's day,
 ///   `[D 04:00, D+1 04:00)` in each span's own tz (`RewindModule.defaultDayStartHour`), so "1–15" covers
 ///   `[1st 04:00, 16th 04:00)` local and a late-night span on the 15th stays on the 15th.
+/// - With Rewind's `cycle_start` set, billing periods are two-week blocks from it (`ExportPeriod`), not halves.
 /// - Billing halves: day 1…15 and day 16…end-of-month (calendar EOM: 28/29/30/31).
 /// - `currentBilling` = the half containing today (runs to its last day even if that's in the future).
 /// - `previousBilling` = the half before it: on day ≤ 15 → 16…EOM of last month; on day ≥ 16 → 1…15 of this month.
@@ -20,14 +21,16 @@ public enum RangePeriod: Hashable, Sendable {
     /// Presets in menu order.
     public static let presets: [RangePeriod] = [.currentBilling, .previousBilling, .thisWeek, .lastWeek, .thisMonth]
 
-    public func bounds(today t: LocalDate) -> ClosedRange<LocalDate> {
+    public func bounds(today t: LocalDate, cycleStart: LocalDate? = nil) -> ClosedRange<LocalDate> {
+        func billing(_ s: String) -> ClosedRange<LocalDate> {   // the exports' own rule, so the two always agree
+            let p = ExportPeriod.parse(s, today: t, cycleStart: cycleStart)!
+            return p.from...p.through
+        }
         switch self {
         case .currentBilling:
-            return t.day <= 15 ? t.withDay(1)...t.withDay(15) : t.withDay(16)...t.endOfMonth
+            return billing("current")
         case .previousBilling:
-            if t.day >= 16 { return t.withDay(1)...t.withDay(15) }
-            let p = t.withDay(1).adding(days: -1)
-            return p.withDay(16)...p.endOfMonth
+            return billing("previous")
         case .thisWeek:
             let mon = t.adding(days: -t.isoWeekdayIndex)
             return mon...mon.adding(days: 6)
@@ -57,23 +60,23 @@ public enum RangePeriod: Hashable, Sendable {
     /// stepping the same way: a billing half (1–15 / 16–EOM) steps by half-month, a whole calendar
     /// month by month, anything else (weeks included) by its own length. Lands back on a preset
     /// when the bounds match one.
-    public func stepped(_ delta: Int, today: LocalDate) -> RangePeriod {
-        let b = bounds(today: today)
+    public func stepped(_ delta: Int, today: LocalDate, cycleStart: LocalDate? = nil) -> RangePeriod {
+        let b = bounds(today: today, cycleStart: cycleStart)
         let a = b.lowerBound, z = b.upperBound
         let sameMonth = a.year == z.year && a.month == z.month
         let next: ClosedRange<LocalDate>
         if sameMonth && a.day == 1 && z == a.endOfMonth {
             let first = delta > 0 ? z.adding(days: 1) : a.adding(days: -1).withDay(1)
             next = first...first.endOfMonth
-        } else if sameMonth && a.day == 1 && z.day == 15 {
+        } else if cycleStart == nil && sameMonth && a.day == 1 && z.day == 15 {
             next = delta > 0 ? a.withDay(16)...a.endOfMonth : RangePeriod.previousBilling.bounds(today: a)
-        } else if sameMonth && a.day == 16 && z == a.endOfMonth {
+        } else if cycleStart == nil && sameMonth && a.day == 16 && z == a.endOfMonth {
             next = delta > 0 ? RangePeriod.currentBilling.bounds(today: z.adding(days: 1)) : a.withDay(1)...a.withDay(15)
         } else {
             let len = a.days(to: z) + 1
             next = a.adding(days: len * delta)...z.adding(days: len * delta)
         }
-        return Self.presets.first { $0.bounds(today: today) == next } ?? .custom(next.lowerBound, next.upperBound)
+        return Self.presets.first { $0.bounds(today: today, cycleStart: cycleStart) == next } ?? .custom(next.lowerBound, next.upperBound)
     }
 
     /// `1–15 Oct 2026`, `16–31 Oct 2026`, `28 Sep – 4 Oct 2026`, `29 Dec 2025 – 4 Jan 2026`.

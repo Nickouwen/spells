@@ -10,6 +10,16 @@ import RewindCore
         #expect(RangePeriod.currentBilling.bounds(today: rd(2026, 9, 30)) == rd(2026, 9, 16)...rd(2026, 9, 30))
     }
 
+    @Test func twoWeekCycleBoundsAndSteps() {
+        let t = rd(2026, 11, 24), c = rd(2026, 11, 21)
+        #expect(RangePeriod.currentBilling.bounds(today: t, cycleStart: c) == rd(2026, 11, 21)...rd(2026, 12, 4))
+        #expect(RangePeriod.previousBilling.bounds(today: t, cycleStart: c) == rd(2026, 11, 7)...rd(2026, 11, 20))
+        #expect(RangePeriod.currentBilling.stepped(-1, today: t, cycleStart: c) == .previousBilling)
+        #expect(RangePeriod.previousBilling.stepped(1, today: t, cycleStart: c) == .currentBilling)
+        #expect(RangePeriod.previousBilling.stepped(-1, today: t, cycleStart: c) == .custom(rd(2026, 10, 24), rd(2026, 11, 6)))
+        #expect(RangePeriod.currentBilling.stepped(1, today: t, cycleStart: c) == .custom(rd(2026, 12, 5), rd(2026, 12, 18)))
+    }
+
     /// Item 9's acceptance pair: `previous` on 10-16 → 1–15 Oct; on 11-01 → 16–31 Oct.
     @Test func previousBillingMatchesExportPresets() {
         #expect(RangePeriod.previousBilling.bounds(today: rd(2026, 10, 16)) == rd(2026, 10, 1)...rd(2026, 10, 15))

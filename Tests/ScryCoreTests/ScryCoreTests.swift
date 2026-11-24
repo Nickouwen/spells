@@ -480,3 +480,25 @@ private let fullNote = ScryNote(
                                startedAt: Date(), keyterms: [], invite: .init(title: "Example sync", invitees: [.init(name: "Alex Client", email: "t@x.com")]))
     #expect(p.contains("\"Example sync\" — invited: Alex Client <t@x.com>"))
 }
+
+// MARK: - Far-side check
+
+@Test func theFarSideCheckFlagsATapThatDeliversTooLittleAndNeverSilence() {
+    // One poll a second: the mic delivers 16 000 samples, the tap `share` of that.
+    func verdicts(_ share: Double, seconds: Int) -> [Bool] {
+        var check = ScryFarSideCheck()
+        return (0..<seconds).compactMap { _ in check.feed(mic: 16000, system: Int(16000 * share)) }
+    }
+    #expect(verdicts(1, seconds: 60) == [false, false, false])   // a healthy call, talking or silent: the tap keeps pace
+    #expect(verdicts(0.33, seconds: 20) == [true])               // the headset's call profile (2026-11-06): a third arrives
+    #expect(verdicts(0, seconds: 600).isEmpty)                   // nothing plays, so the tap delivers nothing: not judged
+    #expect(verdicts(0.33, seconds: 19).isEmpty)                 // not judged before a full window
+    // A gap (a rebuild, a pause in playback) starts the window again; good audio after a rebuild clears the flag.
+    var check = ScryFarSideCheck()
+    for _ in 0..<19 { _ = check.feed(mic: 16000, system: 5000) }
+    #expect(check.feed(mic: 16000, system: 0) == nil)
+    for _ in 0..<19 { #expect(check.feed(mic: 16000, system: 5000) == nil) }
+    #expect(check.feed(mic: 16000, system: 5000) == true)
+    for _ in 0..<20 { _ = check.feed(mic: 16000, system: 15990) }
+    #expect(!check.broken)
+}

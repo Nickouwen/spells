@@ -148,7 +148,7 @@ public struct ShellDetailView: View {
             } else { loading }
         case .range:
             if let r = model.rangeData {
-                ViewSlot.rangeView(r, period: $model.rangePeriod, today: model.today)
+                ViewSlot.rangeView(r, period: $model.rangePeriod, today: model.today, cycleStart: model.cycleStart)
             } else { loading }
         }
     }

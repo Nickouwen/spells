@@ -39,6 +39,10 @@ public struct ScrySettingsView: View {
                     var s = saved; s.autoRecord = v; persist(s)
                 }))
                 SettingsDivider()
+                SettingsToggleRow("Alarm when a meeting starts and you're not in a call", isOn: Binding(get: { saved.meetingAlarm }, set: { v in
+                    var s = saved; s.meetingAlarm = v; persist(s)
+                }))
+                SettingsDivider()
                 SettingsToggleRow("Live transcript and \u{201C}What did I miss?\u{201D}", isOn: Binding(get: { saved.live }, set: { v in
                     var s = saved; s.live = v; persist(s)
                 }))

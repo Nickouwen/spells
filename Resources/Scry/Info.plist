@@ -40,7 +40,7 @@
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Scry records the other side of a call (system audio) only while you're recording a meeting.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>Scry reads the calendar event for a meeting you record, to name who was invited.</string>
+	<string>Scry reads your calendar to name who was invited to a meeting you record, and to alert you when a meeting starts.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Scry records your side of a meeting only while you're recording it.</string>
 	<key>SpellsModule</key>

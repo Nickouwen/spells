@@ -51,7 +51,14 @@ enum ScryTestModes {
         }
         watchdog.cancel()
         let started = Date()
-        try? await Task.sleep(for: .seconds(seconds))
+        // The in-call check on real hardware: one poll a second, as the app does.
+        var check = ScryFarSideCheck(), seen = (mic: 0, system: 0), verdicts: [Bool] = []
+        while Date().timeIntervalSince(started) < seconds {
+            try? await Task.sleep(for: .seconds(1))
+            let now = recorder.delivered
+            if let v = check.feed(mic: now.mic - seen.mic, system: now.system - seen.system) { verdicts.append(v) }
+            seen = now
+        }
         let stats = recorder.stop()
         let capture = ScryCapture(audioFile: "audio.wav", startedAt: started, endedAt: Date(), app: nil, screenshotText: [], userNotes: "")
         do { try capture.encoded().write(to: url.appending(path: "capture.json")) } catch {
@@ -60,6 +67,7 @@ enum ScryTestModes {
         print(String(format: "ch0 mic:    %7d samples in, RMS %.5f", stats.micSamples, stats.micRMS))
         print(String(format: "ch1 system: %7d samples in, RMS %.5f", stats.systemSamples, stats.systemRMS))
         print("wav: \(stats.frames) frames (\(String(format: "%.2f", Double(stats.frames) / 16000)) s, 2 ch, 16 kHz), \(recorder.tapRebuilds) tap rebuild(s)")
+        print("far-side check: \(verdicts.count) window(s) judged, \(verdicts.count { $0 }) broken")
         // ponytail: there's no public preflight for the audio-capture grant; a denied tap delivers digital
         // silence. Exact zeros on ch 1 without the Screen Recording grant (which implies audio) = denied.
         if stats.systemAllZero && !CGPreflightScreenCaptureAccess() {

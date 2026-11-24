@@ -30,7 +30,7 @@ extension LocalDate {
     func storeNextDay() -> LocalDate { storeShift(1) }
     func storePrevDay() -> LocalDate { storeShift(-1) }
 
-    private func storeShift(_ days: Int) -> LocalDate {
+    func storeShift(_ days: Int) -> LocalDate {
         let d = Self.utc.date(byAdding: .day, value: days,
                               to: Self.utc.date(from: DateComponents(year: year, month: month, day: day, hour: 12))!)!
         let c = Self.utc.dateComponents([.year, .month, .day], from: d)

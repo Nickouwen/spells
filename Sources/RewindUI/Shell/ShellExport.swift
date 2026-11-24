@@ -8,9 +8,9 @@ extension AppModel {
         public var summary: String
     }
 
-    /// `spec`: "current" | "previous" billing half. Writes to `exports/<from>_<through>[-audit]`.
+    /// `spec`: "current" | "previous" billing period. Writes to `exports/<from>_<through>[-audit]`.
     public func export(_ spec: String, mode: ExportMode, disclosure: Disclosure = .L0) async throws -> ExportOutcome {
-        guard let period = ExportPeriod.parse(spec, today: today) else { throw ShellExportError.badPeriod(spec) }
+        guard let period = ExportPeriod.parse(spec, today: today, cycleStart: cycleStart) else { throw ShellExportError.badPeriod(spec) }
         let (db, tz) = (self.db, self.timeZone)
         let dir = paths.exports.appending(path: "\(period.from)_\(period.through)\(mode == .audit ? "-audit" : "")",
                                           directoryHint: .isDirectory)

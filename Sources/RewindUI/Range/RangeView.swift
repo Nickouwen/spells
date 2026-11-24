@@ -9,11 +9,13 @@ public struct RangeView: View {
     let data: RangeData
     @Binding var period: RangePeriod
     let today: LocalDate
+    let cycleStart: LocalDate?
     @State private var group: RangeGroup
     @State private var detail: RangeRow?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    public init(data: RangeData, period: Binding<RangePeriod>, today: LocalDate? = nil, group: RangeGroup = .category) {
+    public init(data: RangeData, period: Binding<RangePeriod>, today: LocalDate? = nil, cycleStart: LocalDate? = nil, group: RangeGroup = .category) {
+        self.cycleStart = cycleStart
         self.data = data
         self._period = period
         self.today = today ?? LocalDate.containing(ms: Int64(Date().timeIntervalSince1970 * 1000), in: .current)
@@ -24,7 +26,7 @@ public struct RangeView: View {
         Group {
             if data.metrics.trackedMs == 0 {
                 VStack(alignment: .leading, spacing: Theme.Space.l) {
-                    RangePeriodBar(period: $period, today: today)
+                    RangePeriodBar(period: $period, today: today, cycleStart: cycleStart)
                     EmptyState(symbol: "calendar", title: "No tracked time in this period",
                                detail: "Nothing was recorded between \(RangePeriod.label(data.bounds)). Step back with ‹ to find earlier time.")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -35,7 +37,7 @@ public struct RangeView: View {
                 // Scrolls vertically; the table sizes to its rows (see RangeTableCard.tableHeight).
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: Theme.Space.l) {
-                        RangePeriodBar(period: $period, today: today)
+                        RangePeriodBar(period: $period, today: today, cycleStart: cycleStart)
                         headline
                             // Totals roll when the loaded period changes, not on the minute refetch.
                             .animation(Theme.Motion.animation(Theme.Motion.swap, reduceMotion: reduceMotion), value: data.bounds)

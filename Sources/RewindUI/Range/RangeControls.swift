@@ -5,6 +5,7 @@ import RewindCore
 struct RangePeriodBar: View {
     @Binding var period: RangePeriod
     let today: LocalDate
+    let cycleStart: LocalDate?
 
     var body: some View {
         HStack(spacing: Theme.Space.xs) {
@@ -14,12 +15,12 @@ struct RangePeriodBar: View {
                     Button {
                         period = p
                     } label: {
-                        Text("\(p.name)  ·  \(RangePeriod.label(p.bounds(today: today)))")
+                        Text("\(p.name)  ·  \(RangePeriod.label(p.bounds(today: today, cycleStart: cycleStart)))")
                     }
                 }
             } label: {
                 HStack(spacing: Theme.Space.s) {
-                    Text(RangePeriod.label(period.bounds(today: today))).textRole(.heading)
+                    Text(RangePeriod.label(period.bounds(today: today, cycleStart: cycleStart))).textRole(.heading)
                     Image(systemName: "chevron.down").font(TextRole.label.font).foregroundStyle(Theme.inkTertiary)
                 }
                 .padding(.horizontal, Theme.Space.s)
@@ -37,7 +38,7 @@ struct RangePeriodBar: View {
 
     private func stepButton(_ symbol: String, _ delta: Int, _ help: String) -> some View {
         Button {
-            period = period.stepped(delta, today: today)
+            period = period.stepped(delta, today: today, cycleStart: cycleStart)
         } label: {
             Image(systemName: symbol)
                 .font(TextRole.bodyEmph.font)

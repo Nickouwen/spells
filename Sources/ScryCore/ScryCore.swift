@@ -103,6 +103,33 @@ extension ScryDetector {
 
 public enum ScryRecording: Equatable, Sendable { case none, call(String), inPerson }
 
+/// Is the far side of the call being recorded whole? Judged on the recording alone, with the mic as the clock:
+/// while the tap delivers, it must deliver as many samples as the mic does. `window` samples of mic time are
+/// judged at a time: `broken` when the far side got less than `floor` of them (a Bluetooth headset in its call
+/// profile, 2026-11-06: a third). Silence proves nothing either way — a quiet call delivers zeros at the full
+/// rate, or nothing at all — so a call where nobody talks is never flagged. (Until 2026-11-10 this was judged
+/// against Meet's speaking marker, which sat on a silent guest for 20 s and raised a false alarm.)
+/// shortcut: a tap that delivers silence at the full rate while people talk isn't caught; that needs a
+/// trustworthy "someone is speaking now" signal, which Meet's marker isn't.
+public struct ScryFarSideCheck: Sendable {
+    public static let window = 20 * 16000, floor = 0.75
+    private var clock = 0, got = 0
+    public private(set) var broken = false
+    public init() {}
+
+    /// One poll: the samples (16 kHz) the mic and the tap delivered since the last one. Returns `broken` when
+    /// a window completes, else nil. A poll where either delivered nothing starts the window again: the tap is
+    /// idle (nothing plays) or being rebuilt, or the mic stalled.
+    public mutating func feed(mic: Int, system: Int) -> Bool? {
+        guard mic > 0, system > 0 else { clock = 0; got = 0; return nil }
+        clock += mic; got += system
+        guard clock >= Self.window else { return nil }
+        broken = Double(got) / Double(clock) < Self.floor
+        clock = 0; got = 0
+        return broken
+    }
+}
+
 // MARK: - Calendar invite
 
 /// The calendar event behind a call: its title and who was invited (not who showed up — the screen says that).
@@ -150,12 +177,16 @@ public struct ScryInvite: Codable, Equatable, Sendable {
 public struct ScrySettings: Equatable, Sendable {
     public static let autoOfferKey = "scry_auto_offer", liveKey = "scry_live", rootKey = "scry_root",
                       neverKey = "scry_never_apps", nameKey = "scry_user_name",
-                      autoRecordKey = "scry_auto_record", opsPushKey = "scry_ops_push", opsVaultKey = "scry_ops_vault",
+                      autoRecordKey = "scry_auto_record", meetingAlarmKey = "scry_meeting_alarm", googleClientIDKey = "scry_google_client_id", opsPushKey = "scry_ops_push", opsVaultKey = "scry_ops_vault",
                       opsSourcesKey = "scry_ops_sources", opsSlackUserKey = "scry_ops_slack_user", opsRulesKey = "scry_ops_rules"
     public static let defaultRoot = "~/Documents/Scry"
     public var autoOffer = true
     /// Start recording on its own when a call starts, instead of offering (browsers: only with a call-titled window).
     public var autoRecord = false
+    /// Pop up "Your meeting is starting now" when a meeting starts and you're in no call.
+    public var meetingAlarm = true
+    /// Your Google Cloud OAuth client (type iOS, bundle ID dev.nic.spells.scry) for Google Calendar; not a secret.
+    public var googleClientID = ""
     /// Live transcript + "What did I miss?" during the call (two realtime sockets, $0.39/h each).
     public var live = true
     public var root = defaultRoot
@@ -182,6 +213,8 @@ public struct ScrySettings: Equatable, Sendable {
         var s = ScrySettings()
         if let v = value(autoOfferKey) { s.autoOffer = v == "1" }
         if let v = value(autoRecordKey) { s.autoRecord = v == "1" }
+        if let v = value(meetingAlarmKey) { s.meetingAlarm = v == "1" }
+        if let v = value(googleClientIDKey) { s.googleClientID = v }
         if let v = value(liveKey) { s.live = v == "1" }
         if let v = value(rootKey) { s.root = v }
         if let v = value(neverKey) { s.never = lines(v) }
@@ -207,7 +240,7 @@ public struct ScrySettings: Equatable, Sendable {
     }
 
     public var rows: [String: String] {
-        [Self.autoOfferKey: autoOffer ? "1" : "0", Self.autoRecordKey: autoRecord ? "1" : "0", Self.liveKey: live ? "1" : "0", Self.rootKey: root,
+        [Self.autoOfferKey: autoOffer ? "1" : "0", Self.autoRecordKey: autoRecord ? "1" : "0", Self.meetingAlarmKey: meetingAlarm ? "1" : "0", Self.googleClientIDKey: googleClientID, Self.liveKey: live ? "1" : "0", Self.rootKey: root,
          Self.neverKey: never.joined(separator: "\n"), Self.nameKey: userName, Self.opsPushKey: opsPush ? "1" : "0",
          Self.opsVaultKey: opsVault, Self.opsSourcesKey: opsSources.joined(separator: "\n"), Self.opsSlackUserKey: opsSlackUser, Self.opsRulesKey: opsRules]
     }
@@ -949,7 +982,7 @@ public enum ScryNames {
     private static let chromeVerbs: Set<String> = [
         "mute", "unmute", "stop", "start", "share", "leave", "end", "join", "turn", "raise", "lower", "show", "hide",
         "invite", "copy", "pause", "resume", "record", "open", "close", "exit", "enter", "meeting", "call", "switch",
-        "present", "admit", "remove", "allow", "view", "add", "search", "send", "type", "click", "waiting", "breakout",
+        "present", "admit", "deny", "reframe", "remove", "allow", "view", "add", "search", "send", "type", "click", "waiting", "breakout",
     ]
     /// On-screen names completed from the invite: "Alex" → "Alex Client" when exactly one invitee has
     /// that first name. Multi-word names stay as shown.

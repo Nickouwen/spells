@@ -75,9 +75,9 @@ public struct RangeData: Sendable {
     /// Reads the period from the store: edited spans per local day (the store's day clipping, as export does),
     /// plus the raw record over the same window for the `±` delta and tracker gaps.
     public static func load(store: Store, classifier: Classifier, categories: [RewindCore.Category], projects: [Project],
-                            period: RangePeriod, today: LocalDate, timeZone: TimeZone = .current,
+                            period: RangePeriod, today: LocalDate, cycleStart: LocalDate? = nil, timeZone: TimeZone = .current,
                             dayStartHour: Int = RewindModule.defaultDayStartHour) throws -> RangeData {
-        let bounds = period.bounds(today: today)
+        let bounds = period.bounds(today: today, cycleStart: cycleStart)
         let dates = LocalDate.all(in: bounds)
         var edited: [LocalDate: [EffectiveSpan]] = [:]
         for d in dates { edited[d] = try store.effectiveSpans(day: d, dayStartHour: dayStartHour) }

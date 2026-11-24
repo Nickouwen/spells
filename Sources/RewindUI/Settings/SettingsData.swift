@@ -43,6 +43,26 @@ struct SettingsDataTab: View {
                     }
                 }
             }
+            SettingsSection("Pay period", detail: "Sets the billing periods in Range, exports and Transmute's invoices.") {
+                HStack(spacing: Theme.Space.m) {
+                    Picker("Pay period", selection: Binding(get: { model.cycleStart != nil }, set: { on in
+                        Task { await model.setCycleStart(on ? model.today.adding(days: -model.today.isoWeekdayIndex) : nil) }
+                    })) {
+                        Text("1st–15th, 16th–end").tag(false)
+                        Text("Every two weeks").tag(true)
+                    }
+                    .labelsHidden().fixedSize()
+                    Spacer()
+                    if let start = model.cycleStart {
+                        DatePicker("A period starts on", selection: Binding(get: { start.rangeDate }, set: { d in
+                            Task { await model.setCycleStart(LocalDate(rangeDate: d)) }
+                        }), displayedComponents: .date)
+                        .fixedSize()
+                        .environment(\.timeZone, TimeZone(identifier: "UTC")!)   // `rangeDate` is noon UTC
+                        .environment(\.calendar, LocalDate.rangeCal)
+                    }
+                }
+            }
             SettingsSection("Export", detail: "Billable hours per day and project. Audit adds the chain rows and anchors so the bundle verifies without the app.") {
                 HStack(spacing: Theme.Space.m) {
                     Picker("Period", selection: $period) {
@@ -112,7 +132,7 @@ struct SettingsDataTab: View {
                 let out = try await model.export(period, mode: mode)
                 // The PDF timesheet goes next to timesheet.csv (its footer pins that file's digest).
                 var reveal = out.dir
-                if let p = ExportPeriod.parse(period, today: model.today) {
+                if let p = ExportPeriod.parse(period, today: model.today, cycleStart: model.cycleStart) {
                     let (db, tz, dir) = (model.db, model.timeZone, out.dir)
                     reveal = try await Task.detached(priority: .userInitiated) {
                         try ExportPDF.write(db: db, period: p, mode: mode, to: dir, tz: tz).url
