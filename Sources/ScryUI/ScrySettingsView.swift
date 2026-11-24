@@ -16,6 +16,7 @@ public struct ScrySettingsView: View {
     @State private var root = ""
     @State private var name = ""
     @State private var never = ""
+    @State private var skills = ""
     @State private var claudePath = ""
     @State private var key = ""
     @State private var keySaved = SupportKeychain.read(SupportKeychain.elevenLabs) != nil
@@ -47,6 +48,10 @@ public struct ScrySettingsView: View {
                     var s = saved; s.live = v; persist(s)
                 }))
                 SettingsDivider()
+                SettingsToggleRow("Open the live panel when a recording starts ($0.78 an hour)", isOn: Binding(get: { saved.liveOpen }, set: { v in
+                    var s = saved; s.liveOpen = v; persist(s)
+                }))
+                SettingsDivider()
                 HStack(spacing: Theme.Space.s) {
                     VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                         Text("Screen & System Audio Recording").textRole(.body)
@@ -76,6 +81,8 @@ public struct ScrySettingsView: View {
                 }
                 SettingsDivider()
                 editor("Never offer for these apps (bundle IDs, one per line)", $never, lines: 3)
+                SettingsDivider()
+                editor("Your live-panel skills (one per line: \u{201C}name: what to do\u{201D})", $skills, lines: 3)
                 SettingsDivider()
                 HStack(spacing: Theme.Space.s) {
                     Text("Claude CLI").textRole(.body)
@@ -136,7 +143,11 @@ public struct ScrySettingsView: View {
 
     @State private var savedClaudePath = ""
 
-    private var edited: ScrySettings { ScrySettings.edited(saved, root: root, name: name, never: never) }
+    private var edited: ScrySettings {
+        var s = ScrySettings.edited(saved, root: root, name: name, never: never)
+        s.skills = skills.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        return s
+    }
 
     private var editedOps: ScrySettings {
         var s = saved
@@ -162,6 +173,7 @@ public struct ScrySettingsView: View {
         root = s.root
         name = s.userName
         never = s.never.joined(separator: "\n")
+        skills = s.skills.joined(separator: "\n")
     }
 
     private func showOps(_ s: ScrySettings) {

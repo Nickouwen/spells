@@ -60,7 +60,8 @@ import WardUI
             for (name, view) in shots where only == nil || name.hasPrefix(only!) {
                 try write(view.background(Theme.canvas), size: size, scheme: scheme, name: name)
             }
-            try write(scryLive(), size: CGSize(width: 380, height: 560), scheme: scheme, name: "overlay-scry-live")
+            try write(scryLive(.transcript), size: CGSize(width: 400, height: 600), scheme: scheme, name: "overlay-scry-live")
+            try write(scryLive(.chat), size: CGSize(width: 400, height: 600), scheme: scheme, name: "overlay-scry-live-ask")
         }
         try incantIndicator()
         print("renders: \(Self.out.path)")
@@ -70,14 +71,21 @@ import WardUI
 
     // MARK: Overlays
 
-    private func scryLive() -> some View {
+    private func scryLive(_ tab: ScryLiveView.Tab) -> some View {
         let m = ScryLiveModel(app: "Google Meet", startedAt: Date().addingTimeInterval(-14 * 60))
         m.liveSince = Date().addingTimeInterval(-14 * 60)
         m.level = 0.55
-        m.segments = Fixture.segments
-        m.partial = ["Alex": "and the second batch can go out once the"]
+        m.others = ["Alex", "Jordan"]
+        for (i, s) in Fixture.segments.enumerated() {
+            let far = s.speaker != "Sam"
+            m.transcript.hear(far: far, s.text, at: s.start, speaking: i == 3 ? nil : s.speaker)
+            m.transcript.commit(far: far, s.text, at: s.end, others: m.others)
+        }
+        m.transcript.hear(far: true, "and the second batch can go out once the", at: 30, speaking: "Alex")
         m.notes = "Ask about the return address"
-        return ScryLiveView(model: m, onCatchUp: {}, onNotesChanged: {}, onStop: {}, onDiscard: {})
+        m.chat = [.init(question: "/email", answer: "To: alex@example.com\nSubject: Next steps\n\nHi Alex,\n\nThe mail is built. It stays off until we have your return address. You said you will send it by Friday.\n\nThanks,\nSam",
+                        gmail: URL(string: "https://mail.google.com/")), .init(question: "What did Jordan promise?")]
+        return ScryLiveView(model: m, onCatchUp: {}, onNotesChanged: {}, onStop: {}, onDiscard: {}, tab: tab)
     }
 
     /// The listening indicator in each state, on a menu-bar-grey strip like the top of the screen.

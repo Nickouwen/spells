@@ -135,6 +135,66 @@ public enum ScryNotes {
         return lines.joined(separator: "\n")
     }
 
+    /// Puts the note in a folder (nil or blank: none): one `folder:` line in the frontmatter.
+    public static func setFolder(_ url: URL, _ name: String?) throws -> ScryNoteFile? {
+        try write(foldered(try String(contentsOf: url, encoding: .utf8), name), to: url)
+    }
+
+    static func foldered(_ md: String, _ name: String?) -> String {
+        let lines = md.components(separatedBy: "\n")
+        guard lines.first == "---", let close = lines.dropFirst().firstIndex(of: "---") else { return md }
+        let kept = lines[..<close].filter { !$0.hasPrefix("folder:") }
+        let f = name.map { $0.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces) } ?? ""
+        let e = JSONEncoder(); e.outputFormatting = .withoutEscapingSlashes
+        let row = f.isEmpty ? [] : ["folder: " + String(decoding: (try? e.encode(f)) ?? Data(), as: UTF8.self)]
+        return (Array(kept) + row + lines[close...]).joined(separator: "\n")
+    }
+
+    /// Undoes an edit: writes `before` back only while the file is still what the edit left (`after`).
+    public static func undo(_ url: URL, before: String, after: String) throws -> ScryNoteFile? {
+        let fresh = try String(contentsOf: url, encoding: .utf8)
+        guard fresh == after else { return ScryNote.parse(fresh).map { ScryNoteFile(url: url, markdown: fresh, note: $0) } }
+        return try write(before, to: url)
+    }
+
+    /// The note to share: no frontmatter, and the transcript only when asked.
+    public static func shared(_ md: String, transcript: Bool) -> String {
+        var lines = md.components(separatedBy: "\n")
+        if lines.first == "---", let close = lines.dropFirst().firstIndex(of: "---") { lines.removeSubrange(...close) }
+        if !transcript, let t = lines.lastIndex(of: "## Transcript") { lines.removeSubrange(t...) }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Changes one transcript line (`text` nil deletes it). The file is re-read and the line matched by its place and
+    /// its old speaker and words; changed meanwhile → nothing is written.
+    public static func editLine(_ url: URL, index: Int, old: ScrySegment, speaker: String, text: String?) throws -> ScryNoteFile? {
+        let fresh = try String(contentsOf: url, encoding: .utf8)
+        guard let out = editedLine(fresh, index: index, old: old, speaker: speaker, text: text) else {
+            return ScryNote.parse(fresh).map { ScryNoteFile(url: url, markdown: fresh, note: $0) }
+        }
+        return try write(out, to: url)
+    }
+
+    public static func editedLine(_ md: String, index: Int, old: ScrySegment, speaker: String, text: String?) -> String? {
+        var lines = md.components(separatedBy: "\n")
+        guard let start = lines.lastIndex(of: "## Transcript") else { return nil }
+        let turns = lines.indices.filter { $0 > start && lines[$0].range(of: #"^\*\*\[\d+:\d\d\] "#, options: .regularExpression) != nil }
+        guard turns.indices.contains(index) else { return nil }
+        let i = turns[index], stamp = lines[i].prefix(through: lines[i].firstIndex(of: "]")!)
+        guard lines[i] == "\(stamp) \(old.speaker):** \(old.text)" else { return nil }
+        // One line in the file, whatever was typed.
+        func flat(_ s: String) -> String { s.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces) }
+        if let text {
+            let name = flat(speaker), words = flat(text)
+            guard !name.isEmpty, !words.isEmpty else { return nil }
+            lines[i] = "\(stamp) \(name):** \(words)"
+        } else {
+            lines.remove(at: i)
+            if i < lines.count, lines[i].isEmpty, i > 0, lines[i - 1].isEmpty { lines.remove(at: i) }
+        }
+        return lines.joined(separator: "\n")
+    }
+
     /// `speakers: {"Speaker A":"Alex"}` → the label that showed `from` now maps to `to` (or `from` itself
     /// becomes a mapped label).
     private static func renamedSpeakersLine(_ line: String, from: String, to: String) -> String {

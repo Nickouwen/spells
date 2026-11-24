@@ -143,7 +143,49 @@ struct LauncherRow: Identifiable, Equatable {
     }
 
     func settings(_ m: InstalledModule) { send(m, "settings") }
-    func quit(_ m: InstalledModule) { send(m, "quit") }
+    /// Asks, then insists (`ModuleInstaller.quitApp`); the row says so if it's still running.
+    func quit(_ m: InstalledModule) {
+        run(m.bundleID) { status in
+            status("Quitting…")
+            try await ModuleInstaller.quitApp(m.forInstaller)
+        }
+    }
+
+    /// ⌘Q: quits Spells, and the menu-bar modules too if you say so (they run on their own otherwise). A Dock quit, a
+    /// logout and an update don't ask. Rewind's tracker is left alone: it keeps your hours.
+    func quitSpells() {
+        refresh()
+        let background = modules.filter { $0.loginItem && $0.running }
+        guard !background.isEmpty else { NSApp.terminate(nil); return }
+        let names = background.map(\.name).formatted(.list(type: .and))
+        let alert = NSAlert()
+        alert.messageText = "Quit \(names) too?"
+        alert.informativeText = "They keep running when only Spells quits. Quitting Scry saves a recording in progress and finishes it at the next start. Modules set to start at login come back then."
+        alert.addButton(withTitle: "Quit Only Spells")
+        alert.addButton(withTitle: "Quit All")
+        alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: NSApp.terminate(nil)
+        case .alertSecondButtonReturn:
+            Task {
+                var stuck: [String] = []
+                for m in background {
+                    do { try await ModuleInstaller.quitApp(m.forInstaller) }
+                    catch { stuck.append("\(error)") }
+                }
+                guard stuck.isEmpty else {   // say it, rather than leave it running unseen
+                    let a = NSAlert()
+                    a.messageText = "Not everything quit"
+                    a.informativeText = stuck.joined(separator: "\n")
+                    a.runModal()
+                    refresh()
+                    return
+                }
+                NSApp.terminate(nil)
+            }
+        default: break
+        }
+    }
 
     func setLogin(_ m: InstalledModule, _ on: Bool) {
         send(m, "login-item", ["on": on ? "1" : "0"])

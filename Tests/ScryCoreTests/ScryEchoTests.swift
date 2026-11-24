@@ -95,3 +95,18 @@ private let cases: [EchoCase] = [
     #expect(l.mic.count == 2 && abs(l.mic[0] - 0.25) < 0.001 && l.far == [0, 0])
     #expect(ScryPipeline.levels(Data("not a wav".utf8)) == nil)
 }
+
+/// The first word after each pause of theirs, on a call whose echo delay changed (2026-11-24): 60 ms after theirs, and
+/// loud next to a far side that was silent a moment before. The other words are yours.
+@Test func theSameWordRightAfterTheirsIsEchoAndAnswersAndYourWordsStay() {
+    let quiet = [Float](repeating: 1e-7, count: 4000)
+    var mic = quiet
+    for i in 0..<40 { mic[i] = 0.01 }   // 0–2 s: the mic is loud, the far side's level says nothing played
+    let levels = ScryLevels(mic: mic, far: quiet, lag: 6, coupling: 0.0005)
+    func w(_ s: String, _ t: Double, _ text: String) -> ScrySegment { ScrySegment(speaker: s, start: t, end: t + 0.1, text: text) }
+    let words = [w("Speaker A", 0.20, "provided"), w("You", 0.26, "provided"),
+                 w("Speaker A", 0.60, "Yeah,"), w("You", 0.66, "Yeah,"),              // a real answer can land there
+                 w("Speaker A", 1.00, "phone."), w("You", 1.30, "phone"),             // 300 ms: not this rule's
+                 w("You", 1.50, "prototype"), w("Speaker A", 1.56, "prototype")]      // you said it first
+    #expect(ScryTranscript.withoutEcho(words, levels: levels).filter { $0.speaker == "You" }.map(\.text) == ["Yeah,", "phone", "prototype"])
+}

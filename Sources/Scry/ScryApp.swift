@@ -17,6 +17,11 @@ import UserNotifications
         /// The Meet tab's participants and speaking indicator (Chromium browsers only).
         var meet: ScryMeetWatch?
         /// Whether the far side is really being recorded, and the poll it was last fed at (`checkFarSide`).
+        /// [from, to] of each pause so far; a pause in progress has only its start.
+        var pauses: [[Double]] = []
+        var paused: Bool { pauses.last?.count == 1 }
+        /// Who the screen shows, completed from the invite (`tickRecording`): names for calls outside Meet.
+        var onScreen: [String] = []
         var farSide = ScryFarSideCheck(), farSideSeen = (mic: 0, system: 0)
         init(dir: URL, app: String?, recorder: ScryRecorder, settings: ScrySettings, keyterms: [String]) {
             self.dir = dir; self.app = app; self.recorder = recorder; self.settings = settings; self.keyterms = keyterms
@@ -131,13 +136,16 @@ import UserNotifications
         // Nobody on screen yet → the invite's title (still says it's the right meeting), else the app.
         let onScreen = s.meet?.participants ?? []
         let now = ScryNames.completed(onScreen.isEmpty ? s.screens.last.map { ScryNames.fromOCR([$0], known: (s.invite?.invitees.map(\.name) ?? []) + [s.settings.userName]) } ?? [] : onScreen, s.invite)
+        s.onScreen = now
         let who = ScryNames.pillLabel(now, userName: s.settings.userName,
                                       fallback: s.invite?.title ?? s.app.map(Self.name) ?? "In person")
         // The tap stopped delivering (it's being rebuilt), or it delivers too little of the call: say so, rather
         // than record a one-sided call quietly.
         checkFarSide(s)
         let warn = !s.recorder.systemAlive ? " · no call audio" : s.farSide.broken ? " · call audio broken" : ""
-        if let ms = stopsIn {
+        if s.paused, stopsIn == nil {
+            pill.showRecording("❚❚ Paused · " + who.short, tooltip: "Nothing is being recorded")
+        } else if let ms = stopsIn {
             pill.showRecording("Ending · \(Int((Double(ms) / 1000).rounded(.up)))s · \(who.short)", tooltip: who.full)
         } else {
             let secs = Int(Date().timeIntervalSince(s.startedAt))
@@ -179,6 +187,18 @@ import UserNotifications
             if settings.live {
                 s.live = ScryLive(recorder: recorder, keyterms: keyterms, systemAudio: systemAudio, dir: dir, app: app.map(Self.name), startedAt: s.startedAt,
                                   onStop: { [weak self] in self?.stop() }, onDiscard: { [weak self] in self?.discard() })
+                s.live?.onPause = { [weak self] in self?.togglePause() }
+                s.live?.who = { [weak s] in
+                    guard let s else { return (nil, []) }
+                    // Meet doesn't always mark your own tile: your Mac account's name says which one it is.
+                    let me = [s.settings.userName, NSFullUserName()]
+                    func other(_ n: String) -> Bool { !me.contains { ScryNames.sameFirstName($0, n) } }
+                    let inMeet = (s.meet?.participants ?? []).filter(other)
+                    if !inMeet.isEmpty { return (s.meet?.speaking.flatMap { other($0) ? $0 : nil }, inMeet) }
+                    // Outside Meet, only people who are both invited and on screen: screen text alone can be a button.
+                    let invited = s.invite?.invitees.map(\.name) ?? []
+                    return (nil, s.onScreen.filter { n in other(n) && invited.contains { ScryNames.sameFirstName($0, n) } })
+                }
             }
             if systemAudio {   // off main: the first run blocks on the System Audio Recording prompt
                 DispatchQueue.global().async {
@@ -193,6 +213,8 @@ import UserNotifications
                 MainActor.assumeIsolated { if let s { let l = s.recorder.level; self?.pill.pushLevel(l); s.live?.pushLevel(l) } }
             }
             s.invite = ScryCalendar.invite(app: app, now: s.startedAt)
+            s.live?.invite = s.invite
+            if settings.liveOpen { s.live?.show(activate: false) }   // never takes the focus from the call
             if let i = s.invite { SupportLog.scry.info("calendar invite matched: \(i.invitees.count, privacy: .public) invitees") }
             if let app {
                 if ScryMeetWatch.browsers.contains(app) {   // a Meet tab, if there is one: names and who's speaking
@@ -214,7 +236,19 @@ import UserNotifications
         refreshIcon()
     }
 
+    /// Pause or resume: silence is recorded meanwhile, no screenshots are read, and the note says when.
+    @objc private func togglePause() {
+        guard let s = session else { return }
+        let t = (Date().timeIntervalSince(s.startedAt) * 10).rounded() / 10
+        if s.paused { s.pauses[s.pauses.count - 1].append(t) } else { s.pauses.append([t]) }
+        s.recorder.paused = s.paused
+        s.live?.model.paused = s.paused
+        SupportLog.scry.info("recording \(s.paused ? "paused" : "resumed", privacy: .public)")
+        tickRecording(nil)
+    }
+
     private func screenshot(_ s: Session, _ app: String) {
+        guard !s.paused else { return }
         Task {
             if let lines = await ScryScreens.lines(app: app), !lines.isEmpty { s.screens.append(lines) }
         }
@@ -238,7 +272,8 @@ import UserNotifications
         guard let (s, stats) = endSession() else { return nil }
         SupportLog.scry.info("recording stopped: \(stats.frames, privacy: .public) frames, \(s.screens.count, privacy: .public) screenshots, mic RMS \(stats.micRMS, privacy: .public), system RMS \(stats.systemRMS, privacy: .public), \(s.recorder.tapRebuilds, privacy: .public) tap rebuilds")
         let capture = ScryCapture(audioFile: "audio.wav", startedAt: s.startedAt, endedAt: Date(), app: s.app,
-                                  screenshotText: s.screens, userNotes: s.live?.model.notes ?? "", invite: s.invite)
+                                  screenshotText: s.screens, userNotes: s.live?.model.notes ?? "", invite: s.invite,
+                                  pauses: s.pauses.isEmpty ? nil : s.pauses.map { $0.count == 1 ? $0 + [Date().timeIntervalSince(s.startedAt)] : $0 })
         do { try capture.encoded().write(to: s.dir.appending(path: "capture.json")) } catch {
             SupportLog.scry.error("couldn't write capture.json: \(error.localizedDescription, privacy: .public)")
             Task { await Self.notify("Scry couldn't finish the notes", open: nil) }
@@ -436,6 +471,7 @@ import UserNotifications
             info.isEnabled = false
             menu.addItem(info)
             if s.live != nil { menu.addItem(action("Show live panel", #selector(showLive))) }
+            menu.addItem(action(s.paused ? "Resume recording" : "Pause recording", #selector(togglePause)))
             menu.addItem(action("Stop and make notes", #selector(stop)))
             menu.addItem(action("Discard", #selector(discard)))
         } else {

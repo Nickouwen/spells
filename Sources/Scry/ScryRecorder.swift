@@ -19,6 +19,13 @@ final class ScryRecorder: @unchecked Sendable {
         q.async { self.onMic = mic; self.onSystem = system }
     }
 
+    /// Paused: both sources are written as silence (and sent live as silence), so nothing said is kept and every time still fits.
+    var paused: Bool {
+        get { q.sync { silent } }
+        set { q.async { self.silent = newValue } }
+    }
+    private var silent = false   // on `q`
+
     private let q = DispatchQueue(label: "dev.nic.spells.scry.recorder")
     private let micDevice = SupportMic()
     private let wav: ScryWAV
@@ -222,8 +229,9 @@ final class ScryRecorder: @unchecked Sendable {
 
     // MARK: Writing
 
-    private func append(_ pcm: [Int16], system: Bool) {
+    func append(_ pcm: [Int16], system: Bool) {   // on `q` (a test calls it with no source running)
         guard running, !pcm.isEmpty else { return }
+        let pcm = silent ? [Int16](repeating: 0, count: pcm.count) : pcm
         let ss = pcm.reduce(0.0) { $0 + Double($1) * Double($1) }
         let data = pcm.withUnsafeBufferPointer { Data(buffer: $0) }
         let rms = (ss / Double(pcm.count)).squareRoot() / 32768
