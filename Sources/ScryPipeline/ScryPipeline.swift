@@ -282,10 +282,10 @@ public enum ScryPipeline {
 
     /// `claude -p` isolated like the standup's (`StandupGenerator.liveClaude`, which is internal to
     /// RewindCore and carries the standup system prompt): no tools, MCP, hooks or transcript. → `result`.
-    static func claude(_ prompt: String) async throws -> String {
+    static func claude(_ prompt: String, model: String = "sonnet") async throws -> String {
         let path = SpellsClaude.path(settingRows())
         guard FileManager.default.isExecutableFile(atPath: path) else { throw Failure.claude("not found or not executable: \(path)") }
-        let args = ["-p", "--model", "sonnet", "--output-format", "json", "--safe-mode", "--no-session-persistence",
+        let args = ["-p", "--model", model, "--output-format", "json", "--safe-mode", "--no-session-persistence",
                     "--tools", "", "--strict-mcp-config"]
         let r = try await withCheckedThrowingContinuation { (c: CheckedContinuation<SupportProcess.Result, Error>) in
             DispatchQueue.global().async {
@@ -298,6 +298,17 @@ public enum ScryPipeline {
             throw Failure.claude("exit \(r.status): \(detail)\(r.stderrText.prefix(500))")
         }
         return text
+    }
+}
+
+/// The live panel's chat, answered by Haiku (a few seconds). Sensitive numbers are out of the transcript and the
+/// notes before they leave (`ScryOps.redacted`).
+public enum ScryLiveAsk {
+    public static func answer(_ question: String, transcript: ScryLiveTranscript, notes: String, invite: ScryInvite?) async throws -> String {
+        let text = transcript.segments.map { String(format: "[%02d:%02d] ", Int($0.start) / 60, Int($0.start) % 60) + "\($0.speaker): \($0.text)" }
+        let prompt = ScryLiveChat.prompt(ScryLiveChat.expand(question), transcript: ScryOps.redacted(text.joined(separator: "\n")),
+                                         notes: ScryOps.redacted(notes), invite: invite)
+        return try await ScryPipeline.claude(prompt, model: "haiku").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

@@ -40,6 +40,12 @@ public struct MeetingsView: View {
     /// The note a right-click asked to delete, until the alert answers.
     @State private var deleting: ScryNoteFile?
     @State private var newTask = ""
+    @State private var transcriptQuery = ""
+    /// The transcript line being edited (its place in the note), with the words and speaker so far; `askDelete`: about to go.
+    @State private var editing: (note: ScryNoteFile, index: Int)?
+    @State private var lineText = ""
+    @State private var lineSpeaker = ""
+    @State private var askDelete = false
     /// The open-action backlog shows its first few until asked; it grows with every meeting.
     @State private var showAllOpen = false
 
@@ -267,10 +273,7 @@ public struct MeetingsView: View {
                 if !s.followUpEmail.isEmpty {
                     card("Follow-up email") {
                         Text(s.followUpEmail).textRole(.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                        Button("Copy") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(s.followUpEmail, forType: .string)
-                        }
+                        Button("Copy") { copy(s.followUpEmail) }
                         .buttonStyle(RewindButtonStyle())
                     }
                 }
@@ -317,14 +320,38 @@ public struct MeetingsView: View {
             }
             .buttonStyle(.plain)
             if transcriptOpen {
+                HStack(spacing: Theme.Space.s) {
+                    TextField("Search the transcript", text: $transcriptQuery).textFieldStyle(.roundedBorder)
+                    Button("Copy") { copy(n.note.segments.map { "\($0.speaker): \($0.text)" }.joined(separator: "\n")) }.buttonStyle(RewindButtonStyle())
+                    Button("Copy Note as Markdown") { copy(n.markdown) }.buttonStyle(RewindButtonStyle())
+                }
+                let hits = n.note.segments.indices.filter { i in
+                    transcriptQuery.count < 2 || n.note.segments[i].text.localizedCaseInsensitiveContains(transcriptQuery)
+                        || n.note.segments[i].speaker.localizedCaseInsensitiveContains(transcriptQuery)
+                }
+                if hits.isEmpty { Text("Nothing said matches “\(transcriptQuery)”.").textRole(.label, Theme.inkTertiary) }
                 LazyVStack(alignment: .leading, spacing: Theme.Space.xs + 2) {
-                    ForEach(n.note.segments.indices, id: \.self) { i in
+                    ForEach(hits, id: \.self) { i in
                         let seg = n.note.segments[i]
                         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
                             Text(String(format: "%02d:%02d", Int(seg.start) / 60, Int(seg.start) % 60))
                                 .textRole(.mono, Theme.inkTertiary)
                             (Text(seg.speaker).fontWeight(.semibold) + Text("  \(seg.text)"))
                                 .textRole(.body).fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                            Menu {
+                                Button("Edit…") { lineText = seg.text; lineSpeaker = seg.speaker; askDelete = false; editing = (n, i) }
+                                let names = Set(n.speakers + n.note.meta.participants).subtracting([seg.speaker]).sorted()
+                                if !names.isEmpty {
+                                    Menu("This line was said by") {
+                                        ForEach(names, id: \.self) { name in Button(name) { edit(n, i, speaker: name, text: seg.text) } }
+                                    }
+                                }
+                                Button("Rename “\(seg.speaker)” Everywhere…") { newName = seg.speaker; renaming = seg.speaker }
+                                Divider()
+                                Button("Delete Line…", role: .destructive) { askDelete = true; editing = (n, i) }
+                            } label: { Image(systemName: "ellipsis") }
+                                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Line actions")
                         }
                     }
                 }
@@ -333,6 +360,26 @@ public struct MeetingsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card()
+        .alert("Edit this line", isPresented: Binding(get: { editing != nil && !askDelete }, set: { if !$0 { editing = nil } })) {
+            TextField("Speaker", text: $lineSpeaker)
+            TextField("Text", text: $lineText)
+            Button("Save") { if let e = editing { edit(e.note, e.index, speaker: lineSpeaker, text: lineText) } }
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("Delete this line?", isPresented: Binding(get: { editing != nil && askDelete }, set: { if !$0 { editing = nil } })) {
+            Button("Delete", role: .destructive) { if let e = editing { edit(e.note, e.index, speaker: "", text: nil) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("It leaves the note's transcript. The recording still has it for a week.") }
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    private func edit(_ n: ScryNoteFile, _ i: Int, speaker: String, text: String?) {
+        let url = n.url, old = n.note.segments[i]
+        update(url) { try ScryNotes.editLine(url, index: i, old: old, speaker: speaker, text: text) }
     }
 
     private func card<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {

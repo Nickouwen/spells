@@ -177,7 +177,7 @@ public struct ScryInvite: Codable, Equatable, Sendable {
 public struct ScrySettings: Equatable, Sendable {
     public static let autoOfferKey = "scry_auto_offer", liveKey = "scry_live", rootKey = "scry_root",
                       neverKey = "scry_never_apps", nameKey = "scry_user_name",
-                      autoRecordKey = "scry_auto_record", meetingAlarmKey = "scry_meeting_alarm", googleClientIDKey = "scry_google_client_id", opsPushKey = "scry_ops_push", opsVaultKey = "scry_ops_vault",
+                      autoRecordKey = "scry_auto_record", meetingAlarmKey = "scry_meeting_alarm", googleClientIDKey = "scry_google_client_id", liveOpenKey = "scry_live_open", opsPushKey = "scry_ops_push", opsVaultKey = "scry_ops_vault",
                       opsSourcesKey = "scry_ops_sources", opsSlackUserKey = "scry_ops_slack_user", opsRulesKey = "scry_ops_rules"
     public static let defaultRoot = "~/Documents/Scry"
     public var autoOffer = true
@@ -189,6 +189,8 @@ public struct ScrySettings: Equatable, Sendable {
     public var googleClientID = ""
     /// Live transcript + "What did I miss?" during the call (two realtime sockets, $0.39/h each).
     public var live = true
+    /// Show the live panel as soon as a recording starts (the live transcript then covers all of it).
+    public var liveOpen = false
     public var root = defaultRoot
     public var never: [String] = []
     /// How you appear in notes ("You" is the label; this is the name the summary uses for you).
@@ -216,6 +218,7 @@ public struct ScrySettings: Equatable, Sendable {
         if let v = value(meetingAlarmKey) { s.meetingAlarm = v == "1" }
         if let v = value(googleClientIDKey) { s.googleClientID = v }
         if let v = value(liveKey) { s.live = v == "1" }
+        if let v = value(liveOpenKey) { s.liveOpen = v == "1" }
         if let v = value(rootKey) { s.root = v }
         if let v = value(neverKey) { s.never = lines(v) }
         if let v = value(nameKey) { s.userName = v }
@@ -240,7 +243,7 @@ public struct ScrySettings: Equatable, Sendable {
     }
 
     public var rows: [String: String] {
-        [Self.autoOfferKey: autoOffer ? "1" : "0", Self.autoRecordKey: autoRecord ? "1" : "0", Self.meetingAlarmKey: meetingAlarm ? "1" : "0", Self.googleClientIDKey: googleClientID, Self.liveKey: live ? "1" : "0", Self.rootKey: root,
+        [Self.autoOfferKey: autoOffer ? "1" : "0", Self.autoRecordKey: autoRecord ? "1" : "0", Self.meetingAlarmKey: meetingAlarm ? "1" : "0", Self.googleClientIDKey: googleClientID, Self.liveOpenKey: liveOpen ? "1" : "0", Self.liveKey: live ? "1" : "0", Self.rootKey: root,
          Self.neverKey: never.joined(separator: "\n"), Self.nameKey: userName, Self.opsPushKey: opsPush ? "1" : "0",
          Self.opsVaultKey: opsVault, Self.opsSourcesKey: opsSources.joined(separator: "\n"), Self.opsSlackUserKey: opsSlackUser, Self.opsRulesKey: opsRules]
     }
@@ -403,6 +406,10 @@ public enum ScryTranscript {
         return turns(multichannel ? withoutEcho(out, levels: levels) : out)
     }
 
+    /// Short answers people really give over each other: never echo for being the far side's words.
+    static let answers: Set<String> = ["yeah", "yes", "yep", "no", "nope", "okay", "ok", "right", "sure", "hmm", "mhm", "mm", "uh", "huh", "mm-hmm", "mmhmm",
+                                       "bye", "hello", "hi", "hey", "thanks", "cool", "perfect", "great", "good"]
+
     /// Drops "You" words that are the far side heard through the speakers, judged by how loud each side was
     /// (`levels`) and by what the far side said. Most echo comes back late or transcribed differently (far side
     /// "Claude web", mic "clock lab"), so the 0.4 s word match below missed it (2026-11-17: 900–3500 echo words
@@ -414,6 +421,8 @@ public enum ScryTranscript {
     ///   the channels' word times can be 3 s apart), or when a run of them sits between echo on both sides
     ///   (within 3 s) and averages < 8 dB. A short "Yeah." or "I agree." said over the far side scores 10–20 and stays.
     /// No `levels` (or a far side never loud enough to measure) → the 0.4 s word match.
+    /// - echo when the far side said the same word 20–160 ms before it, unless it's a short answer people give
+    ///   over each other (`answers`).
     public static func withoutEcho(_ segments: [ScrySegment], levels: ScryLevels?) -> [ScrySegment] {
         guard let levels, levels.coupling != nil else { return withoutEcho(segments) }
         let far = segments.filter { $0.speaker != "You" }   // in time order, like `segments`
@@ -432,6 +441,11 @@ public enum ScryTranscript {
         var verdict: [Verdict] = mine.indices.map { k in
             let w = segments[mine[k]]
             guard !farWords(w.start - 3, w.start + 3).isEmpty else { return .mine }
+            // The same word 20–160 ms after theirs is the speakers: the delay can shorten during a call (60 ms, then
+            // 320 ms, on 2026-11-24), and then the loudness misses the first word after each pause of theirs.
+            let word = normalized(w.text)
+            if !word.isEmpty, !answers.contains(word),
+               farWords(w.start - 0.16, w.start - 0.02).contains(where: { normalized($0.text) == word }) { return .echo }
             return score[k] >= 20 ? .mine : score[k] < 0 ? .echo : .unsure
         }
         for k in mine.indices.dropLast() where verdict[k] == .unsure || verdict[k + 1] == .unsure {
@@ -984,6 +998,11 @@ public enum ScryNames {
         "invite", "copy", "pause", "resume", "record", "open", "close", "exit", "enter", "meeting", "call", "switch",
         "present", "admit", "deny", "reframe", "remove", "allow", "view", "add", "search", "send", "type", "click", "waiting", "breakout",
     ]
+    /// "Samuel" (a Mac account) and "Sam Rivera" (Meet): the first names match, or one starts the other (3 letters or more).
+    public static func sameFirstName(_ a: String, _ b: String) -> Bool {
+        guard let x = a.split(separator: " ").first?.lowercased(), let y = b.split(separator: " ").first?.lowercased() else { return false }
+        return x == y || min(x.count, y.count) >= 3 && (x.hasPrefix(y) || y.hasPrefix(x))
+    }
     /// On-screen names completed from the invite: "Alex" → "Alex Client" when exactly one invitee has
     /// that first name. Multi-word names stay as shown.
     public static func completed(_ screen: [String], _ invite: ScryInvite?) -> [String] {

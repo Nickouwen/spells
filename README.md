@@ -34,6 +34,14 @@ Google needs an OAuth client of your own, once per organization:
 3. Create a client of type **iOS** with bundle ID `dev.nic.spells.scry`. It has no secret.
 4. Paste its client ID in Meeting reminders, or run `spellsctl settings scry set scry_google_client_id <id>`. Then click **Connect Google**.
 
+## Scry: the live panel
+
+Click the recording pill, or turn on "Open the live panel when a recording starts". The transcript appears as people talk, and covers the call from the moment the panel opens. Names come from the Google Meet tab, or from being the only other person. Otherwise a line says "Them". Click a name to correct one line or all of them: the note uses it too. Your own lines that repeat the other side (speakers into the mic) are hidden, and one click shows them.
+
+**Ask** answers from the call so far. Type a question, or `/email`, `/actions`, `/ask`, `/summary`, `/translate`. SSN, card and bank numbers leave the text before it goes to the model. An email draft opens in Gmail with only the addresses someone gave. Nothing is sent without your click.
+
+After the call, each transcript line in Meetings can be edited, given to another speaker, or deleted. **⌘Q** in Spells asks whether to quit the menu-bar modules too.
+
 ## Scry: push call items to a team vault
 
 Off by default. After a call, Claude picks out what your team needs from the transcript and says where each item goes in a shared Obsidian vault. The pill offers "Push N items". Nothing is written until you click it. A write only adds a note or a section at the end of a note, with a source line. Sensitive numbers, passwords and keys become `[removed]`.

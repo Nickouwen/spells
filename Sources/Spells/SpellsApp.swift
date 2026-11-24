@@ -18,7 +18,12 @@ struct SpellsApp: App {
         }
         .defaultSize(width: 1440, height: 900)
         .windowResizability(.contentMinSize)
-        .commands { ShellCommands() }
+        .commands {
+            ShellCommands()
+            CommandGroup(replacing: .appTermination) {
+                Button("Quit Spells") { hub.launcher.quitSpells() }.keyboardShortcut("q", modifiers: .command)
+            }
+        }
     }
 }
 

@@ -153,6 +153,13 @@ public enum ModuleInstaller {
     /// embedded in its bundle; up to ~8 s.
     @MainActor
     private static func quit(_ m: Installed) async throws {
+        try await quitApp(m)
+        try await quitEmbedded(in: m.url)
+    }
+
+    /// The app itself; throws when it's still there after ~8 s.
+    @MainActor
+    public static func quitApp(_ m: Installed) async throws {
         func running() -> [NSRunningApplication] { NSRunningApplication.runningApplications(withBundleIdentifier: m.bundleID) }
         if !running().isEmpty {
             NSWorkspace.shared.open([ModuleURLs.url(scheme: m.scheme, verb: "quit")], withApplicationAt: m.url,
@@ -164,7 +171,6 @@ public enum ModuleInstaller {
             }
             guard running().isEmpty else { throw Failure.stillRunning(m.name) }
         }
-        try await quitEmbedded(in: m.url)
     }
 
     /// Helpers living inside `bundle` (Rewind's tracker login item) would keep running from the Trash;

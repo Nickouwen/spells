@@ -179,6 +179,13 @@ import UserNotifications
             if settings.live {
                 s.live = ScryLive(recorder: recorder, keyterms: keyterms, systemAudio: systemAudio, dir: dir, app: app.map(Self.name), startedAt: s.startedAt,
                                   onStop: { [weak self] in self?.stop() }, onDiscard: { [weak self] in self?.discard() })
+                s.live?.who = { [weak s] in
+                    guard let s else { return (nil, []) }
+                    // Meet doesn't always mark your own tile: your Mac account's name says which one it is.
+                    let me = [s.settings.userName, NSFullUserName()]
+                    func other(_ n: String) -> Bool { !me.contains { ScryNames.sameFirstName($0, n) } }
+                    return (s.meet?.speaking.flatMap { other($0) ? $0 : nil }, (s.meet?.participants ?? []).filter(other))
+                }
             }
             if systemAudio {   // off main: the first run blocks on the System Audio Recording prompt
                 DispatchQueue.global().async {
@@ -193,6 +200,8 @@ import UserNotifications
                 MainActor.assumeIsolated { if let s { let l = s.recorder.level; self?.pill.pushLevel(l); s.live?.pushLevel(l) } }
             }
             s.invite = ScryCalendar.invite(app: app, now: s.startedAt)
+            s.live?.invite = s.invite
+            if settings.liveOpen { s.live?.show(activate: false) }   // never takes the focus from the call
             if let i = s.invite { SupportLog.scry.info("calendar invite matched: \(i.invitees.count, privacy: .public) invitees") }
             if let app {
                 if ScryMeetWatch.browsers.contains(app) {   // a Meet tab, if there is one: names and who's speaking

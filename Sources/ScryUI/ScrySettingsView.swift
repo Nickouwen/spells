@@ -47,6 +47,10 @@ public struct ScrySettingsView: View {
                     var s = saved; s.live = v; persist(s)
                 }))
                 SettingsDivider()
+                SettingsToggleRow("Open the live panel when a recording starts ($0.78 an hour)", isOn: Binding(get: { saved.liveOpen }, set: { v in
+                    var s = saved; s.liveOpen = v; persist(s)
+                }))
+                SettingsDivider()
                 HStack(spacing: Theme.Space.s) {
                     VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                         Text("Screen & System Audio Recording").textRole(.body)
