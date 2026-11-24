@@ -263,3 +263,19 @@ private let noteText = "---\ntitle: \"T\"\ndate: 2026-11-24\nstart: 2026-11-24T1
         #expect(t.visible.count == 2, "\(said)")
     }
 }
+
+@Test func aLostNotIsACorrectionAndTwoPeopleOfOneNameAreNotLinked() {
+    var t = ScryLiveTranscript()
+    t.hear(far: true, "We can not send the forms Monday", at: 2); t.hear(far: false, "We", at: 2.5)
+    t.commit(far: true, "We can not send the forms Monday.", at: 3)
+    t.commit(far: false, "We can send the forms Monday.", at: 4)
+    #expect(t.visible.count == 2)
+    var two = ScryLiveTranscript()
+    two.commit(far: true, "Hi there.", at: 2, others: [])
+    two.rename(two.lines[0].id, to: "Sam Lee", everywhere: true, person: "/a/Sam Lee.md")
+    two.hear(far: true, "Hello to you", at: 5, speaking: "Guest")
+    two.commit(far: true, "Hello to you.", at: 6, speaking: "Guest", others: ["Guest", "Other"])
+    let guest = two.lines.first { $0.speaker == "Guest" }
+    if let guest { two.rename(guest.id, to: "Sam Lee", everywhere: true, person: "/b/Sam Lee.md") }
+    #expect(guest != nil && two.given.count == 2 && two.given.allSatisfy { $0.person?.isEmpty != false })
+}

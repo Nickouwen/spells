@@ -78,9 +78,15 @@ public struct ScryLiveTranscript: Equatable, Sendable {
         guard name != "Them" else { aliases = aliases.filter { $0.value != line.speaker }; return }
         // A longer or shorter form is the same person; any other name is someone else.
         func words(_ s: String) -> Set<String> { Set(s.lowercased().split(separator: " ").map(String.init)) }
+        // Two people picked under one name: which lines are whose isn't sure, so neither is linked.
+        if let person, let other = picked[name], other != person, line.speaker != name { picked[name] = ""; return alias(line.speaker, name) }
         picked[name] = person ?? (words(name).isSubset(of: words(line.speaker)) || words(name).isSuperset(of: words(line.speaker)) ? picked[line.speaker] : nil)
-        for (k, v) in aliases where v == line.speaker { aliases[k] = name }
-        aliases[line.speaker] = name
+        alias(line.speaker, name)
+    }
+
+    private mutating func alias(_ old: String, _ name: String) {
+        for (k, v) in aliases where v == old { aliases[k] = name }
+        aliases[old] = name
     }
 
     /// The names you gave, for the note.
@@ -115,14 +121,17 @@ public struct ScryLiveTranscript: Equatable, Sendable {
                     diagonal = above
                 }
             }
-            if best[window.count] * 4 >= mine.count * 3, !mine.contains(where: { Self.corrects($0) && !window.contains($0) }) { return true }
+            if best[window.count] * 4 >= mine.count * 3,
+               !mine.contains(where: { Self.corrects($0) && !window.contains($0) }),
+               !window.contains(where: { Self.negates($0) && !mine.contains($0) }) { return true }
         }
         return false
     }
 
     private static func corrects(_ w: String) -> Bool {
-        w.hasSuffix("n't") || w.contains(where: \.isNumber) || w.hasSuffix("day") || ["no", "not", "never"].contains(w)
+        negates(w) || w.contains(where: \.isNumber) || w.hasSuffix("day") || w == "no"
     }
+    private static func negates(_ w: String) -> Bool { w.hasSuffix("n't") || w == "not" || w == "never" }
 
     private static func sentences(_ s: String) -> [String] {
         var out: [String] = []

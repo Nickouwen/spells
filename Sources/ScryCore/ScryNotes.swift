@@ -161,6 +161,7 @@ public enum ScryNotes {
         var md = try String(contentsOf: url, encoding: .utf8), p = p
         if adding { try free(p, in: md) }
         else if let now = ScryPeople.rows(in: md).first(where: { $0.person.id == p.id })?.person { p = now }   // edited in Obsidian meanwhile
+        else if p.role == .mentioned { throw Changed() }   // gone: a link doesn't bring it back
         if let known, p.role == .speaker, p.name.wholeMatch(of: /Speaker [A-Z0-9]+|Them/) != nil {
             let name = ScryNotePerson.plain(known.name)
             if ScryNote.parse(md)?.segments.contains(where: { $0.speaker == name }) == false {
@@ -207,14 +208,13 @@ public enum ScryNotes {
                 if fields.isEmpty || l.contains(":") && !l.hasPrefix(" ") && !l.hasPrefix("-") { fields.append([l]) } else { fields[fields.count - 1].append(l) }
             }
             for l in lines[close...] {
-                if l == "## Transcript" { break }
                 if l.hasPrefix("## ") { sections.append((l, [])) } else if !sections.isEmpty { sections[sections.count - 1].1.append(l) }
             }
             return (fields, sections)
         }
         func key(_ f: [String]) -> Substring { f[0].prefix { $0 != ":" } }
         let own: Set = ["title", "date", "start", "end", "duration_min", "app", "folder", "participants", "speakers", "source"]
-        let written: Set = ["## Summary", "## Decisions", "## Key dates", "## Action items", "## Open questions", "## Insights", "## People", "## Your notes", "## Follow-up email"]
+        let written: Set = ["## Summary", "## Decisions", "## Key dates", "## Action items", "## Open questions", "## Insights", "## People", "## Your notes", "## Follow-up email", "## Transcript"]
         let old = parts(from), fields = old.fields.filter { !own.contains(String(key($0))) }.flatMap { $0 }
         let sections = old.sections.filter { !written.contains($0.head) }.flatMap { [$0.head] + $0.lines }
         var out = to.components(separatedBy: "\n")

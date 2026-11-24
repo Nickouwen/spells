@@ -437,7 +437,7 @@ public enum ScryTranscript {
     public static func safeNames(_ map: [String: String], for segments: [ScrySegment]) -> [String: String] {
         let taken = Set(segments.map(\.speaker))
         return map.filter { k, v in
-            k.wholeMatch(of: /Speaker [A-Z0-9]+|Them/) != nil && !taken.contains(v) && map.values.filter { $0 == v }.count == 1
+            k.wholeMatch(of: /Speaker [A-Z0-9]+|Them/) != nil && !taken.contains(v) && v.contains { $0.isLetter } && map.values.filter { $0 == v }.count == 1
         }
     }
 

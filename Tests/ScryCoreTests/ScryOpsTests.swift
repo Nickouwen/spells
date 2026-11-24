@@ -175,3 +175,15 @@ private func tempVault() throws -> URL {
     #expect(ScryOps.redacted(turns: phone) == phone)
     #expect(ScryOps.redacted("My account is 1234567890 and account: 1234567890", numbersOnly: true) == "My account is [removed] and account: [removed]")
 }
+
+@Test func phonesAndCountsNearAKeywordStay() {
+    for kept in [["It's 864-555-0105.", "864-555-0105?"],
+                 ["What's the account number?", "I don't have it. What's your phone?", "864-555-0142"],
+                 ["What's the account number?", "Actually, phone number?", "8645550142"],
+                 ["What's the account number?", "Sure.", "864-555-0142."],
+                 ["Social: 120,000,000 people."]] {
+        #expect(ScryOps.redacted(turns: kept) == kept)
+    }
+    #expect(ScryOps.redacted(turns: ["What's the account number?", "Sure.", "1234567890."])[2] == "[removed].")
+    #expect(ScryOps.redacted(turns: ["It's 4111 1111", "1111 1111 ok"]) == ["It's [removed]", "[removed] ok"])
+}

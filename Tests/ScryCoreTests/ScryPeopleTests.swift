@@ -165,6 +165,7 @@ private func md(_ extra: String = "") -> String {
     #expect(throws: ScryNotes.Twice.self) { try ScryNotes.addMention(url, .init(name: "Marcus", role: .mentioned, at: "00:09")) }
     let dana = try #require(ScryPeople.load([v.appending(path: "People")]).first { $0.name == "Dana Whitfield" })
     let n = try #require(try ScryNotes.linkPerson(url, .init(name: "Marcus", role: .mentioned, detail: "an old one"), to: dana))   // the row itself, as it is now
+    #expect(throws: ScryNotes.Changed.self) { try ScryNotes.linkPerson(url, .init(name: "Zoe", role: .mentioned), to: dana) }   // taken out in Obsidian meanwhile
     #expect(n.note.people.filter { $0.name == "Marcus" }.count == 1 && n.note.people.contains { $0.detail == "brother" && $0.at == "00:04" && $0.link != nil })
 }
 
@@ -185,7 +186,7 @@ private func md(_ extra: String = "") -> String {
 @Test func theModelNeverJoinsTwoVoicesOrRenamesANamedOne() {
     let s = ["You", "Dana", "Speaker B", "Speaker C", "Speaker D"].map { ScrySegment(speaker: $0, start: 0, end: 1, text: "x") }
     #expect(ScryTranscript.safeNames(["Dana": "Robert", "Speaker B": "Dana", "Speaker C": "Jo"], for: s) == ["Speaker C": "Jo"])
-    #expect(ScryTranscript.safeNames(["Speaker B": "Jo", "Speaker C": "Jo", "Speaker D": "Al"], for: s) == ["Speaker D": "Al"])
+    #expect(ScryTranscript.safeNames(["Speaker A": " ", "Speaker B": "Jo", "Speaker C": "Jo", "Speaker D": "Al"], for: s) == ["Speaker D": "Al"])
 }
 
 @Test func aNoteWrittenAnewKeepsYourFieldsAndSections() {
