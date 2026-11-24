@@ -156,3 +156,28 @@ private func md(_ extra: String = "") -> String {
     var s = ScrySettings(); s.people = ["~/People", "/tmp/p"]
     #expect(ScrySettings.load(s.rows) == s)
 }
+
+@Test func aSecondPersonMentionedByTheSameNameNeverReplacesTheFirst() throws {
+    let v = try vault(); defer { try? FileManager.default.removeItem(at: v) }
+    let url = v.appending(path: "calls/m.md")
+    try md("## People\n\n- **Marcus** (mentioned 00:04) · brother\n\n").write(to: url, atomically: true, encoding: .utf8)
+    #expect(throws: ScryNotes.Twice.self) { try ScryNotes.addMention(url, .init(name: "Marcus", role: .mentioned, at: "00:09")) }
+    let dana = try #require(ScryPeople.load([v.appending(path: "People")]).first { $0.name == "Dana Whitfield" })
+    let n = try #require(try ScryNotes.linkPerson(url, .init(name: "Marcus", role: .mentioned, at: "00:04", detail: "brother"), to: dana))   // the row itself
+    #expect(n.note.people.filter { $0.name == "Marcus" }.count == 1 && n.note.people.contains { $0.detail == "brother" && $0.link != nil })
+}
+
+@Test func anyPersonKindIsAPersonNote() {
+    let u = URL(filePath: "/x/Dana Whitfield.md")
+    #expect(ScryPeople.person("---\ntype: client\n---\n", url: u) != nil && ScryPeople.person("---\ntype: company\n---\n", url: u) == nil)
+}
+
+@Test func anEditTakesTheOtherHalfOfANumberWithIt() throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "scry-half-\(UUID().uuidString).md")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try md().write(to: url, atomically: true, encoding: .utf8)
+    let s = try #require(ScryNote.parse(md())).segments
+    let n = try #require(try ScryNotes.editLine(url, index: 1, old: s[1], speaker: s[1].speaker, text: "The account number is", also: [(2, s[2], "[removed]")]))
+    #expect(n.note.segments[1].text == "The account number is" && n.note.segments[2].text == "[removed]" && n.note.segments[0] == s[0])
+    #expect(throws: ScryNotes.Changed.self) { try ScryNotes.editLine(url, index: 1, old: n.note.segments[1], speaker: "X", text: "y", also: [(2, s[2], "z")]) }
+}

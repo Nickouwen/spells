@@ -227,3 +227,28 @@ private let noteText = "---\ntitle: \"T\"\ndate: 2026-11-24\nstart: 2026-11-24T1
     let old = #"{"audioFile":"a.wav","startedAt":"2026-11-24T10:00:00Z","endedAt":"2026-11-24T10:01:00Z","screenshotText":[],"userNotes":""}"#
     #expect(try ScryCapture.decode(Data(old.utf8)).pauses == nil)
 }
+
+@Test func aCorrectedNameDropsTheOtherPersonsNote() {
+    var t = ScryLiveTranscript()
+    t.commit(far: true, "Hi there.", at: 2, others: [])
+    let id = t.lines[0].id
+    t.rename(id, to: "Dana Whitfield", everywhere: true, person: "/people/Dana Whitfield.md")
+    t.rename(id, to: "Dana", everywhere: true)
+    #expect(t.given.first?.person == "/people/Dana Whitfield.md")
+    t.rename(id, to: "Ellen Park", everywhere: true)
+    #expect(t.given.map(\.name) == ["Ellen Park"] && t.given.first?.person == nil)
+    t.rename(id, to: "them", everywhere: true)
+    #expect(t.given.isEmpty && t.lines[0].speaker == "Them")
+}
+
+@Test func anAddressKeepsItsFirstCharacter() {
+    #expect(ScryLiveChat.addresses("!billing@example.com").isEmpty && ScryLiveChat.addresses("**billing@example.com**!") == ["billing@example.com"])
+}
+
+@Test func aColleagueWithYourFirstNameIsStillOnTheCall() {
+    let segs = [ScrySegment(speaker: "Speaker A", start: 1, end: 2, text: "Hey.")]
+    #expect(ScryNames.soleSpeaker(segs, names: ["Sam Rivera", "Sam Chen", "Alex Client"], userName: "Sam Rivera").isEmpty)
+    #expect(ScryNames.soleSpeaker(segs, names: ["Sam Chen", "Alex Client"], userName: "Sam Rivera").isEmpty)
+    #expect(ScryNames.soleSpeaker(segs, names: ["Sam Rivera", "Alex Client"], userName: "Sam Rivera") == ["Speaker A": "Alex Client"])
+    #expect(ScryNames.soleSpeaker(segs, names: ["Sam Rivera", "Sam Chen", "Alex Client"], userName: "Sam").isEmpty)
+}

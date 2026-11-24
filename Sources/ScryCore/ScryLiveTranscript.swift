@@ -68,14 +68,17 @@ public struct ScryLiveTranscript: Equatable, Sendable {
     /// `everywhere`: every far-side line with that name, and the ones still to come. A "You" line is your mic: it stays.
     /// `person`: the note of someone you know, when you picked them.
     public mutating func rename(_ id: Int, to name: String, everywhere: Bool, person: String? = nil) {
-        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        var name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.lowercased() == "them" { name = "Them" }
         guard !name.isEmpty, let line = lines.first(where: { $0.id == id }), line.far else { return }
         for i in lines.indices where lines[i].far && (lines[i].id == id || everywhere && lines[i].speaker == line.speaker) {
             lines[i].speaker = name; lines[i].byHand = everywhere && name != "Them"   // "Them" takes a name back
         }
         guard everywhere else { return }
         guard name != "Them" else { aliases = aliases.filter { $0.value != line.speaker }; return }
-        picked[name] = person ?? picked[line.speaker]   // a new spelling is the same person
+        // A new spelling is the same person; a name with no word in common is someone else.
+        func words(_ s: String) -> Set<String> { Set(s.lowercased().split(separator: " ").map(String.init)) }
+        picked[name] = person ?? (words(name).isDisjoint(with: words(line.speaker)) ? nil : picked[line.speaker])
         for (k, v) in aliases where v == line.speaker { aliases[k] = name }
         aliases[line.speaker] = name
     }
@@ -240,7 +243,7 @@ public enum ScryLiveChat {
     /// Whole addresses only: a piece of a longer one ("billing@x.com" in "mary!billing@x.com") is someone else's.
     static func addresses(_ text: String) -> [String] {
         text.split { $0.isWhitespace || "<>()[]{},;:\"“”".contains($0) }
-            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".?!*")) }
+            .map { String($0.trimmingPrefix("**").reversed().drop { ".?!*".contains($0) }.reversed()) }   // a leading "!" is part of an address
             .filter { $0.wholeMatch(of: #/[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+/#) != nil }
     }
 

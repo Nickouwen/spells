@@ -155,3 +155,12 @@ private func tempVault() throws -> URL {
     #expect(ScrySettings.load(t.rows) == t)
     #expect(ScrySettings.folder("relative") == nil && ScrySettings.folder("  ") == nil && ScrySettings.folder("~/Ops")?.path.hasSuffix("/Ops") == true)
 }
+
+@Test func numbersSplitOrGroupedAnywhereAreFound() {
+    #expect(ScryOps.redacted(turns: ["My social is 123-4", "5-6789."]) == ["My social is [removed]", "[removed]."])
+    #expect(ScryOps.redacted("IBAN is GB29 NWBK 6016 1331 9268 19 and that is it", numbersOnly: true) == "IBAN is [removed] and that is it")
+    let split = ScryOps.redacted(turns: ["The IBAN is GB29 NWBK 6016", "1331 9268 19 ok"])
+    #expect(split == ["The IBAN is [removed]", "[removed] ok"])
+    #expect(ScryOps.redacted("The account is in 2026 order, ask Dana", numbersOnly: true) == "The account is in 2026 order, ask Dana")
+    #expect(ScryOps.redacted("Social media had 12345 likes", numbersOnly: true) == "Social media had 12345 likes")
+}

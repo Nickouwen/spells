@@ -1097,7 +1097,11 @@ public enum ScryNames {
     /// On a call, a far side that diarized to one speaker with exactly one other person named → that
     /// speaker is them (["Speaker A": "Alex Client"]); otherwise [:], and the summary maps on evidence.
     public static func soleSpeaker(_ segments: [ScrySegment], names: [String], userName: String) -> [String: String] {
-        let far = Set(segments.map(\.speaker).filter { $0 != "You" }), people = others(names, userName: userName)
+        let far = Set(segments.map(\.speaker).filter { $0 != "You" })
+        // Your full name exactly, or your first name alone: a colleague with your first name is a person on the call too.
+        let me = userName.lowercased(), first = me.split(separator: " ").first.map(String.init) ?? ""
+        let mine = names.filter { $0.lowercased().split(separator: " ").first.map(String.init) == first }
+        let people = names.filter { n in !(n.lowercased() == me || n.lowercased() == first || me == first && mine == [n]) }
         guard far.count == 1, people.count == 1, let label = far.first else { return [:] }
         return [label: people[0]]
     }

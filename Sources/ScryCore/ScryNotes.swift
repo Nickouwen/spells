@@ -166,6 +166,7 @@ public enum ScryNotes {
             }
         }
         p.link = known.map { ScryPeople.link(to: $0, from: url) }
+        try free(p, in: md)
         return try write(ScryPeople.setting(p, in: md), to: url)
     }
 
@@ -175,7 +176,18 @@ public enum ScryNotes {
     }
 
     public static func addMention(_ url: URL, _ p: ScryNotePerson) throws -> ScryNoteFile? {
-        try write(ScryPeople.setting(p, in: try String(contentsOf: url, encoding: .utf8)), to: url)
+        let md = try String(contentsOf: url, encoding: .utf8)
+        try free(p, in: md)
+        return try write(ScryPeople.setting(p, in: md), to: url)
+    }
+
+    /// A row is its name: a second person mentioned by the same name would replace the first.
+    private static func free(_ p: ScryNotePerson, in md: String) throws {
+        if p.role == .mentioned, ScryPeople.rows(in: md).contains(where: { $0.person.id == p.id && $0.person.at != p.at }) { throw Twice(name: p.name) }
+    }
+    public struct Twice: Error, CustomStringConvertible {
+        let name: String
+        public var description: String { "“\(name)” is already in People. Use a fuller name for this one." }
     }
 
     /// Undoes an edit: writes `before` back only while the file is still what the edit left (`after`); else throws.
@@ -198,9 +210,15 @@ public enum ScryNotes {
 
     /// Changes one transcript line (`text` nil deletes it). The file is re-read and the line matched by its place and
     /// its old speaker and words; changed meanwhile → throws and nothing is written.
-    public static func editLine(_ url: URL, index: Int, old: ScrySegment, speaker: String, text: String?) throws -> ScryNoteFile? {
+    /// `also`: lines near it whose words change with it (the other half of a number), by place.
+    public static func editLine(_ url: URL, index: Int, old: ScrySegment, speaker: String, text: String?,
+                                also: [(index: Int, old: ScrySegment, text: String)] = []) throws -> ScryNoteFile? {
         let fresh = try String(contentsOf: url, encoding: .utf8)
         guard var out = editedLine(fresh, index: index, old: old, speaker: speaker, text: text) else { throw Changed() }
+        for l in also {
+            guard let next = editedLine(out, index: l.index, old: l.old, speaker: l.old.speaker, text: l.text) else { throw Changed() }
+            out = next
+        }
         // Their last line went to someone else, or went: so does their row.
         if let n = ScryNote.parse(out), !n.segments.contains(where: { $0.speaker == old.speaker }) {
             out = ScryPeople.removing(ScryNotePerson(name: old.speaker, role: .speaker), from: out)

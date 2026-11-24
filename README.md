@@ -46,7 +46,7 @@ After the call, each transcript line in Meetings can be edited, given to another
 
 ## Scry: people
 
-Each note lists who spoke and who was mentioned. Set `scry_people` to one or more folders with a Markdown note per person (the file name is the name; frontmatter may hold `aliases`, `email`, `role`, `company`). Scry links someone by itself only with the same email or the same full name. For anyone else, the note's People card suggests matches, and you choose one or make a new person note. Linking a speaker also renames them in the note. Inside one Obsidian vault the links are wiki links, so backlinks work.
+Each note lists who spoke and who was mentioned. Set `scry_people` to one or more folders with a Markdown note per person (the file name is the name; frontmatter may hold `aliases`, `email`, `role`, `company`). Scry links someone by itself only with the same email or the same full name. For anyone else, the note's People card suggests matches, and you choose one or make a new person note. Linking a speaker who has no name yet also names them in the note. Inside one Obsidian vault the links are wiki links, so backlinks work.
 
 ## Scry: push call items to a team vault
 

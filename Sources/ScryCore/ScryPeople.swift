@@ -73,7 +73,8 @@ public enum ScryPeople {
                 }
             }
         }
-        if let t = fm["type"]?.first, !["person", "people", "contact"].contains(t.lowercased()) { return nil }
+        // "client" or "lead" is a person too.
+        if let t = fm["type"]?.first, ["project", "meeting", "company", "organization", "transcript", "daily", "index", "template"].contains(t.lowercased()) { return nil }
         let file = url.deletingPathExtension().lastPathComponent, name = bare(file)
         guard !name.isEmpty else { return nil }
         let heading = lines.first { $0.hasPrefix("# ") }.map { bare(String($0.dropFirst(2))) }

@@ -201,7 +201,7 @@ import UserNotifications
                     let exact = [s.meet?.selfName, s.settings.userName == ScrySettings().userName ? nil : s.settings.userName].compactMap { $0?.lowercased() }
                     if let people = s.meet?.participants, !people.isEmpty {
                         let speaking = s.meet?.speaking.flatMap { n in
-                            (exact.isEmpty ? ScryNames.sameFirstName(NSFullUserName(), n) : exact.contains(n.lowercased())) ? nil : n
+                            (exact.isEmpty ? ScryNames.sameFirstName(NSFullUserName(), n) : exact.contains(n.lowercased()) || s.settings.userName.split(separator: " ").count == 1 && ScryNames.sameFirstName(s.settings.userName, n)) ? nil : n
                         }
                         return (speaking, ScryNames.others(people, selfName: s.meet?.selfName, userName: s.settings.userName) ?? [])
                     }

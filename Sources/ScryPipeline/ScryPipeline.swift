@@ -133,7 +133,7 @@ public enum ScryPipeline {
         t0 = clock.now
         var summary = try ScryPrompt.parseSummary(try await claude(prompt))
         if levels?.throughSpeakers == true {
-            summary.insights.append("The call played through speakers, so the mic also heard the far side. Scry removed that echo from your lines.")
+            summary.insights.append(speakersLine)
         }
         if let p = capture.pauses, !p.isEmpty {
             func at(_ t: Double) -> String { String(format: "%02d:%02d", Int(t) / 60, Int(t) % 60) }
@@ -141,6 +141,8 @@ public enum ScryPipeline {
         }
         let claudeMs = ms(clock.now - t0)
 
+        // The model names voices that have no name yet; one named above (or by you) keeps its name and link.
+        summary.speakers = summary.speakers.filter { !known.values.contains($0.key) }
         let speakers = known.merging(summary.speakers) { a, _ in a }
         var participants = names
         for n in speakers.values.sorted() where !participants.contains(where: { $0 == n || $0.hasPrefix(n + " ") }) {
@@ -148,7 +150,8 @@ public enum ScryPipeline {
         }
         let url = unique(ScryNote.fileURL(root: settings.rootURL, startedAt: capture.startedAt, title: summary.title))
         let spoken = ScryTranscript.renamed(segments, summary.speakers)
-        let emails = Dictionary((capture.invite?.invitees ?? []).compactMap { i in i.email.map { (i.name, $0) } }, uniquingKeysWith: { a, _ in a })
+        let emails = Dictionary(grouping: capture.invite?.invitees ?? [], by: \.name)   // two invitees with one name: neither email is sure
+            .compactMapValues { i in Set(i.compactMap { $0.email?.lowercased() }).count == 1 ? i.compactMap(\.email)[0] : nil }
         let people = ScryPeople.rows(segments: spoken, mentioned: summary.people, emails: emails, owner: settings.userName,
                                      known: ScryPeople.load(settings.people.compactMap(ScrySettings.folder)), note: url,
                                      picked: Dictionary(given.compactMap { g in g.person.map { (g.name, $0) } }, uniquingKeysWith: { _, b in b }))
@@ -163,6 +166,7 @@ public enum ScryPipeline {
     }
 
     private static let pausePrefix = "Recording paused:"
+    private static let speakersLine = "The call played through speakers, so the mic also heard the far side. Scry removed that echo from your lines."
 
     /// Re-summarizes a note from its own transcript with the current prompt and rewrites it in place: same
     /// times, participants, transcript and your notes; new title, summary and action items (ticks are lost).
@@ -171,24 +175,26 @@ public enum ScryPipeline {
         guard let note = ScryNote.parse(before), !note.segments.isEmpty else {
             throw Failure.claude("\(url.lastPathComponent) isn't a Scry note with a transcript")
         }
-        // A note from before 2026-11-24 can still hold numbers: they don't go to the model.
-        let pauses = note.summary.insights.filter { $0.hasPrefix(pausePrefix) }
+        // A note from before 2026-11-24 can still hold numbers: they don't go to the model, nor into the note again.
+        let lines = note.summary.insights.filter { $0.hasPrefix(pausePrefix) || $0 == speakersLine }
         let safe = zip(note.segments, ScryOps.redacted(turns: note.segments.map(\.text))).map { s, t in var s = s; s.text = t; return s }
-        let prompt = ScryPrompt.summary(segments: safe, participants: note.meta.participants, userNotes: ScryOps.redacted(note.userNotes, numbersOnly: true),
+        let userNotes = ScryOps.redacted(note.userNotes, numbersOnly: true)
+        let prompt = ScryPrompt.summary(segments: safe, participants: note.meta.participants, userNotes: userNotes,
                                         userName: settings.userName, appName: note.meta.app, startedAt: note.meta.startedAt,
                                         keyterms: keyterms, language: language)
         var summary = try ScryPrompt.parseSummary(try await claude(prompt))
-        summary.insights += pauses   // the model can't know these
+        summary.insights += lines   // the model can't know these
+        summary.speakers = summary.speakers.filter { s in !note.segments.contains { $0.speaker == s.value } }   // two voices never become one
         var meta = note.meta
         meta.speakers = meta.speakers.merging(summary.speakers) { a, _ in a }
-        let spoken = ScryTranscript.renamed(note.segments, summary.speakers)
+        let spoken = ScryTranscript.renamed(safe, summary.speakers)
         // Links already made stay (yours or not linking someone included); people found this time join them.
         let found = ScryPeople.rows(segments: spoken, mentioned: summary.people, emails: [:], owner: settings.userName,
                                     known: ScryPeople.load(settings.people.compactMap(ScrySettings.folder)), note: url)
         let kept = note.people.map { p in
             p.role == .speaker ? ScryNotePerson(name: summary.speakers[p.name] ?? p.name, role: p.role, at: p.at, detail: p.detail, link: p.link) : p
         }
-        let out = ScryNote(meta: meta, summary: summary, userNotes: note.userNotes, segments: spoken,
+        let out = ScryNote(meta: meta, summary: summary, userNotes: userNotes, segments: spoken,
                            people: ScryPeople.merged(kept, found.filter { f in !kept.contains { $0.id == f.id } }))   // one you unlinked stays unlinked
         guard try String(contentsOf: url, encoding: .utf8) == before else { throw Failure.noteChanged }
         try Data(out.markdown().utf8).write(to: url, options: .atomic)
@@ -354,7 +360,7 @@ public enum ScryLiveAsk {
                               skills: [ScryLiveChat.Skill] = ScryLiveChat.builtIn) async throws -> String {
         let safe = zip(transcript.segments, ScryOps.redacted(turns: transcript.segments.map(\.text))).map { s, t in var s = s; s.text = t; return s }
         let text = safe.map { String(format: "[%02d:%02d] ", Int($0.start) / 60, Int($0.start) % 60) + "\($0.speaker): \($0.text)" }
-        let prompt = ScryLiveChat.prompt(ScryLiveChat.expand(question, skills: skills), transcript: ScryOps.redacted(text.joined(separator: "\n")),
+        let prompt = ScryLiveChat.prompt(ScryOps.redacted(ScryLiveChat.expand(question, skills: skills)), transcript: ScryOps.redacted(text.joined(separator: "\n")),
                                          notes: ScryOps.redacted(notes), invite: invite)
         return try await ScryPipeline.claude(prompt, model: "haiku").trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -372,8 +378,8 @@ public enum ScryAsk {
         let top = ids.compactMap { byID[$0] }
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
         // Summary sections only: five whole transcripts could overrun claude's context or the timeout.
-        let prompt = ScryPrompt.ask(question, notes: top.map {
-            ($0.note.summary.title, f.string(from: $0.note.meta.startedAt), withoutTranscript($0.markdown))
+        let prompt = ScryPrompt.ask(ScryOps.redacted(question), notes: top.map {
+            ($0.note.summary.title, f.string(from: $0.note.meta.startedAt), ScryOps.redacted(withoutTranscript($0.markdown), numbersOnly: true))
         })
         return (try await ScryPipeline.claude(prompt).trimmingCharacters(in: .whitespacesAndNewlines), top.map(\.url))
     }

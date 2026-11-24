@@ -47,6 +47,8 @@ public struct MeetingsView: View {
     @State private var lineSpeaker = ""
     @State private var askDelete = false
     /// The last edit to a note's words, names, people or folder, until it's undone or another one.
+    /// Edits run one after another: each reads the file the one before it left, so one undo takes back one edit.
+    @State private var lastEdit: Task<Void, Never>?
     @State private var undo: (url: URL, what: String, before: String, after: String)?
     /// The folder the list shows; nil = all notes.
     @State private var folder: String?
@@ -364,7 +366,7 @@ public struct MeetingsView: View {
         .alert("Summarize this note again?", isPresented: Binding(get: { redoing != nil }, set: { if !$0 { redoing = nil } })) {
             Button("Summarize") { if let r = redoing { resummarize(r.note, language: r.language) } }
             Button("Cancel", role: .cancel) {}
-        } message: { Text("It replaces the title, summary, lists and action items, ticks included. The transcript and your notes stay.") }
+        } message: { Text("It replaces the title, summary, lists and action items, ticks included. The transcript and your notes stay. You can undo it.") }
     }
 
     // MARK: People
@@ -450,7 +452,7 @@ public struct MeetingsView: View {
     }
 
     private func resummarize(_ n: ScryNoteFile, language: String?) {
-        work(n) { settings, terms in
+        work(n, undo: "Summarized again.") { settings, terms in
             _ = try await ScryPipeline.resummarize(note: n.url, settings: settings, keyterms: terms, language: language)
             return n.url
         }
@@ -461,13 +463,16 @@ public struct MeetingsView: View {
         work(n) { settings, terms in try await ScryPipeline.separate(note: n.note, voices: voices, settings: settings, keyterms: terms).noteURL }
     }
 
-    private func work(_ n: ScryNoteFile, _ body: @escaping @Sendable (ScrySettings, [String]) async throws -> URL) {
+    private func work(_ n: ScryNoteFile, undo what: String? = nil, _ body: @escaping @Sendable (ScrySettings, [String]) async throws -> URL) {
         working.insert(n.url)
         workError = nil
+        if what != nil { undo = nil }
         Task {
             let rows = await Task.detached { ScryPipeline.settingRows() }.value
             do {
+                let before = try String(contentsOf: n.url, encoding: .utf8)
                 let url = try await body(ScrySettings.load(rows), ScryPipeline.keyterms(rows))
+                if let what { undo = (url, what, before, try String(contentsOf: url, encoding: .utf8)) }
                 await reload()
                 selection = url
             } catch {
@@ -569,12 +574,15 @@ public struct MeetingsView: View {
     private func edit(_ n: ScryNoteFile, _ i: Int, speaker: String, text: String?) {
         let url = n.url, old = n.note.segments[i]
         // A number typed here is judged with the lines around it.
-        let safe = text.map { t in
-            var turns = n.note.segments.map(\.text); turns[i] = t
-            return ScryOps.redacted(turns: turns)[i]
+        var safe: String?, also: [(index: Int, old: ScrySegment, text: String)] = []
+        if let text {
+            var turns = n.note.segments.map(\.text); turns[i] = text
+            let cut = ScryOps.redacted(turns: turns)
+            safe = cut[i]
+            also = (max(0, i - 2)...min(turns.count - 1, i + 2)).filter { $0 != i && cut[$0] != turns[$0] }.map { ($0, n.note.segments[$0], cut[$0]) }
         }
         update(url, undo: text == nil ? "Line deleted." : "Line changed.") {
-            try ScryNotes.editLine(url, index: i, old: old, speaker: speaker, text: safe)
+            try ScryNotes.editLine(url, index: i, old: old, speaker: speaker, text: safe, also: also)
         }
     }
 
@@ -805,7 +813,9 @@ public struct MeetingsView: View {
     private func update(_ url: URL, undo what: String? = nil, _ body: @escaping @Sendable () throws -> ScryNoteFile?) {
         workError = nil
         if what != nil { undo = nil }
-        Task {
+        let previous = lastEdit
+        lastEdit = Task {
+            await previous?.value
             do {
                 let (before, fresh) = try await Task.detached(priority: .userInitiated) { (try String(contentsOf: url, encoding: .utf8), try body()) }.value
                 guard let fresh, let i = notes?.firstIndex(where: { $0.url == url }) else { return }
