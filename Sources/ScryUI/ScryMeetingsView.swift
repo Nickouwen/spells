@@ -568,8 +568,13 @@ public struct MeetingsView: View {
 
     private func edit(_ n: ScryNoteFile, _ i: Int, speaker: String, text: String?) {
         let url = n.url, old = n.note.segments[i]
+        // A number typed here is judged with the lines around it.
+        let safe = text.map { t in
+            var turns = n.note.segments.map(\.text); turns[i] = t
+            return ScryOps.redacted(turns: turns)[i]
+        }
         update(url, undo: text == nil ? "Line deleted." : "Line changed.") {
-            try ScryNotes.editLine(url, index: i, old: old, speaker: speaker, text: text.map { ScryOps.redacted($0, numbersOnly: true) })
+            try ScryNotes.editLine(url, index: i, old: old, speaker: speaker, text: safe)
         }
     }
 

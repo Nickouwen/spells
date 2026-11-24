@@ -71,9 +71,10 @@ public struct ScryLiveTranscript: Equatable, Sendable {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, let line = lines.first(where: { $0.id == id }), line.far else { return }
         for i in lines.indices where lines[i].far && (lines[i].id == id || everywhere && lines[i].speaker == line.speaker) {
-            lines[i].speaker = name; lines[i].byHand = everywhere
+            lines[i].speaker = name; lines[i].byHand = everywhere && name != "Them"   // "Them" takes a name back
         }
         guard everywhere else { return }
+        guard name != "Them" else { aliases = aliases.filter { $0.value != line.speaker }; return }
         picked[name] = person ?? picked[line.speaker]   // a new spelling is the same person
         for (k, v) in aliases where v == line.speaker { aliases[k] = name }
         aliases[line.speaker] = name
@@ -137,13 +138,14 @@ public struct ScryLiveName: Codable, Equatable, Sendable {
 
     /// Ten a second, so they outvote the marker's two.
     public var hints: [ScryMeet.Hint] {
-        stride(from: from, through: max(from, to - 0.5), by: 0.1).map { ScryMeet.Hint(t: ($0 * 10).rounded() / 10, name: name) }
+        stride(from: from, through: max(from + 0.5, to - 0.5), by: 0.1).map { ScryMeet.Hint(t: ($0 * 10).rounded() / 10, name: name) }
     }
 
     public static func save(_ names: [ScryLiveName], in dir: URL) throws {
-        guard !names.isEmpty else { return }
+        let url = dir.appending(path: file)
+        guard !names.isEmpty else { if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }; return }
         let e = JSONEncoder()
-        try Data(names.map { String(decoding: try e.encode($0), as: UTF8.self) }.joined(separator: "\n").utf8).write(to: dir.appending(path: file), options: .atomic)
+        try Data(names.map { String(decoding: try e.encode($0), as: UTF8.self) }.joined(separator: "\n").utf8).write(to: url, options: .atomic)
     }
 
     public static func load(_ dir: URL) -> [ScryLiveName] {

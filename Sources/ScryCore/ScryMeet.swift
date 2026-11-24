@@ -179,7 +179,8 @@ public enum ScryMeet {
         // Names you gave (`given`) count as they are: you said it isn't you.
         let marked = hints.filter { h in
             let n = h.name.lowercased()
-            return n != me && (meFirst.isEmpty || n.split(separator: " ").first.map(String.init) != meFirst)
+            // A full name in settings is exactly you; a first name alone covers every form of it.
+            return n != me && (me.contains(" ") || meFirst.isEmpty || n.split(separator: " ").first.map(String.init) != meFirst)
         }
         for h in marked + given {
             let inside = far.filter { $0.start - slack <= h.t && h.t <= $0.end + slack }

@@ -502,10 +502,14 @@ import notify
         func run(_ views: [NSView], to alpha: CGFloat, duration: TimeInterval, delay: TimeInterval) {
             let go = { [weak self] in
                 guard let self, self.isExpanded == opening else { return }   // turned round meanwhile
-                NSAnimationContext.runAnimationGroup { ctx in
-                    ctx.duration = duration
-                    ctx.timingFunction = Self.easeOut
-                    for v in views { v.animator().alphaValue = alpha }
+                for v in views {   // from what shows now: a turn mid-fade doesn't jump
+                    let a = CABasicAnimation(keyPath: "opacity")
+                    a.fromValue = v.layer?.presentation()?.opacity ?? Float(v.alphaValue)
+                    a.toValue = alpha
+                    a.duration = duration
+                    a.timingFunction = Self.easeOut
+                    v.alphaValue = alpha
+                    v.layer?.add(a, forKey: "fade")
                 }
             }
             if delay == 0 { go() } else { DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { go() } } }

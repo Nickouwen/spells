@@ -131,9 +131,22 @@ import Testing
     #expect(ScryMeet.names(for: seg, hints: marker, owner: "Nic", given: t.given.flatMap(\.hints)) == ["Speaker A": "Dana Whitfield"])
     t.rename(3, to: "Dana", everywhere: true)
     #expect(Set(t.given.map(\.name)) == ["Dana"] && t.given.allSatisfy { $0.person == "/p/Dana.md" })
+    var one = ScryLiveTranscript()   // a short "Yes." is enough, and a name taken back is gone
+    one.hear(far: true, "Yes.", at: 4); one.commit(far: true, "Yes.", at: 4.2); one.rename(0, to: "Dana", everywhere: true)
+    #expect(ScryMeet.names(for: [.init(speaker: "Speaker A", start: 4, end: 4.2, text: "Yes.")], hints: [], owner: "", given: one.given.flatMap(\.hints)) == ["Speaker A": "Dana"])
+    let dir = FileManager.default.temporaryDirectory.appending(path: "scry-back-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try ScryLiveName.save(one.given, in: dir)
+    one.rename(0, to: "Them", everywhere: true); one.commit(far: true, "And no.", at: 8)
+    try ScryLiveName.save(one.given, in: dir)
+    #expect(one.given.isEmpty && one.lines.allSatisfy { $0.speaker == "Them" } && ScryLiveName.load(dir).isEmpty)
+    // A full name in settings is exactly you; a colleague with your first name keeps theirs.
+    let m = stride(from: 0.0, to: 9, by: 0.5).map { ScryMeet.Hint(t: $0, name: "Sam Lee") }, c = [ScrySegment(speaker: "Speaker C", start: 0, end: 9, text: "x")]
+    #expect(ScryMeet.names(for: c, hints: m, owner: "Sam Rivera") == ["Speaker C": "Sam Lee"] && ScryMeet.names(for: c, hints: m, owner: "Sam").isEmpty)
     // A name you gave is never taken for yours, even with your first name.
     let b = [ScrySegment(speaker: "Speaker B", start: 0, end: 9, text: "x")], hints = stride(from: 0.0, to: 9, by: 0.5).map { ScryMeet.Hint(t: $0, name: "Sam Okafor") }
-    #expect(ScryMeet.names(for: b, hints: hints, owner: "Sam Rivera").isEmpty && ScryMeet.names(for: b, hints: [], owner: "Sam Rivera", given: hints) == ["Speaker B": "Sam Okafor"])
+    #expect(ScryMeet.names(for: b, hints: hints, owner: "Sam").isEmpty && ScryMeet.names(for: b, hints: [], owner: "Sam", given: hints) == ["Speaker B": "Sam Okafor"])
 }
 
 @Test func yourSentenceOverALongSpeechIsNotEcho() {

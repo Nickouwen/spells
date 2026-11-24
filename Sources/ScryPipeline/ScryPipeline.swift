@@ -185,10 +185,11 @@ public enum ScryPipeline {
         // Links already made stay (yours or not linking someone included); people found this time join them.
         let found = ScryPeople.rows(segments: spoken, mentioned: summary.people, emails: [:], owner: settings.userName,
                                     known: ScryPeople.load(settings.people.compactMap(ScrySettings.folder)), note: url)
+        let kept = note.people.map { p in
+            p.role == .speaker ? ScryNotePerson(name: summary.speakers[p.name] ?? p.name, role: p.role, at: p.at, detail: p.detail, link: p.link) : p
+        }
         let out = ScryNote(meta: meta, summary: summary, userNotes: note.userNotes, segments: spoken,
-                           people: ScryPeople.merged(note.people.map { p in
-                               p.role == .speaker ? ScryNotePerson(name: summary.speakers[p.name] ?? p.name, role: p.role, at: p.at, detail: p.detail, link: p.link) : p
-                           }, found.filter { f in !note.people.contains { $0.id == f.id } }))   // one you unlinked stays unlinked
+                           people: ScryPeople.merged(kept, found.filter { f in !kept.contains { $0.id == f.id } }))   // one you unlinked stays unlinked
         guard try String(contentsOf: url, encoding: .utf8) == before else { throw Failure.noteChanged }
         try Data(out.markdown().utf8).write(to: url, options: .atomic)
         return summary
@@ -351,7 +352,8 @@ public enum ScryPipeline {
 public enum ScryLiveAsk {
     public static func answer(_ question: String, transcript: ScryLiveTranscript, notes: String, invite: ScryInvite?,
                               skills: [ScryLiveChat.Skill] = ScryLiveChat.builtIn) async throws -> String {
-        let text = transcript.segments.map { String(format: "[%02d:%02d] ", Int($0.start) / 60, Int($0.start) % 60) + "\($0.speaker): \($0.text)" }
+        let safe = zip(transcript.segments, ScryOps.redacted(turns: transcript.segments.map(\.text))).map { s, t in var s = s; s.text = t; return s }
+        let text = safe.map { String(format: "[%02d:%02d] ", Int($0.start) / 60, Int($0.start) % 60) + "\($0.speaker): \($0.text)" }
         let prompt = ScryLiveChat.prompt(ScryLiveChat.expand(question, skills: skills), transcript: ScryOps.redacted(text.joined(separator: "\n")),
                                          notes: ScryOps.redacted(notes), invite: invite)
         return try await ScryPipeline.claude(prompt, model: "haiku").trimmingCharacters(in: .whitespacesAndNewlines)

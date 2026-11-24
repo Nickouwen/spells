@@ -155,7 +155,7 @@ import SwiftUI
 
     private func catchUp() {
         model.busy = true
-        let segments = model.transcript.segments.map { var s = $0; s.text = ScryOps.redacted(s.text); return s }
+        let segments = zip(model.transcript.segments, ScryOps.redacted(turns: model.transcript.segments.map(\.text))).map { s, t in var s = s; s.text = ScryOps.redacted(t); return s }
         Task {
             do { model.catchUp = try await ScryCerebras.catchUp(segments) } catch {
                 SupportLog.scry.error("catch-up failed: \(String(describing: error), privacy: .public)")

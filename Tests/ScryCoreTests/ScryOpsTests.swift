@@ -41,6 +41,9 @@ private func tempVault() throws -> URL {
     #expect(ScryOps.redacted(turns: ["We sold 1234567890 units.", "The account is fine.", "It's 2026."]) == ["We sold 1234567890 units.", "The account is fine.", "It's 2026."])
     #expect(ScryOps.redacted(turns: ["My social is 123", "45 6789, okay?"]) == ["My social is [removed]", "[removed], okay?"])
     #expect(ScryOps.redacted(turns: ["It's 4111 1111 1111", "1111."]) == ["It's [removed]", "[removed]."])
+    #expect(ScryOps.redacted(turns: ["It's 4111 1111 1111.", "1111."]) == ["It's [removed]", "[removed]."])
+    #expect(ScryOps.redacted(turns: ["My account number is 1234", "567890, yes."]) == ["My account number is [removed]", "[removed], yes."])
+    #expect(ScryOps.redacted(turns: ["We have 1,234.", "5678 of them.", "$4,111.50"]) == ["We have 1,234.", "5678 of them.", "$4,111.50"])
     let long = "The account number is something " + String(repeating: "that we talked about ", count: 10) + "and the account number?"
     #expect(ScryOps.redacted(turns: [long, "1234567890"])[1] == "[removed]" && ScryOps.redacted(turns: []).isEmpty)
     #expect(r("the password is hunter2!") == "the password is hunter2!")   // not a number: your words stay
