@@ -125,21 +125,44 @@ public struct ScryLiveTranscript: Equatable, Sendable {
 public enum ScryLiveChat {
     public struct Skill: Sendable, Identifiable {
         public let id: String, title: String, prompt: String
+        public var group = "Yours"
     }
-    public static let skills = [
+    public static let builtIn = [
         Skill(id: "email", title: "Draft the follow-up email", prompt: """
             Draft the email You would send after this call. Start with a "To:" line, a "Cc:" line if needed and a "Subject:" line, then a blank \
             line and the body. Use only addresses in the transcript or the invite; if one is missing, leave "To:" empty and say so after the \
             email. Promise only what You promised. Remarks to You go after a line with only ---.
-            """),
-        Skill(id: "actions", title: "Action items so far", prompt: "List the action items agreed so far: owner, task, due date if said, and the [mm:ss] of the line. Only what was agreed, not what was only offered."),
-        Skill(id: "ask", title: "What should I ask next?", prompt: "Suggest up to three short questions You should still ask, based on what is unclear or unanswered."),
-        Skill(id: "summary", title: "Summary so far", prompt: "Summarize the call so far in at most six short bullets: topics, decisions, open points."),
-        Skill(id: "translate", title: "Translate the last minute", prompt: "Translate the last minute of the transcript to English, or to the language named here, line by line with speakers:"),
+            """, group: "Write"),
+        Skill(id: "actions", title: "Action items so far", prompt: "List the action items agreed so far: owner, task, due date if said, and the [mm:ss] of the line. Only what was agreed, not what was only offered.", group: "Find"),
+        Skill(id: "ask", title: "What should I ask next?", prompt: "Suggest up to three short questions You should still ask, based on what is unclear or unanswered.", group: "Help"),
+        Skill(id: "summary", title: "Summary so far", prompt: "Summarize the call so far in at most six short bullets: topics, decisions, open points.", group: "Find"),
+        Skill(id: "decisions", title: "Decisions so far", prompt: "List only what was decided so far, with the [mm:ss] of the line. An offer nobody accepted is not a decision.", group: "Find"),
+        Skill(id: "documents", title: "Documents needed", prompt: "List the documents that must be made or sent: what each one is, for whom, the details said on the call, and what is still missing.", group: "Find"),
+        Skill(id: "contacts", title: "People and contact details", prompt: "List the people mentioned: name, role, and any email or phone that was said, with the [mm:ss].", group: "Find"),
+        Skill(id: "slack", title: "Draft a Slack message", prompt: "Draft a short Slack message from You to your own team about this call: outcome, next steps, who owes what. Plain text, no heading.", group: "Write"),
+        Skill(id: "notion", title: "Draft a Notion page", prompt: "Write a Notion page about this call in Markdown: a title, Summary, Decisions, Next steps, Open questions.", group: "Write"),
+        Skill(id: "translate", title: "Translate the last minute", prompt: "Translate the last minute of the transcript to English, or to the language named here, line by line with speakers:", group: "Help"),
     ]
 
+    /// In menu order.
+    public static let groups = ["Write", "Find", "Help", "Yours"]
+
+    /// Built-in ones plus yours ("name: what to do" lines); yours win over a built-in of the same name.
+    public static func skills(custom: [String]) -> [Skill] {
+        let mine = custom.compactMap { line -> Skill? in
+            guard let c = line.firstIndex(of: ":") else { return nil }
+            let name = line[..<c].trimmingCharacters(in: .whitespaces), prompt = line[line.index(after: c)...].trimmingCharacters(in: .whitespaces)
+            let id = name.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).joined(separator: "-")
+            return id.isEmpty || prompt.isEmpty ? nil : Skill(id: id, title: name, prompt: prompt)
+        }
+        return mine + builtIn.filter { b in !mine.contains { $0.id == b.id } }
+    }
+
+    /// What to paste into a meeting's chat before you record.
+    public static let consent = "I'm using a note taker that records and transcribes this call. Tell me if you'd rather I turn it off."
+
     /// "/email to Ellen" → the skill's prompt plus the rest; anything else is the question itself.
-    public static func expand(_ input: String) -> String {
+    public static func expand(_ input: String, skills: [Skill] = builtIn) -> String {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.hasPrefix("/") else { return text }
         let parts = text.dropFirst().split(separator: " ", maxSplits: 1).map(String.init)

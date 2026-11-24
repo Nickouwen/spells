@@ -200,9 +200,10 @@ public enum ScryOps {
     /// `text` with what must never reach the vault replaced by "[removed]": SSNs, full card numbers (Luhn-checked),
     /// bank, routing and IBAN numbers after their keyword (a last 4 stays), passwords and PINs given as values,
     /// and API keys (known formats, or a long value after "API key", "token" or "secret").
-    public static func redacted(_ text: String) -> String {
+    /// `numbersOnly`: the SSN, card and bank rules alone (what a saved note leaves out).
+    public static func redacted(_ text: String, numbersOnly: Bool = false) -> String {
         var s = text
-        for (pattern, group, check) in rules {
+        for (pattern, group, check) in numbersOnly ? Array(rules.prefix(numberRules)) : rules {
             let re = try! NSRegularExpression(pattern: pattern)
             for m in re.matches(in: s, range: NSRange(s.startIndex..., in: s)).reversed() {
                 guard let r = Range(m.range(at: group), in: s), check(String(s[r])) else { continue }
@@ -212,9 +213,11 @@ public enum ScryOps {
         return s
     }
 
+    /// The first `numberRules` are the numbers.
+    private static let numberRules = 4
     private static let rules: [(String, Int, @Sendable (String) -> Bool)] = [
         (#"\b\d{3}-\d{2}-\d{4}\b"#, 0, { _ in true }),
-        (#"(?i)\b(?:ssn|social security(?: number)?)\D{0,12}(\d{9})\b"#, 1, { _ in true }),
+        (#"(?i)\b(?:ssn|social(?: security)?(?: number)?)\D{0,12}(\d{3}[\s.,-]{0,2}\d{2}[\s.,-]{0,2}\d{4})\b"#, 1, { _ in true }),
         (#"\b\d(?:[ -]?\d){12,18}\b"#, 0, luhn),
         (#"(?i)\b(?:account|acct|routing|aba|iban)(?:\s+(?:number|no\.?|num|#))?\s*(?:is\s+|[:#=]\s*)?([A-Z]{2}\d{2}[A-Z0-9]{8,30}|\d(?:[ -]?\d){5,19})\b"#, 1, { _ in true }),
         (#"(?i)\b(?:password|passcode|passwd|pwd)\s*(?:is\s+|[:=]\s*)["'“]?([^\s"'”]{4,})"#, 1, { v in v.contains { !$0.isLetter } }),

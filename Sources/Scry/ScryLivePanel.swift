@@ -20,6 +20,7 @@ import SwiftUI
     /// Who the Meet tab shows speaking now, and everyone else in the call.
     var who: () -> (speaking: String?, others: [String]) = { (nil, []) }
     var invite: ScryInvite?
+    var onPause: () -> Void = {}
     /// The capture folder: your notes are saved there (`notes.txt`) as you type, so a crash or a quit
     /// mid-meeting keeps them (`ScryCaptures.recoverCrashed` reads the file).
     private let dir: URL
@@ -101,11 +102,13 @@ import SwiftUI
             p.minSize = NSSize(width: 340, height: 460)
             p.contentView = NSHostingView(rootView: ScryLiveView(model: model, onCatchUp: { [weak self] in self?.catchUp() },
                                                                  onAsk: { [weak self] in self?.ask($0) },
+                                                                 onPause: { [weak self] in self?.onPause() },
                                                                  onNotesChanged: { [weak self] in self?.notesChanged() },
                                                                  onStop: onStop, onDiscard: onDiscard))
             if let v = NSScreen.main?.visibleFrame { p.setFrameTopLeftPoint(NSPoint(x: v.maxX - 420, y: v.maxY - 20)) }
             panel = p
         }
+        model.skills = ScryLiveChat.skills(custom: ScryApp.loadSettings().settings.skills)
         if activate { NSApp.activate() }   // you type in it
         // The panel, its transcript and your notes live as long as the recording: closing or minimising it
         // only hides it, and "Show live panel" (or the pill) brings the same one back.
@@ -140,7 +143,7 @@ import SwiftUI
         let i = model.chat.count - 1, transcript = model.transcript, notes = model.notes, invite = invite
         Task {
             do {
-                let text = try await ScryLiveAsk.answer(question, transcript: transcript, notes: notes, invite: invite)
+                let text = try await ScryLiveAsk.answer(question, transcript: transcript, notes: notes, invite: invite, skills: model.skills)
                 let known = ([transcript.plainText, notes] + (invite?.invitees.compactMap(\.email) ?? [])).joined(separator: "\n")
                 model.chat[i].answer = text
                 model.chat[i].gmail = ScryLiveChat.email(in: text, known: known)
@@ -173,6 +176,8 @@ import SwiftUI
     /// Everyone else in the call, as far as the Meet tab shows.
     var others: [String] = []
     var chat: [Chat] = []
+    var skills = ScryLiveChat.builtIn
+    var paused = false
     var notes = ""
     var catchUp = ""
     var busy = false
@@ -193,6 +198,7 @@ struct ScryLiveView: View {
     @Bindable var model: ScryLiveModel
     var onCatchUp: () -> Void
     var onAsk: (String) -> Void = { _ in }
+    var onPause: () -> Void = {}
     var onNotesChanged: () -> Void
     var onStop: () -> Void
     var onDiscard: () -> Void
@@ -245,13 +251,14 @@ struct ScryLiveView: View {
 
     private var header: some View {
         HStack(spacing: Theme.Space.s) {
-            Circle().fill(Theme.StateLayer.recording).frame(width: 8, height: 8).opacity(pulse ? 1 : 0.3)
+            Circle().fill(model.paused ? Theme.inkTertiary : Theme.StateLayer.recording).frame(width: 8, height: 8).opacity(model.paused || pulse ? 1 : 0.3)
             VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                Text("Recording").textRole(.heading)
+                Text(model.paused ? "Paused" : "Recording").textRole(.heading)
                 Text(model.others.isEmpty ? model.app.map { "\($0) call" } ?? "In person" : model.others.joined(separator: ", "))
                     .textRole(.label, Theme.inkTertiary).lineLimit(1)
             }
             Spacer()
+            IconButton(symbol: model.paused ? "play.fill" : "pause.fill", help: model.paused ? "Resume recording" : "Pause: nothing is recorded until you resume") { onPause() }
             LevelMeter(level: model.level)
             TimelineView(.periodic(from: model.startedAt, by: 1)) { ctx in
                 Text(Self.clock(ctx.date.timeIntervalSince(model.startedAt))).textRole(.title).monospacedDigit()   // .metric out-shouted the transcript; fixed digits so it doesn't jitter
@@ -288,6 +295,7 @@ struct ScryLiveView: View {
                     Button(showEcho ? "Hide echo" : "\(echoes) echo hidden") { showEcho.toggle() }.buttonStyle(QuietButtonStyle())
                         .help("Lines of yours that repeat the other side: your speakers, heard by your mic")
                 }
+                IconButton(symbol: "hand.raised", help: "Copy a consent notice to paste into the meeting's chat") { copy(ScryLiveChat.consent) }
                 IconButton(symbol: "doc.on.doc", help: "Copy the transcript") { copy(model.transcript.plainText) }
             }
             .background { Button("") { searching = true }.keyboardShortcut("f", modifiers: .command).opacity(0).accessibilityHidden(true) }
@@ -327,17 +335,12 @@ struct ScryLiveView: View {
         } else if lines.isEmpty, query.count >= 2 {
             Text("Nothing said matches “\(query)”.").textRole(.label, Theme.inkTertiary).frame(maxWidth: .infinity).padding(Theme.Space.xl)
         } else {
-            LazyVStack(alignment: .leading, spacing: Theme.Space.xs) {
-                ForEach(Array(lines.enumerated()), id: \.element.id) { i, l in
-                    // The name once per turn.
-                    if i == 0 || lines[i - 1].speaker != l.speaker { speaker(l).padding(.top, i == 0 ? 0 : Theme.Space.s) }
-                    bubble(l.text, mine: !l.far, faint: l.echo)
-                }
+            LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
+                ForEach(lines) { l in row(l) }
                 if query.count < 2 {
-                    ForEach([false, true], id: \.self) { far in
+                    ForEach([false, true], id: \.self) { far in   // You, then them
                         if let p = model.transcript.partial[far] {
-                            Text(far ? model.transcript.speaker(p, others: model.others) : "You").textRole(.label, Theme.inkTertiary).padding(.top, Theme.Space.s)
-                            bubble(p.text, mine: !far, faint: true)
+                            row(chip: chip(far ? model.transcript.speaker(p, others: model.others) : "You", you: !far), time: "now", text: p.text, faint: true)
                         }
                     }
                 }
@@ -347,9 +350,9 @@ struct ScryLiveView: View {
         }
     }
 
-    /// The name, with a menu to say who it is (yours is your mic: nothing to change).
-    @ViewBuilder private func speaker(_ l: ScryLiveTranscript.Line) -> some View {
-        HStack(spacing: Theme.Space.s) {
+    /// A far-side name opens the menu that says who it is (yours is your mic: nothing to change).
+    private func row(_ l: ScryLiveTranscript.Line) -> some View {
+        row(chip: Group {
             if l.far {
                 Menu {
                     let names = model.others.filter { $0 != l.speaker }
@@ -358,21 +361,28 @@ struct ScryLiveView: View {
                         Section("This line") { ForEach(names, id: \.self) { n in Button(n) { model.transcript.rename(l.id, to: n, everywhere: false) } } }
                     }
                     Button("Rename…") { newName = l.speaker == "Them" ? "" : l.speaker; naming = l }
-                } label: { Text(l.speaker).textRole(.label, Theme.inkSecondary) }
-                    .menuStyle(.borderlessButton).fixedSize().help("Say who this is")
-            } else {
-                Text("You").textRole(.label, Theme.ink)
-            }
-            Text(Self.clock(l.start)).textRole(.label, Theme.inkTertiary)
-        }
+                } label: { chip(l.speaker, you: false) }
+                    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().help("Say who this is")
+            } else { chip("You", you: true) }
+        }, time: Self.clock(l.start), text: l.text, faint: l.echo)
     }
 
-    private func bubble(_ text: String, mine: Bool, faint: Bool) -> some View {
-        Text(text).textRole(.body, faint ? Theme.inkTertiary : Theme.ink).italic(faint)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, mine ? Theme.Space.s : 0).padding(.vertical, mine ? Theme.Space.xs : 0)
-            .background(mine ? Theme.ink.over(Theme.surface, alpha: faint ? 0.04 : 0.10) : Theme.surface,
-                        in: RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
+    private func row(chip: some View, time: String, text: String, faint: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+            Text(time).textRole(.label, Theme.inkTertiary).frame(width: 40, alignment: .trailing)
+            chip.frame(minWidth: 64, alignment: .leading)   // one text column whatever the name's length
+            Text(text).textRole(.body, faint ? Theme.inkTertiary : Theme.ink).italic(faint)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Neutral chips: a shared hue on every other speaker carried no meaning. You = full ink. First names: the column is narrow.
+    private func chip(_ name: String, you: Bool) -> some View {
+        Text(name.split(separator: " ").first.map(String.init) ?? name).textRole(.micro, you ? Theme.ink : Theme.inkSecondary).lineLimit(1)
+            .padding(.horizontal, Theme.Space.xs + 2).padding(.vertical, 2)
+            .background(Theme.ink.over(Theme.surface, alpha: you ? 0.14 : 0.07), in: RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
+            .accessibilityLabel(name)
     }
 
     private func copy(_ text: String) {
@@ -418,7 +428,15 @@ struct ScryLiveView: View {
                 if model.chat.isEmpty {
                     Text("Ask about the call so far, or pick a skill. Answers use the transcript, your notes and the invite.")
                         .textRole(.label, Theme.inkTertiary)
-                    ForEach(ScryLiveChat.skills) { s in Button("/\(s.id)  \(s.title)") { send("/" + s.id) }.buttonStyle(QuietButtonStyle()) }
+                    ForEach(ScryLiveChat.groups, id: \.self) { g in
+                        let some = model.skills.filter { $0.group == g }
+                        if !some.isEmpty {
+                            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                                Text(g).textRole(.label, Theme.inkSecondary)
+                                ForEach(some) { s in Button("/\(s.id)  \(s.title)") { send("/" + s.id) }.buttonStyle(QuietButtonStyle()) }
+                            }
+                        }
+                    }
                 }
                 ForEach(model.chat) { c in
                     Text(c.question).textRole(.bodyEmph).textSelection(.enabled)
@@ -442,7 +460,12 @@ struct ScryLiveView: View {
 
     private var askField: some View {
         HStack(spacing: Theme.Space.s) {
-            Menu { ForEach(ScryLiveChat.skills) { s in Button(s.title) { send("/" + s.id) } } } label: { Image(systemName: "sparkles") }
+            Menu {
+                ForEach(ScryLiveChat.groups, id: \.self) { g in
+                    let some = model.skills.filter { $0.group == g }
+                    if !some.isEmpty { Section(g) { ForEach(some) { s in Button(s.title) { send("/" + s.id) } } } }
+                }
+            } label: { Image(systemName: "sparkles") }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Skills").accessibilityLabel("Skills")
             TextField("Ask anything, or type / for a skill", text: $question).textFieldStyle(.plain).textRole(.body).onSubmit { send(question) }
             Button("Ask") { send(question) }.buttonStyle(QuietButtonStyle())

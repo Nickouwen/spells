@@ -14,7 +14,7 @@ private func tempVault() throws -> URL {
 }
 
 @Test func opsRedactsWhatMustNeverReachTheVault() {
-    let r = ScryOps.redacted
+    func r(_ s: String) -> String { ScryOps.redacted(s) }
     #expect(r("SSN 123-45-6789 on file") == "SSN [removed] on file")
     #expect(r("her social security number is 123456789.") == "her social security number is [removed].")
     #expect(r("card 4111 1111 1111 1111 exp 09/28") == "card [removed] exp 09/28")
@@ -27,6 +27,16 @@ private func tempVault() throws -> URL {
     #expect(r("door PIN: 4471") == "door PIN: [removed]")
     #expect(r("key sk-ant-api03-abcdefghijklmnopqrstuvwx and xoxb-1234-5678-abcdefgh") == "key [removed] and [removed]")
     #expect(r("API key: 9f8e7d6c5b4a39281706f5e4") == "API key: [removed]")
+}
+
+@Test func savedNotesLeaveOutNumbersOnly() {
+    func r(_ s: String) -> String { ScryOps.redacted(s, numbersOnly: true) }
+    #expect(r("Do you need my social? It's 123-45-6789.") == "Do you need my social? It's [removed].")
+    #expect(r("my social is 123 45 6789") == "my social is [removed]" && r("Social: 123, 45, 6789") == "Social: [removed]")
+    #expect(r("card 4111 1111 1111 1111") == "card [removed]" && r("routing number 021000021") == "routing number [removed]")
+    #expect(r("call 864-555-0142, case 2026-CP-23-01234, $14,500") == "call 864-555-0142, case 2026-CP-23-01234, $14,500")
+    #expect(r("social media had 1,200 views in 2026") == "social media had 1,200 views in 2026")
+    #expect(r("the password is hunter2!") == "the password is hunter2!")   // not a number: your words stay
 }
 
 @Test func opsWritesOnlyInsideTheVault() throws {

@@ -81,7 +81,6 @@ import WardUI
             m.transcript.hear(far: far, s.text, at: s.start, speaking: i == 3 ? nil : s.speaker)
             m.transcript.commit(far: far, s.text, at: s.end, others: m.others)
         }
-        m.transcript.commit(far: false, "send you the return address by Friday", at: 24)   // echo: hidden
         m.transcript.hear(far: true, "and the second batch can go out once the", at: 30, speaking: "Alex")
         m.notes = "Ask about the return address"
         m.chat = [.init(question: "/email", answer: "To: alex@example.com\nSubject: Next steps\n\nHi Alex,\n\nThe mail is built. It stays off until we have your return address. You said you will send it by Friday.\n\nThanks,\nSam",

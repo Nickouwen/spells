@@ -75,7 +75,7 @@ import Testing
 
 @Test func skillsExpandAndAnythingElseIsTheQuestion() {
     #expect(ScryLiveChat.expand("/email to Ellen").hasSuffix("a line with only ---. to Ellen"))
-    #expect(ScryLiveChat.expand("/EMAIL") == ScryLiveChat.skills[0].prompt)
+    #expect(ScryLiveChat.expand("/EMAIL") == ScryLiveChat.builtIn[0].prompt)
     #expect(ScryLiveChat.expand(" What did Dana say? ") == "What did Dana say?")
     #expect(ScryLiveChat.expand("/nope x") == "/nope x" && ScryLiveChat.expand("/") == "/")
     let p = ScryLiveChat.prompt("Q", transcript: "[00:01] You: hi", notes: "", invite: .init(title: "Call", invitees: [.init(name: "Ellen", email: "e@x.example")]))
@@ -115,4 +115,51 @@ import Testing
     #expect(!s.liveOpen)
     s.liveOpen = true
     #expect(ScrySettings.load(s.rows) == s)
+}
+
+@Test func yourSkillsJoinTheBuiltInOnes() {
+    let all = ScryLiveChat.skills(custom: ["Seller recap: list the seller's worries", "email: my own email", "no prompt:", "not a skill", ": x"])
+    #expect(all.prefix(2).map(\.id) == ["seller-recap", "email"] && all.count == ScryLiveChat.builtIn.count + 1 && all[0].group == "Yours")
+    #expect(ScryLiveChat.expand("/seller-recap now", skills: all) == "list the seller's worries now")
+    #expect(ScryLiveChat.expand("/email", skills: all) == "my own email" && ScryLiveChat.expand("/slack", skills: all).contains("Slack"))
+    #expect(Set(ScryLiveChat.builtIn.map(\.group)).isSubset(of: ScryLiveChat.groups) && Set(ScryLiveChat.builtIn.map(\.id)).count == ScryLiveChat.builtIn.count)
+    var s = ScrySettings(); s.skills = ["a: b", "c: d: e"]
+    #expect(ScrySettings.load(s.rows) == s)
+}
+
+private let noteText = "---\ntitle: \"T\"\ndate: 2026-11-24\nstart: 2026-11-24T10:00:00Z\nend: 2026-11-24T10:05:00Z\nspeakers: {}\nsource: scry\n---\n\n# T\n\n## Summary\n\nAll good.\n\n---\n\n## Transcript\n\n**[00:01] You:** Hi.\n\n**[00:05] Dana:** Bye.\n"
+
+@Test func aFolderIsOneFrontmatterLineAndRoundTrips() throws {
+    let a = ScryNotes.foldered(noteText, "Sales \"A\"\nx")
+    #expect(a == noteText.replacingOccurrences(of: "source: scry\n", with: "source: scry\nfolder: \"Sales \\\"A\\\" x\"\n"))
+    let n = try #require(ScryNote.parse(a))
+    #expect(n.meta.folder == "Sales \"A\" x" && ScryNote.parse(n.markdown())?.meta.folder == n.meta.folder)   // kept when the note is rewritten
+    #expect(ScryNotes.foldered(ScryNotes.foldered(a, "B"), nil) == noteText && ScryNotes.foldered(a, " ") == noteText)
+    #expect(ScryNotes.foldered("no frontmatter", "B") == "no frontmatter")
+}
+
+@Test func sharingLeavesOutTheFrontmatterAndTheTranscriptUnlessAsked() {
+    #expect(ScryNotes.shared(noteText, transcript: false) == "# T\n\n## Summary\n\nAll good.\n\n---")
+    #expect(ScryNotes.shared(noteText, transcript: true).hasSuffix("**[00:05] Dana:** Bye.") && !ScryNotes.shared(noteText, transcript: true).contains("source: scry"))
+}
+
+@Test func undoOnlyWritesOverWhatTheEditLeft() throws {
+    let url = FileManager.default.temporaryDirectory.appending(path: "scry-undo-\(UUID().uuidString).md")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try noteText.write(to: url, atomically: true, encoding: .utf8)
+    let after = try #require(try ScryNotes.editLine(url, index: 1, old: .init(speaker: "Dana", start: 5, end: 300, text: "Bye."), speaker: "", text: nil)).markdown
+    #expect(after != noteText && !after.contains("Dana"))
+    _ = try ScryNotes.undo(url, before: noteText, after: after)
+    #expect(try String(contentsOf: url, encoding: .utf8) == noteText)
+    let edited = after + "\nmy own line\n"   // changed in Obsidian meanwhile
+    try edited.write(to: url, atomically: true, encoding: .utf8)
+    _ = try ScryNotes.undo(url, before: noteText, after: after)
+    #expect(try String(contentsOf: url, encoding: .utf8) == edited)
+}
+
+@Test func capturesKeepTheirPausesAndOldOnesHaveNone() throws {
+    let c = ScryCapture(audioFile: "a.wav", startedAt: Date(timeIntervalSince1970: 0), endedAt: Date(timeIntervalSince1970: 60), app: nil, screenshotText: [], userNotes: "", pauses: [[10, 20.5]])
+    #expect(try ScryCapture.decode(c.encoded()).pauses == [[10, 20.5]])
+    let old = #"{"audioFile":"a.wav","startedAt":"2026-11-24T10:00:00Z","endedAt":"2026-11-24T10:01:00Z","screenshotText":[],"userNotes":""}"#
+    #expect(try ScryCapture.decode(Data(old.utf8)).pauses == nil)
 }

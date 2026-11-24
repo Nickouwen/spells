@@ -18,8 +18,10 @@ public enum ScryPipeline {
         case claude(String)
         /// Not a fault: no words on either side and no notes typed, so there is nothing to write up.
         case nothingSaid
+        case recordingGone
         public var description: String {
             switch self {
+            case .recordingGone: "the recording is gone (it's kept for a week)"
             case .nothingSaid: "nobody spoke in the recording, so no note was made"
             case .noKey: "no ElevenLabs key (ELEVENLABS_API_KEY, Spells/.env or Keychain \(SupportKeychain.elevenLabs))"
             case let .scribe(status, body): "Scribe HTTP \(status): \(body)"
@@ -56,7 +58,18 @@ public enum ScryPipeline {
         }
     }
 
-    static func run(_ dir: URL, _ settings: ScrySettings, _ keyterms: [String]) async throws -> Result {
+    /// Transcribes a note's recording again, told how many people are on the far side, when the first pass heard two as
+    /// one. Writes a second note beside it. Throws when the recording is gone (it's kept for a week).
+    public static func separate(note: ScryNote, voices: Int, settings: ScrySettings, keyterms: [String]) async throws -> Result {
+        let dir = ScryCaptures.dirs(ScryCaptures.kept(.current())).first { d in
+            guard let c = try? ScryCapture.decode(Data(contentsOf: d.appending(path: "capture.json"))) else { return false }
+            return abs(c.startedAt.timeIntervalSince(note.meta.startedAt)) < 1.5
+        }
+        guard let dir else { throw Failure.recordingGone }
+        return try await run(dir, settings, keyterms, voices: voices)
+    }
+
+    static func run(_ dir: URL, _ settings: ScrySettings, _ keyterms: [String], voices: Int? = nil) async throws -> Result {
         let capture = try ScryCapture.decode(Data(contentsOf: dir.appending(path: "capture.json")))
         // Who was on the call: the Meet tab's participant tiles when the recorder could read them (exact names,
         // and who spoke when), else on-screen names completed from the calendar invite; nobody → the invitees.
@@ -80,18 +93,22 @@ public enum ScryPipeline {
         let json: Data, diarized: Bool
         if capture.app == nil {
             // Channel 0 only: channel 1 is silent in person, and averaging it in would halve the level.
-            json = try await scribe(mono(wav, channel: 0).wav, keyterms: terms, diarize: true); diarized = true
+            json = try await scribe(mono(wav, channel: 0).wav, keyterms: terms, diarize: true, voices: voices); diarized = true
         } else {
             let far = mono(wav, channel: 1)
             async let you = scribe(mono(wav, channel: 0).wav, keyterms: terms, diarize: false)
             // ponytail: RMS < 0.001 (~−60 dBFS) = nobody on the far side; skip paying to transcribe silence.
-            let them = far.rms < 0.001 ? nil : try await scribe(far.wav, keyterms: terms, diarize: true)
+            let them = far.rms < 0.001 ? nil : try await scribe(far.wav, keyterms: terms, diarize: true, voices: voices)
             json = try merged(you: try await you, farSide: them); diarized = them != nil
         }
         let scribeMs = ms(clock.now - t0)
         // On a call, how loud each side was tells the far side's echo in the mic from what you said.
         let levels = capture.app == nil ? nil : levels(wav)
-        let raw = try ScryTranscript.segments(fromScribeJSON: json, levels: levels)
+        // SSNs, card and bank numbers never reach the model or the note (the note is synced; the audio goes after a week).
+        let raw = try ScryTranscript.segments(fromScribeJSON: json, levels: levels).map { s in
+            var s = s; s.text = ScryOps.redacted(s.text, numbersOnly: true); return s
+        }
+        let userNotes = ScryOps.redacted(capture.userNotes, numbersOnly: true)
         // A call nobody spoke in (2026-11-10): asked for a summary of nothing, the model writes a note about an
         // empty transcript and a follow-up email asking what was said. Notes you typed are still worth a note.
         if raw.isEmpty, capture.userNotes.allSatisfy(\.isWhitespace) { throw Failure.nothingSaid }
@@ -106,13 +123,17 @@ public enum ScryPipeline {
         let segments = ScryTranscript.renamed(raw, known)
 
         let appName = capture.app.flatMap { ScryCallApps.known[$0] }
-        let prompt = ScryPrompt.summary(segments: segments, participants: names, userNotes: capture.userNotes,
+        let prompt = ScryPrompt.summary(segments: segments, participants: names, userNotes: userNotes,
                                         userName: settings.userName, appName: appName, startedAt: capture.startedAt,
                                         keyterms: terms, invite: capture.invite)
         t0 = clock.now
         var summary = try ScryPrompt.parseSummary(try await claude(prompt))
         if levels?.throughSpeakers == true {
             summary.insights.append("The call played through speakers, so the mic also heard the far side. Scry removed that echo from your lines.")
+        }
+        if let p = capture.pauses, !p.isEmpty {
+            func at(_ t: Double) -> String { String(format: "%02d:%02d", Int(t) / 60, Int(t) % 60) }
+            summary.insights.append("Recording paused: " + p.filter { $0.count == 2 }.map { "\(at($0[0]))–\(at($0[1]))" }.joined(separator: ", ") + ".")
         }
         let claudeMs = ms(clock.now - t0)
 
@@ -123,7 +144,7 @@ public enum ScryPipeline {
         }
         let note = ScryNote(meta: .init(startedAt: capture.startedAt, endedAt: capture.endedAt, app: appName,
                                         participants: participants, speakers: speakers),
-                            summary: summary, userNotes: capture.userNotes,
+                            summary: summary, userNotes: userNotes,
                             segments: ScryTranscript.renamed(segments, summary.speakers))
         let url = unique(ScryNote.fileURL(root: settings.rootURL, startedAt: capture.startedAt, title: summary.title))
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -134,13 +155,13 @@ public enum ScryPipeline {
 
     /// Re-summarizes a note from its own transcript with the current prompt and rewrites it in place: same
     /// times, participants, transcript and your notes; new title, summary and action items (ticks are lost).
-    public static func resummarize(note url: URL, settings: ScrySettings, keyterms: [String]) async throws -> ScrySummary {
+    public static func resummarize(note url: URL, settings: ScrySettings, keyterms: [String], language: String? = nil) async throws -> ScrySummary {
         guard let note = ScryNote.parse(try String(contentsOf: url, encoding: .utf8)), !note.segments.isEmpty else {
             throw Failure.claude("\(url.lastPathComponent) isn't a Scry note with a transcript")
         }
         let prompt = ScryPrompt.summary(segments: note.segments, participants: note.meta.participants, userNotes: note.userNotes,
                                         userName: settings.userName, appName: note.meta.app, startedAt: note.meta.startedAt,
-                                        keyterms: keyterms)
+                                        keyterms: keyterms, language: language)
         let summary = try ScryPrompt.parseSummary(try await claude(prompt))
         var meta = note.meta
         meta.speakers = meta.speakers.merging(summary.speakers) { a, _ in a }
@@ -161,9 +182,10 @@ public enum ScryPipeline {
     static func ms(_ d: Duration) -> Int { Int(d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000) }
 
     /// Multipart text fields + the file part's header; the WAV bytes and the closing boundary follow it.
-    static func multipartHead(boundary: String, keyterms: [String], diarize: Bool) -> Data {
+    static func multipartHead(boundary: String, keyterms: [String], diarize: Bool, voices: Int? = nil) -> Data {
         var fields = [("model_id", "scribe_v2"), ("no_verbatim", "true"), ("timestamps_granularity", "word"), ("tag_audio_events", "false")]
         if diarize { fields.append(("diarize", "true")) }
+        if diarize, let voices { fields.append(("num_speakers", String(voices))) }
         fields += keyterms.map { ("keyterms", $0) }
         var s = ""
         for (k, v) in fields { s += "--\(boundary)\r\nContent-Disposition: form-data; name=\"\(k)\"\r\n\r\n\(v)\r\n" }
@@ -173,12 +195,12 @@ public enum ScryPipeline {
 
     /// POSTs a mono WAV to Scribe v2 batch → the response JSON; non-200 throws status + body prefix. The
     /// multipart body is spooled to a temp file and uploaded from there.
-    static func scribe(_ wav: Data, keyterms: [String], diarize: Bool) async throws -> Data {
+    static func scribe(_ wav: Data, keyterms: [String], diarize: Bool, voices: Int? = nil) async throws -> Data {
         guard let key = SupportKeychain.read(SupportKeychain.elevenLabs) else { throw Failure.noKey }
         let boundary = "scry-\(UUID().uuidString)"
         let bodyURL = FileManager.default.temporaryDirectory.appending(path: "\(boundary).multipart")
         defer { try? FileManager.default.removeItem(at: bodyURL) }
-        FileManager.default.createFile(atPath: bodyURL.path, contents: multipartHead(boundary: boundary, keyterms: keyterms, diarize: diarize),
+        FileManager.default.createFile(atPath: bodyURL.path, contents: multipartHead(boundary: boundary, keyterms: keyterms, diarize: diarize, voices: voices),
                                        attributes: [.posixPermissions: 0o600])
         let h = try FileHandle(forWritingTo: bodyURL)
         try h.seekToEnd()
@@ -304,9 +326,10 @@ public enum ScryPipeline {
 /// The live panel's chat, answered by Haiku (a few seconds). Sensitive numbers are out of the transcript and the
 /// notes before they leave (`ScryOps.redacted`).
 public enum ScryLiveAsk {
-    public static func answer(_ question: String, transcript: ScryLiveTranscript, notes: String, invite: ScryInvite?) async throws -> String {
+    public static func answer(_ question: String, transcript: ScryLiveTranscript, notes: String, invite: ScryInvite?,
+                              skills: [ScryLiveChat.Skill] = ScryLiveChat.builtIn) async throws -> String {
         let text = transcript.segments.map { String(format: "[%02d:%02d] ", Int($0.start) / 60, Int($0.start) % 60) + "\($0.speaker): \($0.text)" }
-        let prompt = ScryLiveChat.prompt(ScryLiveChat.expand(question), transcript: ScryOps.redacted(text.joined(separator: "\n")),
+        let prompt = ScryLiveChat.prompt(ScryLiveChat.expand(question, skills: skills), transcript: ScryOps.redacted(text.joined(separator: "\n")),
                                          notes: ScryOps.redacted(notes), invite: invite)
         return try await ScryPipeline.claude(prompt, model: "haiku").trimmingCharacters(in: .whitespacesAndNewlines)
     }

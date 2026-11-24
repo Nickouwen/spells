@@ -46,6 +46,17 @@ public struct MeetingsView: View {
     @State private var lineText = ""
     @State private var lineSpeaker = ""
     @State private var askDelete = false
+    /// The last deleted line, until it's undone or another edit.
+    @State private var deleted: (url: URL, before: String, after: String)?
+    /// The folder the list shows; nil = all notes.
+    @State private var folder: String?
+    /// The note a new folder was asked for, and its name so far.
+    @State private var foldering: ScryNoteFile?
+    @State private var newFolder = ""
+    /// "Summarize Again": the note and the language, until confirmed. `working`: notes being redone.
+    @State private var redoing: (note: ScryNoteFile, language: String?)?
+    @State private var working: Set<URL> = []
+    @State private var workError: String?
     /// The open-action backlog shows its first few until asked; it grows with every meeting.
     @State private var showAllOpen = false
 
@@ -100,11 +111,22 @@ public struct MeetingsView: View {
     // MARK: List
 
     private func list(_ notes: [ScryNoteFile]) -> some View {
-        let open = notes.flatMap { n in n.actions.filter { !$0.done }.map { (id: "\(n.url.path)#\($0.line)", note: n, item: $0) } }
+        let folders = Set(notes.compactMap(\.note.meta.folder)).sorted()
+        let shown = folder.map { f in notes.filter { $0.note.meta.folder == f } } ?? notes
+        let open = shown.flatMap { n in n.actions.filter { !$0.done }.map { (id: "\(n.url.path)#\($0.line)", note: n, item: $0) } }
         let current = selection ?? notes.first?.url
         return ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 if !failed.isEmpty { failedCard }
+                if !folders.isEmpty {
+                    Picker("Folder", selection: $folder) {
+                        Text("All notes").tag(String?.none)
+                        ForEach(folders, id: \.self) { Text($0).tag(String?.some($0)) }
+                    }
+                    .labelsHidden()
+                    // The last note left it: show all rather than an empty list.
+                    .onChange(of: folders) { if let f = folder, !folders.contains(f) { folder = nil } }
+                }
                 if !open.isEmpty {
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         HStack(alignment: .firstTextBaseline) {
@@ -121,7 +143,7 @@ public struct MeetingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .card()
                 }
-                ForEach(Self.byDay(notes, timeZone: timeZone), id: \.day) { g in
+                ForEach(Self.byDay(shown, timeZone: timeZone), id: \.day) { g in
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         Text(Self.dayTitle(g.day, timeZone: timeZone)).textRole(.micro)
                         VStack(spacing: 0) {
@@ -143,7 +165,7 @@ public struct MeetingsView: View {
                     Spacer(minLength: Theme.Space.s)
                     if n.openCount > 0 { Text("\(n.openCount) open").textRole(.label, Theme.inkSecondary) }
                 }
-                Text(meta(n)).textRole(.label, Theme.inkTertiary).lineLimit(1)
+                Text(n.note.meta.folder.map { meta(n) + " · " + $0 } ?? meta(n)).textRole(.label, Theme.inkTertiary).lineLimit(1)
                 if !n.note.meta.participants.isEmpty {
                     Text(n.note.meta.participants.joined(separator: ", ")).textRole(.label, Theme.inkSecondary).lineLimit(1)
                 }
@@ -164,6 +186,7 @@ public struct MeetingsView: View {
         .contextMenu {
             Button("Open in Editor") { NSWorkspace.shared.open(n.url) }
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([n.url]) }
+            Menu("Folder") { folderItems(n) }
             Divider()
             Button("Delete Note…", role: .destructive) { deleting = n }
         }
@@ -225,8 +248,26 @@ public struct MeetingsView: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text(s.title).textRole(.title)
                         Spacer(minLength: Theme.Space.s)
+                        if working.contains(n.url) { ProgressView().controlSize(.small) }
+                        Menu("More") {
+                            Menu("Share") {
+                                ShareLink("Notes", item: ScryNotes.shared(n.markdown, transcript: false))
+                                ShareLink("Notes and Transcript", item: ScryNotes.shared(n.markdown, transcript: true))
+                            }
+                            Menu("Folder") { folderItems(n) }
+                            Menu("Summarize Again") {
+                                Button("In the Call's Language") { redoing = (n, nil) }
+                                Divider()
+                                ForEach(["English", "French", "Spanish", "Portuguese", "German"], id: \.self) { l in Button("In \(l)") { redoing = (n, l) } }
+                            }
+                            Menu("Separate Voices") {
+                                ForEach(2..<7) { k in Button("\(k) other people") { separate(n, voices: k) } }
+                            }
+                        }
+                        .menuStyle(.button).fixedSize().disabled(working.contains(n.url))
                         Button("Open in Editor") { NSWorkspace.shared.open(n.url) }.buttonStyle(RewindButtonStyle())
                     }
+                    if let workError { Text(workError).textRole(.label, Theme.StateLayer.distraction).fixedSize(horizontal: false, vertical: true) }
                     FlowLayout(spacing: Theme.Space.s) {
                         chip("calendar", "\(Self.dayTitle(Date(timeIntervalSince1970: Double(n.startMs) / 1000), timeZone: timeZone)) · \(Fmt.clock(ms: n.startMs, timeZone: timeZone))–\(Fmt.clock(ms: n.endMs, timeZone: timeZone))")
                         chip("clock", Fmt.duration(ms: n.endMs - n.startMs))
@@ -290,6 +331,57 @@ public struct MeetingsView: View {
         } message: {
             Text("Replaces “\(renaming ?? "")” throughout this note.")
         }
+        .alert("New folder", isPresented: Binding(get: { foldering != nil }, set: { if !$0 { foldering = nil } })) {
+            TextField("Name", text: $newFolder)
+            Button("Move") { if let f = foldering { move(f, to: newFolder) } }
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("Summarize this note again?", isPresented: Binding(get: { redoing != nil }, set: { if !$0 { redoing = nil } })) {
+            Button("Summarize") { if let r = redoing { resummarize(r.note, language: r.language) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("It replaces the title, summary, lists and action items, ticks included. The transcript and your notes stay.") }
+    }
+
+    @ViewBuilder private func folderItems(_ n: ScryNoteFile) -> some View {
+        ForEach(Set((notes ?? []).compactMap(\.note.meta.folder)).sorted(), id: \.self) { f in
+            Button(f == n.note.meta.folder ? "✓ \(f)" : f) { move(n, to: f) }
+        }
+        Button("New Folder…") { newFolder = ""; foldering = n }
+        if n.note.meta.folder != nil { Divider(); Button("Remove from Folder") { move(n, to: nil) } }
+    }
+
+    private func move(_ n: ScryNoteFile, to name: String?) {
+        let url = n.url
+        update(url) { try ScryNotes.setFolder(url, name) }
+    }
+
+    private func resummarize(_ n: ScryNoteFile, language: String?) {
+        work(n) { settings, terms in
+            _ = try await ScryPipeline.resummarize(note: n.url, settings: settings, keyterms: terms, language: language)
+            return n.url
+        }
+    }
+
+    /// The recording is transcribed again for that many people; the result is a second note, selected when it's done.
+    private func separate(_ n: ScryNoteFile, voices: Int) {
+        work(n) { settings, terms in try await ScryPipeline.separate(note: n.note, voices: voices, settings: settings, keyterms: terms).noteURL }
+    }
+
+    private func work(_ n: ScryNoteFile, _ body: @escaping @Sendable (ScrySettings, [String]) async throws -> URL) {
+        working.insert(n.url)
+        workError = nil
+        Task {
+            let rows = await Task.detached { ScryPipeline.settingRows() }.value
+            do {
+                let url = try await body(ScrySettings.load(rows), ScryPipeline.keyterms(rows))
+                await reload()
+                selection = url
+            } catch {
+                SupportLog.scry.error("scry note not redone: \(String(describing: error), privacy: .private)")
+                workError = "That didn't work: \(error)"
+            }
+            working.remove(n.url)
+        }
     }
 
     private func speakers(_ n: ScryNoteFile) -> some View {
@@ -328,6 +420,12 @@ public struct MeetingsView: View {
                 let hits = n.note.segments.indices.filter { i in
                     transcriptQuery.count < 2 || n.note.segments[i].text.localizedCaseInsensitiveContains(transcriptQuery)
                         || n.note.segments[i].speaker.localizedCaseInsensitiveContains(transcriptQuery)
+                }
+                if let d = deleted, d.url == n.url {
+                    HStack(spacing: Theme.Space.s) {
+                        Text("Line deleted.").textRole(.label, Theme.inkSecondary)
+                        Button("Undo") { deleted = nil; update(d.url) { try ScryNotes.undo(d.url, before: d.before, after: d.after) } }.buttonStyle(QuietButtonStyle())
+                    }
                 }
                 if hits.isEmpty { Text("Nothing said matches “\(transcriptQuery)”.").textRole(.label, Theme.inkTertiary) }
                 LazyVStack(alignment: .leading, spacing: Theme.Space.xs + 2) {
@@ -369,7 +467,7 @@ public struct MeetingsView: View {
         .alert("Delete this line?", isPresented: Binding(get: { editing != nil && askDelete }, set: { if !$0 { editing = nil } })) {
             Button("Delete", role: .destructive) { if let e = editing { edit(e.note, e.index, speaker: "", text: nil) } }
             Button("Cancel", role: .cancel) {}
-        } message: { Text("It leaves the note's transcript. The recording still has it for a week.") }
+        } message: { Text("You can undo it until your next edit.") }
     }
 
     private func copy(_ text: String) {
@@ -378,8 +476,13 @@ public struct MeetingsView: View {
     }
 
     private func edit(_ n: ScryNoteFile, _ i: Int, speaker: String, text: String?) {
-        let url = n.url, old = n.note.segments[i]
-        update(url) { try ScryNotes.editLine(url, index: i, old: old, speaker: speaker, text: text) }
+        let url = n.url, old = n.note.segments[i], before = n.markdown
+        deleted = nil
+        // Undo writes `before` back, so only when this delete is all that changed in the file.
+        let after = text == nil ? ScryNotes.editedLine(before, index: i, old: old, speaker: "", text: nil) : nil
+        update(url, then: { fresh in if let after, fresh.markdown == after { deleted = (url, before, after) } }) {
+            try ScryNotes.editLine(url, index: i, old: old, speaker: speaker, text: text)
+        }
     }
 
     private func card<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
@@ -600,12 +703,13 @@ public struct MeetingsView: View {
         update(url) { try ScryNotes.rename(url, from: from, to: to) }
     }
 
-    private func update(_ url: URL, _ body: @escaping @Sendable () throws -> ScryNoteFile?) {
+    private func update(_ url: URL, then: @escaping (ScryNoteFile) -> Void = { _ in }, _ body: @escaping @Sendable () throws -> ScryNoteFile?) {
         Task {
             do {
                 guard let fresh = try await Task.detached(priority: .userInitiated, operation: body).value,
                       let i = notes?.firstIndex(where: { $0.url == url }) else { return }
                 notes?[i] = fresh
+                then(fresh)
             } catch {
                 SupportLog.scry.error("scry note not saved: \(String(describing: error), privacy: .public)")
             }

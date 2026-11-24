@@ -38,9 +38,11 @@ Google needs an OAuth client of your own, once per organization:
 
 Click the recording pill, or turn on "Open the live panel when a recording starts". The transcript appears as people talk, and covers the call from the moment the panel opens. Names come from the Google Meet tab, or from being the only other person. Otherwise a line says "Them". Click a name to correct one line or all of them: the note uses it too. Your own lines that repeat the other side (speakers into the mic) are hidden, and one click shows them.
 
-**Ask** answers from the call so far. Type a question, or `/email`, `/actions`, `/ask`, `/summary`, `/translate`. SSN, card and bank numbers leave the text before it goes to the model. An email draft opens in Gmail with only the addresses someone gave. Nothing is sent without your click.
+**Ask** answers from the call so far. Type a question, or `/` and a skill: email, slack, notion, summary, actions, decisions, documents, contacts, ask, translate. Add your own in settings, one `name: what to do` per line. SSN, card and bank numbers leave the text before it goes to the model. An email draft opens in Gmail with only the addresses someone gave. Nothing is sent without your click.
 
-After the call, each transcript line in Meetings can be edited, given to another speaker, or deleted. **⌘Q** in Spells asks whether to quit the menu-bar modules too.
+Pause records silence until you resume, and the note says when. The hand button copies a consent notice for the meeting's chat.
+
+After the call, each transcript line in Meetings can be edited, given to another speaker, or deleted (with undo). A note's **More** menu shares it, files it in a folder, summarizes it again in another language, or transcribes the recording again for a number of voices. SSNs, card and bank numbers are left out of saved notes. **⌘Q** in Spells asks whether to quit the menu-bar modules too.
 
 ## Scry: push call items to a team vault
 

@@ -101,7 +101,7 @@ public enum ScryCaptures {
         }
     }
 
-    private static func dirs(_ root: URL) -> [URL] {
+    static func dirs(_ root: URL) -> [URL] {
         ((try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []).filter(\.hasDirectoryPath)
     }
     private static func has(_ d: URL, _ name: String) -> Bool { FileManager.default.fileExists(atPath: d.appending(path: name).path) }
