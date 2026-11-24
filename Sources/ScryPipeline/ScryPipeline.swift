@@ -118,7 +118,7 @@ public enum ScryPipeline {
         if raw.isEmpty, capture.userNotes.allSatisfy(\.isWhitespace) { throw Failure.nothingSaid }
         // Named before the summary, so its recap says "Alex", not "Speaker A": Meet's speaking indicator votes
         // first; with nothing from it, a lone far-side speaker is the one other person named.
-        let fromMeet = capture.app == nil ? [:] : ScryMeet.names(for: raw, hints: meet.hints + given.flatMap(\.hints), owner: settings.userName)
+        let fromMeet = capture.app == nil ? [:] : ScryMeet.names(for: raw, hints: meet.hints, owner: settings.userName, given: given.flatMap(\.hints))
         let sole = capture.app == nil || !fromMeet.isEmpty ? [:] : ScryNames.soleSpeaker(raw, names: names, userName: settings.userName)
         let known = fromMeet.merging(sole) { a, _ in a }
         if !meet.hints.isEmpty || !given.isEmpty {
@@ -137,7 +137,7 @@ public enum ScryPipeline {
         }
         if let p = capture.pauses, !p.isEmpty {
             func at(_ t: Double) -> String { String(format: "%02d:%02d", Int(t) / 60, Int(t) % 60) }
-            summary.insights.append("Recording paused: " + p.filter { $0.count == 2 }.map { "\(at($0[0]))–\(at($0[1]))" }.joined(separator: ", ") + ".")
+            summary.insights.append(pausePrefix + " " + p.filter { $0.count == 2 }.map { "\(at($0[0]))–\(at($0[1]))" }.joined(separator: ", ") + ".")
         }
         let claudeMs = ms(clock.now - t0)
 
@@ -162,6 +162,8 @@ public enum ScryPipeline {
         return Result(noteURL: url, summary: summary, scribeMs: scribeMs, claudeMs: claudeMs, diarized: diarized)
     }
 
+    private static let pausePrefix = "Recording paused:"
+
     /// Re-summarizes a note from its own transcript with the current prompt and rewrites it in place: same
     /// times, participants, transcript and your notes; new title, summary and action items (ticks are lost).
     public static func resummarize(note url: URL, settings: ScrySettings, keyterms: [String], language: String? = nil) async throws -> ScrySummary {
@@ -170,11 +172,13 @@ public enum ScryPipeline {
             throw Failure.claude("\(url.lastPathComponent) isn't a Scry note with a transcript")
         }
         // A note from before 2026-11-24 can still hold numbers: they don't go to the model.
+        let pauses = note.summary.insights.filter { $0.hasPrefix(pausePrefix) }
         let safe = zip(note.segments, ScryOps.redacted(turns: note.segments.map(\.text))).map { s, t in var s = s; s.text = t; return s }
         let prompt = ScryPrompt.summary(segments: safe, participants: note.meta.participants, userNotes: ScryOps.redacted(note.userNotes, numbersOnly: true),
                                         userName: settings.userName, appName: note.meta.app, startedAt: note.meta.startedAt,
                                         keyterms: keyterms, language: language)
-        let summary = try ScryPrompt.parseSummary(try await claude(prompt))
+        var summary = try ScryPrompt.parseSummary(try await claude(prompt))
+        summary.insights += pauses   // the model can't know these
         var meta = note.meta
         meta.speakers = meta.speakers.merging(summary.speakers) { a, _ in a }
         let spoken = ScryTranscript.renamed(note.segments, summary.speakers)
@@ -184,7 +188,7 @@ public enum ScryPipeline {
         let out = ScryNote(meta: meta, summary: summary, userNotes: note.userNotes, segments: spoken,
                            people: ScryPeople.merged(note.people.map { p in
                                p.role == .speaker ? ScryNotePerson(name: summary.speakers[p.name] ?? p.name, role: p.role, at: p.at, detail: p.detail, link: p.link) : p
-                           }, found))
+                           }, found.filter { f in !note.people.contains { $0.id == f.id } }))   // one you unlinked stays unlinked
         guard try String(contentsOf: url, encoding: .utf8) == before else { throw Failure.noteChanged }
         try Data(out.markdown().utf8).write(to: url, options: .atomic)
         return summary

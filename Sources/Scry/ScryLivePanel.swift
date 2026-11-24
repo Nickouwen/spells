@@ -32,6 +32,7 @@ import SwiftUI
         self.recorder = recorder; self.keyterms = keyterms; self.systemAudio = systemAudio; self.dir = dir
         started = startedAt; self.onStop = onStop; self.onDiscard = onDiscard
         model = ScryLiveModel(app: app, startedAt: startedAt)
+        model.onNamed = { [weak self] in self?.saveNames() }
     }
 
     static let notesFile = "notes.txt"
@@ -141,7 +142,7 @@ import SwiftUI
         Task {
             do {
                 let text = try await ScryLiveAsk.answer(question, transcript: transcript, notes: notes, invite: invite, skills: model.skills)
-                let known = ([transcript.plainText, notes] + (invite?.invitees.compactMap(\.email) ?? [])).joined(separator: "\n")
+                let known = ([transcript.plainText, notes, question] + (invite?.invitees.compactMap(\.email) ?? [])).joined(separator: "\n")
                 model.chat[i].answer = text
                 model.chat[i].gmail = ScryLiveChat.email(in: text, known: known)
                     .flatMap { ScryLiveChat.gmail(to: $0.to, cc: $0.cc, subject: $0.subject, body: $0.body) }
@@ -187,6 +188,13 @@ import SwiftUI
     var liveSince: Date?
     /// The mic's current level, 0…1.
     var level: Double = 0
+
+    /// After each name you give: kept straight away, like the notes.
+    var onNamed: () -> Void = {}
+    func rename(_ id: Int, to name: String, everywhere: Bool, person: String? = nil) {
+        transcript.rename(id, to: name, everywhere: everywhere, person: person)
+        onNamed()
+    }
 
     init(app: String?, startedAt: Date) { self.app = app; self.startedAt = startedAt }
 }
@@ -243,8 +251,8 @@ struct ScryLiveView: View {
         .onChange(of: model.notes) { _, _ in onNotesChanged() }
         .alert("Who is this?", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } }), presenting: naming) { l in
             TextField("Name", text: $newName)
-            Button("All “\(l.speaker)” lines") { model.transcript.rename(l.id, to: newName, everywhere: true) }
-            Button("This line") { model.transcript.rename(l.id, to: newName, everywhere: false) }
+            Button("All “\(l.speaker)” lines") { model.rename(l.id, to: newName, everywhere: true) }
+            Button("This line") { model.rename(l.id, to: newName, everywhere: false) }
             Button("Cancel", role: .cancel) {}
         } message: { _ in Text("Naming all their lines names them in the note too.") }
     }
@@ -359,12 +367,12 @@ struct ScryLiveView: View {
                 Menu {
                     let names = model.others.filter { $0 != l.speaker }
                     if !names.isEmpty {
-                        Section("All “\(l.speaker)” lines") { ForEach(names, id: \.self) { n in Button(n) { model.transcript.rename(l.id, to: n, everywhere: true) } } }
-                        Section("This line") { ForEach(names, id: \.self) { n in Button(n) { model.transcript.rename(l.id, to: n, everywhere: false) } } }
+                        Section("All “\(l.speaker)” lines") { ForEach(names, id: \.self) { n in Button(n) { model.rename(l.id, to: n, everywhere: true) } } }
+                        Section("This line") { ForEach(names, id: \.self) { n in Button(n) { model.rename(l.id, to: n, everywhere: false) } } }
                     }
-                    let known = model.known.filter { $0.name != l.speaker }
+                    let known = model.known
                     if !known.isEmpty {   // all their lines: a name you know is who they are for the whole call
-                        Menu("People You Know") { ForEach(known) { k in Button(k.name) { model.transcript.rename(l.id, to: k.name, everywhere: true, person: k.url.path) } } }
+                        Menu("People You Know") { ForEach(known) { k in Button(k.name) { model.rename(l.id, to: k.name, everywhere: true, person: k.url.path) } } }
                     }
                     Button("Rename…") { newName = l.speaker == "Them" ? "" : l.speaker; naming = l }
                 } label: { chip(l.speaker, you: false) }

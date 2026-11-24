@@ -4,7 +4,7 @@ import ScryCore
 
 /// Who is this? Search the people you know, likeliest first, or make a note for someone new.
 struct ScryPersonPicker: View {
-    enum Choice { case known(String, ScryPerson), new(String), unlinked(String), cancel }
+    enum Choice { case known(String, ScryPerson), new(said: String, name: String), unlinked(String), cancel }
     let person: ScryNotePerson
     let known: [ScryPerson]
     let canCreate: Bool
@@ -56,7 +56,7 @@ struct ScryPersonPicker: View {
             HStack(spacing: Theme.Space.s) {
                 if canCreate {
                     TextField("New person's full name", text: $newName).textFieldStyle(.roundedBorder).frame(width: 150)
-                    Button("New Person") { done(.new(newName.trimmingCharacters(in: .whitespaces))) }.buttonStyle(RewindButtonStyle())
+                    Button("New Person") { done(.new(said: called, name: newName.trimmingCharacters(in: .whitespaces))) }.buttonStyle(RewindButtonStyle())
                         .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 if adding, !called.isEmpty { Button("Add Without Link") { done(.unlinked(called)) }.buttonStyle(QuietButtonStyle()) }

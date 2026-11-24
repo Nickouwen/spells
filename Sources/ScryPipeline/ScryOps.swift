@@ -213,27 +213,45 @@ public enum ScryOps {
         return s
     }
 
-    /// A call's turns, numbers only: a number said a turn or two after its keyword ("account number?" … "1234567890") is
-    /// judged with them.
+    /// A call's turns, numbers only. A number said a turn or two after its keyword ("account number?" … "1234567890"), or
+    /// split between two turns, is found across them, and each turn loses its part.
     public static func redacted(turns: [String]) -> [String] {
-        turns.indices.map { i in
-            var text = redacted(turns[i], numbersOnly: true)
-            for back in 1...2 where i >= back {
-                let before = String(turns[i - back].suffix(60)).replacingOccurrences(of: "\n", with: " ") + "\n"
-                let both = redacted(before + text, numbersOnly: true)
-                // Only what changed in this turn: its keyword part was judged as its own turn.
-                if let cut = both.range(of: "\n") { text = String(both[cut.upperBound...]) }
+        var cuts = [[NSRange]](repeating: [], count: turns.count)
+        for i in turns.indices {
+            for k in 0...2 where k <= i {
+                let head = k == 0 ? "" : turns[i - k] + "\n", start = (head as NSString).length
+                for m in numbers(in: head + turns[i]) {
+                    let tail = NSRange(location: max(m.location, start), length: max(0, NSMaxRange(m) - max(m.location, start)))
+                    if tail.length > 0 { cuts[i].append(NSRange(location: tail.location - start, length: tail.length)) }
+                    let front = NSRange(location: m.location, length: max(0, min(NSMaxRange(m), start - 1) - m.location))
+                    if k > 0, front.length > 0, tail.length > 0 { cuts[i - k].append(front) }
+                }
             }
-            return text
+        }
+        return zip(turns, cuts).map { turn, ranges in
+            var s = turn
+            // Last first, overlaps as one.
+            for r in ranges.sorted(by: { $0.location < $1.location }).reduce(into: [NSRange]()) { out, r in
+                if let l = out.last, r.location <= NSMaxRange(l) { out[out.count - 1] = NSUnionRange(l, r) } else { out.append(r) }
+            }.reversed() { if let x = Range(r, in: s) { s.replaceSubrange(x, with: "[removed]") } }
+            return s
         }
     }
+
+    private static func numbers(in s: String) -> [NSRange] {
+        let ns = s as NSString
+        return numberPatterns.flatMap { re, group, check in
+            re.matches(in: s, range: NSRange(location: 0, length: ns.length)).map { $0.range(at: group) }.filter { check(ns.substring(with: $0)) }
+        }
+    }
+    private static let numberPatterns = rules.prefix(numberRules).map { (try! NSRegularExpression(pattern: $0.0), $0.1, $0.2) }
 
     /// The first `numberRules` are the numbers.
     private static let numberRules = 4
     private static let rules: [(String, Int, @Sendable (String) -> Bool)] = [
         (#"\b\d{3}-\d{2}-\d{4}\b"#, 0, { _ in true }),
         (#"(?i)\b(?:ssn|social(?: security)?(?: number)?)\D{0,12}(\d{3}[\s.,-]{0,2}\d{2}[\s.,-]{0,2}\d{4})\b"#, 1, { _ in true }),
-        (#"\b\d(?:[ -]?\d){12,18}\b"#, 0, luhn),
+        (#"\b\d(?:[\s-]?\d){12,18}\b"#, 0, luhn),
         (#"(?i)\b(?:account|acct|routing|aba|iban)(?:\s+(?:number|no\.?|num|#))?[?.,;]?\s*(?:is\s+|it'?s\s+|[:#=]\s*)?([A-Z]{2}\d{2}[A-Z0-9]{8,30}|\d(?:[ -]?\d){5,19})\b"#, 1, { _ in true }),
         (#"(?i)\b(?:password|passcode|passwd|pwd)\s*(?:is\s+|[:=]\s*)["'“]?([^\s"'”]{4,})"#, 1, { v in v.contains { !$0.isLetter } }),
         (#"(?i)\bpin(?:\s+code)?\s*(?:is\s+|[:=]\s*)?(\d{4,8})\b"#, 1, { _ in true }),

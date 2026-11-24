@@ -99,6 +99,17 @@ private func md(_ extra: String = "") -> String {
     #expect(ScryNotes.shared(n.markdown, transcript: false).contains("- **Dana** (speaker) · seller\n") && !ScryNotes.shared(n.markdown, transcript: true).contains("[[People"))
 }
 
+@Test func aSpeakerWithNoLinesLeftHasNoRowAndOtherSectionsAreLeftAlone() throws {
+    let v = try vault(); defer { try? FileManager.default.removeItem(at: v) }
+    let url = v.appending(path: "calls/s.md")
+    try md("## People\n\n- **Dana** (speaker)\n- **Zoe** (speaker)\n\n## Your notes\n\n- **Dana** (speaker)\n\n").replacingOccurrences(of: "**[00:09] Dana:**", with: "**[00:09] Zoe:**").write(to: url, atomically: true, encoding: .utf8)
+    let n = try #require(try ScryNotes.rename(url, from: "Dana", to: "Dana W"))
+    #expect(n.note.people.map(\.name) == ["Dana W", "Zoe"] && n.note.userNotes == "- **Dana** (speaker)")   // your own words stay
+    let i = try #require(n.note.segments.firstIndex { $0.speaker == "Zoe" })
+    let e = try #require(try ScryNotes.editLine(url, index: i, old: n.note.segments[i], speaker: "Dana W", text: n.note.segments[i].text))
+    #expect(e.note.people.map(\.name) == ["Dana W"])
+}
+
 @Test func linksOutsideTheVaultAreFileLinksAndOddNamesStillWork() throws {
     let v = try vault(); defer { try? FileManager.default.removeItem(at: v) }
     let out = FileManager.default.temporaryDirectory.appending(path: "elsewhere-\(UUID().uuidString).md")

@@ -22,10 +22,10 @@ import notify
     // Collapsed ears.
     private let earRing = TrackerIslandRingView(lineWidth: 2.25)
     private let earDot = TrackerIslandDotView()
-    private let earWarn = NSImageView()
+    private let earWarn = TrackerIslandWarnView()
     private let earTime = TrackerIslandLabel(font: TrackerIsland.earFont, color: TrackerIslandPalette.ink)
     // Expanded card.
-    private let card = NSView()
+    private let card = TrackerIslandCardView()
     private let eyebrow = TrackerIslandLabel(font: .systemFont(ofSize: 11, weight: .semibold), color: TrackerIslandPalette.inkSecondary)
     private let state = TrackerIslandLabel(font: .systemFont(ofSize: 11, weight: .semibold), color: TrackerIslandPalette.inkSecondary)
     private let hero = TrackerIslandLabel(font: .monospacedDigitSystemFont(ofSize: 30, weight: .light), color: TrackerIslandPalette.ink)

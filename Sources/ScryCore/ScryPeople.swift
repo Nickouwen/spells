@@ -73,7 +73,7 @@ public enum ScryPeople {
                 }
             }
         }
-        if let t = fm["type"]?.first, t.lowercased() != "person" { return nil }
+        if let t = fm["type"]?.first, !["person", "people", "contact"].contains(t.lowercased()) { return nil }
         let file = url.deletingPathExtension().lastPathComponent, name = bare(file)
         guard !name.isEmpty else { return nil }
         let heading = lines.first { $0.hasPrefix("# ") }.map { bare(String($0.dropFirst(2))) }
@@ -232,7 +232,7 @@ public enum ScryPeople {
         return lines.joined(separator: "\n")
     }
 
-    private static func rows(in md: String) -> [(line: Int, person: ScryNotePerson)] {
+    static func rows(in md: String) -> [(line: Int, person: ScryNotePerson)] {
         let lines = md.components(separatedBy: "\n"), head = lines.firstIndex(of: "## Transcript") ?? lines.count
         guard let start = lines[..<head].firstIndex(of: "## People") else { return [] }
         let end = lines[(start + 1)...].firstIndex { $0.hasPrefix("## ") } ?? lines.count

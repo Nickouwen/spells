@@ -51,7 +51,8 @@ public struct ScryLiveTranscript: Equatable, Sendable {
             if let last = parts.last, last.echo == echo { parts[parts.count - 1].text += " " + s } else { parts.append((s, echo)) }
         }
         for part in parts {
-            let line = Line(id: nextID, far: far, speaker: far ? aliases[name] ?? name : name, start: p.start, end: t, text: part.text, heard: p.heard, echo: part.echo)
+            var line = Line(id: nextID, far: far, speaker: far ? aliases[name] ?? name : name, start: p.start, end: t, text: part.text, heard: p.heard, echo: part.echo)
+            line.byHand = far && aliases[name] != nil   // you named this voice: every line of it counts
             lines.insert(line, at: (lines.lastIndex { $0.start <= p.start } ?? -1) + 1)   // in the order people started
             nextID += 1
         }
@@ -73,7 +74,7 @@ public struct ScryLiveTranscript: Equatable, Sendable {
             lines[i].speaker = name; lines[i].byHand = everywhere
         }
         guard everywhere else { return }
-        picked[name] = person
+        picked[name] = person ?? picked[line.speaker]   // a new spelling is the same person
         for (k, v) in aliases where v == line.speaker { aliases[k] = name }
         aliases[line.speaker] = name
     }
@@ -97,16 +98,22 @@ public struct ScryLiveTranscript: Equatable, Sendable {
         let mine = Self.words(text)
         guard !mine.isEmpty, !mine.allSatisfy(ScryTranscript.answers.contains) else { return false }
         let far = Self.words((lines.filter { $0.far && $0.heard + 0.2 >= start }.map(\.text) + [partial[true]?.text ?? ""]).joined(separator: " "))
-        var best = [Int](repeating: 0, count: far.count + 1)   // longest common subsequence
-        for w in mine {
-            var diagonal = 0
-            for j in far.indices {
-                let above = best[j + 1]
-                best[j + 1] = far[j] == w ? diagonal + 1 : max(above, best[j])
-                diagonal = above
+        // Echo is one stretch of what they said: not words of yours picked out of a long speech.
+        let span = mine.count * 2
+        for from in stride(from: 0, through: max(0, far.count - 1), by: max(1, mine.count / 2)) {
+            var best = [Int](repeating: 0, count: span + 1)   // longest common subsequence
+            let window = far[from..<min(from + span, far.count)]
+            for w in mine {
+                var diagonal = 0
+                for (j, f) in window.enumerated() {
+                    let above = best[j + 1]
+                    best[j + 1] = f == w ? diagonal + 1 : max(above, best[j])
+                    diagonal = above
+                }
             }
+            if best[window.count] * 4 >= mine.count * 3 { return true }
         }
-        return best.last! * 4 >= mine.count * 3
+        return false
     }
 
     private static func sentences(_ s: String) -> [String] {
@@ -231,7 +238,7 @@ public enum ScryLiveChat {
     /// Whole addresses only: a piece of a longer one ("billing@x.com" in "mary!billing@x.com") is someone else's.
     static func addresses(_ text: String) -> [String] {
         text.split { $0.isWhitespace || "<>()[]{},;:\"“”".contains($0) }
-            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".?*_")) }
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".?!*")) }
             .filter { $0.wholeMatch(of: #/[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+/#) != nil }
     }
 

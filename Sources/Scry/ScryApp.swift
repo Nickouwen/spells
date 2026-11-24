@@ -196,11 +196,13 @@ import UserNotifications
                 s.live?.onPause = { [weak self] in self?.togglePause() }
                 s.live?.who = { [weak s] in
                     guard let s else { return (nil, []) }
-                    // Meet doesn't always mark your own tile, and a first name alone could be a colleague's: it only keeps
-                    // a line from getting your name.
-                    let mine = [s.settings.userName, NSFullUserName()]
+                    // Meet doesn't always mark your own tile. While nothing says which name is yours, one with your first
+                    // name is left out rather than put on someone else's line.
+                    let exact = [s.meet?.selfName, s.settings.userName == ScrySettings().userName ? nil : s.settings.userName].compactMap { $0?.lowercased() }
                     if let people = s.meet?.participants, !people.isEmpty {
-                        let speaking = s.meet?.speaking.flatMap { n in mine.contains { ScryNames.sameFirstName($0, n) } ? nil : n }
+                        let speaking = s.meet?.speaking.flatMap { n in
+                            (exact.isEmpty ? ScryNames.sameFirstName(NSFullUserName(), n) : exact.contains(n.lowercased())) ? nil : n
+                        }
                         return (speaking, ScryNames.others(people, selfName: s.meet?.selfName, userName: s.settings.userName) ?? [])
                     }
                     return (nil, ScryNames.soleInvitee(s.invite, onScreen: s.onScreen, userName: s.settings.userName).map { [$0] } ?? [])

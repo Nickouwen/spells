@@ -95,7 +95,7 @@ import Testing
     #expect(e.to == ["ellen@parklaw.example"] && e.cc == ["dana.w@example.com"] && e.subject == "Next steps & more" && e.body == "Hi Ellen,\n\n100% agreed?")
     // An address inside another isn't the one that was given, and a piece of an odd one is nobody's.
     #expect(ScryLiveChat.email(in: "To: billing@example.com\nSubject: x\n\ny", known: "it's mary!billing@example.com")?.to == [])
-    #expect(ScryLiveChat.addresses("Mail <a.b@x.com>, (c@y.org); d@z.io.") == ["a.b@x.com", "c@y.org", "d@z.io"])
+    #expect(ScryLiveChat.addresses("Mail <a.b@x.com>, (c@y.org); d@z.io. _anna@x.com") == ["a.b@x.com", "c@y.org", "d@z.io", "_anna@x.com"])
     #expect(ScryLiveChat.email(in: "To: w@example.com\nSubject: x\n\ny", known: "dana.w@example.com")?.to == [])
     #expect(ScryLiveChat.email(in: "No email here.", known: "") == nil)
     let url = try #require(ScryLiveChat.gmail(to: e.to, cc: e.cc, subject: e.subject, body: e.body)?.absoluteString)
@@ -110,6 +110,8 @@ import Testing
     #expect(ScryNotes.editedLine(md, index: 1, old: old, speaker: "", text: nil) == md.replacingOccurrences(of: "**[00:05] Speaker A:** Hello there.\n\n", with: ""))
     #expect(ScryNotes.editedLine(md, index: 2, old: old, speaker: "Dana", text: "x") == nil)   // changed on disk meanwhile
     #expect(ScryNotes.editedLine(md, index: 1, old: old, speaker: "Dana", text: "  ") == nil)
+    let same = md.replacingOccurrences(of: "## Transcript\n\n", with: "## Transcript\n\n**[00:00] You:** Hi.\n\n")   // one more just like it, before
+    #expect(ScryNotes.editedLine(same, index: 0, old: .init(speaker: "You", start: 1, end: 5, text: "Hi."), speaker: "", text: nil) == nil)
     #expect(ScryNotes.editedLine(md, index: 9, old: old, speaker: "Dana", text: "x") == nil)
 }
 
@@ -119,6 +121,31 @@ import Testing
             && !ScryNames.sameFirstName("Al", "Alex") && !ScryNames.sameFirstName("", "Alex"))
 }
 
+@Test func aNameGivenEarlyCoversTheWholeVoiceAndOutlivesANewSpelling() throws {
+    var t = ScryLiveTranscript()
+    func say(_ at: Double) { t.hear(far: true, "x y z", at: at, speaking: "Dana W"); t.commit(far: true, "x y z", at: at + 8) }
+    say(0); t.rename(0, to: "Dana Whitfield", everywhere: true, person: "/p/Dana.md")
+    for i in 1..<10 { say(Double(i * 20)) }
+    let seg = t.lines.map { ScrySegment(speaker: "Speaker A", start: $0.start, end: $0.end, text: "x") }
+    let marker = stride(from: 0.0, to: 190, by: 0.5).map { ScryMeet.Hint(t: $0, name: "Dana W") }
+    #expect(ScryMeet.names(for: seg, hints: marker, owner: "Nic", given: t.given.flatMap(\.hints)) == ["Speaker A": "Dana Whitfield"])
+    t.rename(3, to: "Dana", everywhere: true)
+    #expect(Set(t.given.map(\.name)) == ["Dana"] && t.given.allSatisfy { $0.person == "/p/Dana.md" })
+    // A name you gave is never taken for yours, even with your first name.
+    let b = [ScrySegment(speaker: "Speaker B", start: 0, end: 9, text: "x")], hints = stride(from: 0.0, to: 9, by: 0.5).map { ScryMeet.Hint(t: $0, name: "Sam Okafor") }
+    #expect(ScryMeet.names(for: b, hints: hints, owner: "Sam Rivera").isEmpty && ScryMeet.names(for: b, hints: [], owner: "Sam Rivera", given: hints) == ["Speaker B": "Sam Okafor"])
+}
+
+@Test func yourSentenceOverALongSpeechIsNotEcho() {
+    var t = ScryLiveTranscript()
+    let speech = "I think that the house on the corner is fine and the bank works with us most days so if you ask me it is all good for now"
+    t.hear(far: true, "I think that", at: 0); t.hear(far: false, "That works", at: 3)
+    t.hear(far: true, speech, at: 12); t.commit(far: true, speech, at: 13)
+    t.commit(far: false, "That works for me.", at: 14)
+    t.hear(far: false, "the bank", at: 5); t.commit(far: false, "the bank works with us most days", at: 14.2)
+    #expect(t.lines.filter { !$0.far }.map(\.echo) == [false, true])
+}
+
 @Test func theOnlyOtherPersonIsNeverAGuess() {
     #expect(ScryNames.others(["Sam Rivera", "Samantha Lee", "Bob"], selfName: nil, userName: "Sam Rivera") == ["Samantha Lee", "Bob"])
     #expect(ScryNames.others(["Samantha Lee", "Bob"], selfName: nil, userName: "Sam") == nil)           // your tile isn't there: not sure
@@ -126,7 +153,8 @@ import Testing
     #expect(ScryNames.others(["Dan", "Dana"], selfName: "Dan", userName: "You") == ["Dana"])
     let one = ScryInvite(title: "T", invitees: [.init(name: "Dana Whitfield", email: nil)])
     let two = ScryInvite(title: "T", invitees: one.invitees + [.init(name: "Ellen Park", email: nil)])
-    #expect(ScryNames.soleInvitee(one, onScreen: ["Dana Whitfield", "Mute"], userName: "You") == "Dana Whitfield")
+    #expect(ScryNames.soleInvitee(one, onScreen: ["Dana Whitfield", "Sam Rivera"], userName: "Sam Rivera") == "Dana Whitfield")
+    #expect(ScryNames.soleInvitee(one, onScreen: ["Dana Whitfield", "Uninvited Guest"], userName: "Sam Rivera") == nil)
     #expect(ScryNames.soleInvitee(one, onScreen: ["Dana"], userName: "You") == nil && ScryNames.soleInvitee(nil, onScreen: ["Dana"], userName: "You") == nil)
     #expect(ScryNames.soleInvitee(two, onScreen: ["Dana Whitfield"], userName: "You") == nil)            // the other may be speaking
     #expect(ScryNames.soleInvitee(two, onScreen: ["Dana Whitfield"], userName: "Ellen Park") == "Dana Whitfield")

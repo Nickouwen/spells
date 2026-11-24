@@ -157,7 +157,8 @@ import SpellsKit
         CATransaction.begin()
         CATransaction.setCompletionBlock { MainActor.assumeIsolated { then() } }
         let a = CABasicAnimation(keyPath: reduceMotion ? "opacity" : "transform.translation.y")   // Reduce Motion: a fade
-        a.fromValue = reduceMotion ? (y == 0 ? 0 : 1) : now
+        let fading = moving ? layer.presentation()?.opacity ?? 1 : y == 0 ? 0 : 1
+        a.fromValue = reduceMotion ? CGFloat(fading) : now
         a.toValue = reduceMotion ? (y == 0 ? 1 : 0) : y
         a.duration = reduceMotion ? 0.12 : duration
         a.timingFunction = Self.easeOut

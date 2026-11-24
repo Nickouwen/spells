@@ -460,6 +460,7 @@ public enum ScryTranscript {
         enum Verdict { case mine, echo, unsure }
         let mine = segments.indices.filter { segments[$0].speaker == "You" }
         let score = mine.map { levels.score(start: segments[$0].start, end: segments[$0].end) }
+        var alone: Set<Int> = []   // echo by the same-word rule: says nothing about the words around it
         var verdict: [Verdict] = mine.indices.map { k in
             let w = segments[mine[k]]
             guard !farWords(w.start - 3, w.start + 3).isEmpty else { return .mine }
@@ -468,7 +469,7 @@ public enum ScryTranscript {
             let word = normalized(w.text)
             if !word.isEmpty, !answers.contains(word),
                farWords(w.start - 0.16, w.start - 0.02).contains(where: { normalized($0.text) == word }),
-               levels.scoreNow(start: w.start, end: w.end) < Self.nowLimit { return .echo }
+               levels.scoreNow(start: w.start, end: w.end) < Self.nowLimit, score[k] >= 0 { alone.insert(k); return .echo }
             return score[k] >= 20 ? .mine : score[k] < 0 ? .echo : .unsure
         }
         for k in mine.indices.dropLast() where verdict[k] == .unsure || verdict[k + 1] == .unsure {
@@ -484,7 +485,7 @@ public enum ScryTranscript {
             var end = k
             while end + 1 < mine.count, verdict[end + 1] == .unsure { end += 1 }
             func echo(_ j: Int, near i: Int) -> Bool {
-                mine.indices.contains(j) && verdict[j] == .echo && abs(segments[mine[j]].start - segments[mine[i]].start) < 3
+                mine.indices.contains(j) && verdict[j] == .echo && !alone.contains(j) && abs(segments[mine[j]].start - segments[mine[i]].start) < 3
             }
             let mean = score[k...end].reduce(0, +) / Double(end - k + 1)
             let isEcho = echo(k - 1, near: k) && echo(end + 1, near: end) && mean < 8
@@ -1058,7 +1059,9 @@ public enum ScryNames {
     /// Outside Meet: the one other person invited, when the screen shows them.
     public static func soleInvitee(_ invite: ScryInvite?, onScreen: [String], userName: String) -> String? {
         let others = (invite?.invitees.map(\.name) ?? []).filter { $0.lowercased() != userName.lowercased() }
-        guard others.count == 1, onScreen.contains(where: { $0.lowercased() == others[0].lowercased() }) else { return nil }
+        let seen = onScreen.filter { $0.lowercased() != userName.lowercased() }
+        // Anyone else on screen, invited or not, may be the one speaking.
+        guard others.count == 1, !seen.isEmpty, seen.allSatisfy({ $0.lowercased() == others[0].lowercased() }) else { return nil }
         return others[0]
     }
 

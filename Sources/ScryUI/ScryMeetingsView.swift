@@ -349,7 +349,7 @@ public struct MeetingsView: View {
                     linking = nil
                     switch choice {
                     case .known(let name, let p): link(l.note, l.person, as: name, to: p)
-                    case .new(let name): create(l.note, l.person, as: name)
+                    case .new(let said, let name): create(l.note, l.person, said: said, as: name)
                     case .unlinked(let name): mention(l.note, l.person, as: name)
                     case .cancel: break
                     }
@@ -421,14 +421,14 @@ public struct MeetingsView: View {
         update(url, undo: "\(p.name) added.") { try ScryNotes.addMention(url, p) }
     }
 
-    private func create(_ n: ScryNoteFile, _ p: ScryNotePerson, as name: String) {
+    private func create(_ n: ScryNoteFile, _ p: ScryNotePerson, said: String, as name: String) {
         guard let folder = peopleFolders.first else { return }
         let url = n.url, date = ISO8601DateFormatter.string(from: Date(), timeZone: timeZone, formatOptions: [.withFullDate])
         Task {
             do {
                 let who = try await Task.detached { try ScryPeople.create(name, email: nil, detail: p.detail, from: url, in: folder, date: date) }.value
                 known = ((known ?? []) + [who]).sorted { $0.name < $1.name }
-                link(n, p, as: p.name.isEmpty ? name : p.name, to: who)
+                link(n, p, as: said.isEmpty ? name : said, to: who)
             } catch {
                 SupportLog.scry.error("person note not made: \(String(describing: error), privacy: .private)")
                 workError = (error as? CocoaError)?.code == .fileWriteFileExists ? "A note named “\(name)” is already there. Choose it instead." : "Couldn't make the note: \(error.localizedDescription)"
@@ -568,7 +568,9 @@ public struct MeetingsView: View {
 
     private func edit(_ n: ScryNoteFile, _ i: Int, speaker: String, text: String?) {
         let url = n.url, old = n.note.segments[i]
-        update(url, undo: text == nil ? "Line deleted." : "Line changed.") { try ScryNotes.editLine(url, index: i, old: old, speaker: speaker, text: text) }
+        update(url, undo: text == nil ? "Line deleted." : "Line changed.") {
+            try ScryNotes.editLine(url, index: i, old: old, speaker: speaker, text: text.map { ScryOps.redacted($0, numbersOnly: true) })
+        }
     }
 
     private func card<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {

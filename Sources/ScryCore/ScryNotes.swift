@@ -120,14 +120,15 @@ public enum ScryNotes {
 
     public static func renamedText(_ md: String, from: String, to: String) -> String {
         var inFront = false, frontSeen = false
-        let lines = md.components(separatedBy: "\n").map { line -> String in
+        let rows = Set(ScryPeople.rows(in: md).map(\.line))
+        let lines = md.components(separatedBy: "\n").enumerated().map { i, line -> String in
             if line == "---" { if !frontSeen { inFront = true; frontSeen = true } else if inFront { inFront = false }; return line }
             if inFront, line.hasPrefix("speakers:") { return renamedSpeakersLine(line, from: from, to: to) }
             if let r = line.range(of: #"^\*\*\[\d+:\d\d\] "#, options: .regularExpression),
                line[r.upperBound...].hasPrefix(from + ":**") {
                 return String(line[..<r.upperBound]) + to + line[line.index(r.upperBound, offsetBy: from.count)...]
             }
-            if let p = ScryNotePerson.parse(line), p.role == .speaker, p.name == from {
+            if rows.contains(i), let p = ScryNotePerson.parse(line), p.role == .speaker, p.name == from {
                 return ScryNotePerson(name: to, role: .speaker, at: p.at, detail: p.detail, link: p.link).markdown
             }
             if line.range(of: #"^\s*- \[[ xX]\] "#, options: .regularExpression) != nil {
@@ -189,10 +190,9 @@ public enum ScryNotes {
     /// The note to share: no frontmatter, and the transcript only when asked.
     public static func shared(_ md: String, transcript: Bool) -> String {
         var lines = md.components(separatedBy: "\n")
-        if lines.first == "---", let close = lines.dropFirst().firstIndex(of: "---") { lines.removeSubrange(...close) }
+        for row in ScryPeople.rows(in: md) { var p = row.person; p.link = nil; lines[row.line] = p.markdown }   // who you know, and where their notes are, stays here
         if !transcript, let t = lines.lastIndex(of: "## Transcript") { lines.removeSubrange(t...) }
-        // Who you know, and where their notes are, stays here.
-        lines = lines.map { l in ScryNotePerson.parse(l).map { p in var p = p; p.link = nil; return p.markdown } ?? l }
+        if lines.first == "---", let close = lines.dropFirst().firstIndex(of: "---") { lines.removeSubrange(...close) }
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -200,7 +200,11 @@ public enum ScryNotes {
     /// its old speaker and words; changed meanwhile → throws and nothing is written.
     public static func editLine(_ url: URL, index: Int, old: ScrySegment, speaker: String, text: String?) throws -> ScryNoteFile? {
         let fresh = try String(contentsOf: url, encoding: .utf8)
-        guard let out = editedLine(fresh, index: index, old: old, speaker: speaker, text: text) else { throw Changed() }
+        guard var out = editedLine(fresh, index: index, old: old, speaker: speaker, text: text) else { throw Changed() }
+        // Their last line went to someone else, or went: so does their row.
+        if let n = ScryNote.parse(out), !n.segments.contains(where: { $0.speaker == old.speaker }) {
+            out = ScryPeople.removing(ScryNotePerson(name: old.speaker, role: .speaker), from: out)
+        }
         return try write(out, to: url)
     }
 
@@ -210,7 +214,8 @@ public enum ScryNotes {
         let turns = lines.indices.filter { $0 > start && lines[$0].range(of: #"^\*\*\[\d+:\d\d\] "#, options: .regularExpression) != nil }
         guard turns.indices.contains(index) else { return nil }
         let i = turns[index], stamp = lines[i].prefix(through: lines[i].firstIndex(of: "]")!)
-        guard lines[i] == "\(stamp) \(old.speaker):** \(old.text)" else { return nil }
+        let at = stamp.split { !$0.isNumber }.compactMap { Int($0) }   // "**[69:21]"
+        guard at.count == 2, at[0] * 60 + at[1] == Int(old.start), lines[i] == "\(stamp) \(old.speaker):** \(old.text)" else { return nil }
         // One line in the file, whatever was typed.
         func flat(_ s: String) -> String { s.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces) }
         if let text {
