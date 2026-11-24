@@ -196,14 +196,14 @@ import UserNotifications
                 s.live?.onPause = { [weak self] in self?.togglePause() }
                 s.live?.who = { [weak s] in
                     guard let s else { return (nil, []) }
-                    // Meet doesn't always mark your own tile: your Mac account's name says which one it is.
-                    let me = [s.settings.userName, NSFullUserName()]
-                    func other(_ n: String) -> Bool { !me.contains { ScryNames.sameFirstName($0, n) } }
-                    let inMeet = (s.meet?.participants ?? []).filter(other)
-                    if !inMeet.isEmpty { return (s.meet?.speaking.flatMap { other($0) ? $0 : nil }, inMeet) }
-                    // Outside Meet, only people who are both invited and on screen: screen text alone can be a button.
-                    let invited = s.invite?.invitees.map(\.name) ?? []
-                    return (nil, s.onScreen.filter { n in other(n) && invited.contains { ScryNames.sameFirstName($0, n) } })
+                    // Meet doesn't always mark your own tile, and a first name alone could be a colleague's: it only keeps
+                    // a line from getting your name.
+                    let mine = [s.settings.userName, NSFullUserName()]
+                    if let people = s.meet?.participants, !people.isEmpty {
+                        let speaking = s.meet?.speaking.flatMap { n in mine.contains { ScryNames.sameFirstName($0, n) } ? nil : n }
+                        return (speaking, ScryNames.others(people, selfName: s.meet?.selfName, userName: s.settings.userName) ?? [])
+                    }
+                    return (nil, ScryNames.soleInvitee(s.invite, onScreen: s.onScreen, userName: s.settings.userName).map { [$0] } ?? [])
                 }
             }
             if systemAudio {   // off main: the first run blocks on the System Audio Recording prompt

@@ -46,8 +46,8 @@ public struct MeetingsView: View {
     @State private var lineText = ""
     @State private var lineSpeaker = ""
     @State private var askDelete = false
-    /// The last deleted line, until it's undone or another edit.
-    @State private var deleted: (url: URL, before: String, after: String)?
+    /// The last edit to a note's words, names, people or folder, until it's undone or another one.
+    @State private var undo: (url: URL, what: String, before: String, after: String)?
     /// The folder the list shows; nil = all notes.
     @State private var folder: String?
     /// The note a new folder was asked for, and its name so far.
@@ -272,6 +272,12 @@ public struct MeetingsView: View {
                         .menuStyle(.button).fixedSize().disabled(working.contains(n.url))
                         Button("Open in Editor") { NSWorkspace.shared.open(n.url) }.buttonStyle(RewindButtonStyle())
                     }
+                    if let u = undo, u.url == n.url {
+                        HStack(spacing: Theme.Space.s) {
+                            Text(u.what).textRole(.label, Theme.inkSecondary)
+                            Button("Undo") { undo = nil; update(u.url) { try ScryNotes.undo(u.url, before: u.before, after: u.after) } }.buttonStyle(RewindButtonStyle())
+                        }
+                    }
                     if let workError { Text(workError).textRole(.label, Theme.StateLayer.distraction).fixedSize(horizontal: false, vertical: true) }
                     FlowLayout(spacing: Theme.Space.s) {
                         chip("calendar", "\(Self.dayTitle(Date(timeIntervalSince1970: Double(n.startMs) / 1000), timeZone: timeZone)) · \(Fmt.clock(ms: n.startMs, timeZone: timeZone))–\(Fmt.clock(ms: n.endMs, timeZone: timeZone))")
@@ -377,7 +383,7 @@ public struct MeetingsView: View {
                     }
                     Spacer(minLength: Theme.Space.s)
                     if let l = p.link {
-                        let who = known.flatMap { ScryPeople.person(for: l, in: $0) }
+                        let who = known.flatMap { ScryPeople.person(for: l, from: n.url, in: $0) }
                         Button { if let who { NSWorkspace.shared.open(who.url) } } label: {
                             Label(who?.name ?? (known == nil ? "Linked" : "Linked note not found"), systemImage: "link")
                         }
@@ -387,7 +393,9 @@ public struct MeetingsView: View {
                         let likely = ScryPeople.suggestions(p.name, in: known ?? []).prefix(5)
                         if !likely.isEmpty { Section("Is this") { ForEach(likely) { k in Button(k.detail.isEmpty ? k.name : "\(k.name), \(k.detail)") { link(n, p, as: p.name, to: k) } } } }
                         Button("Choose or Create…") { linking = (n, p) }
-                        if p.link != nil { Divider(); Button("Remove Link") { link(n, p, as: p.name, to: nil) } }
+                        Divider()
+                        if p.link != nil { Button("Remove Link") { link(n, p, as: p.name, to: nil) } }
+                        if p.role == .mentioned { Button("Remove from People") { let url = n.url; update(url, undo: "\(p.name) removed.") { try ScryNotes.removePerson(url, p) } } }
                     }
                     .menuStyle(.button).fixedSize()
                 }
@@ -405,12 +413,12 @@ public struct MeetingsView: View {
 
     private func link(_ n: ScryNoteFile, _ p: ScryNotePerson, as name: String, to who: ScryPerson?) {
         let url = n.url, p = ScryNotePerson(name: name, role: p.role, at: p.at, detail: p.detail, link: p.link)
-        update(url) { try ScryNotes.linkPerson(url, p, to: who) }
+        update(url, undo: who.map { "Linked to \($0.name)." } ?? "Link removed.") { try ScryNotes.linkPerson(url, p, to: who) }
     }
 
     private func mention(_ n: ScryNoteFile, _ p: ScryNotePerson, as name: String) {
         let url = n.url, p = ScryNotePerson(name: name, role: p.role, at: p.at, detail: p.detail, link: p.link)
-        update(url) { try ScryNotes.linkPerson(url, p, to: nil) }
+        update(url, undo: "\(p.name) added.") { try ScryNotes.addMention(url, p) }
     }
 
     private func create(_ n: ScryNoteFile, _ p: ScryNotePerson, as name: String) {
@@ -438,7 +446,7 @@ public struct MeetingsView: View {
 
     private func move(_ n: ScryNoteFile, to name: String?) {
         let url = n.url
-        update(url) { try ScryNotes.setFolder(url, name) }
+        update(url, undo: "Folder changed.") { try ScryNotes.setFolder(url, name) }
     }
 
     private func resummarize(_ n: ScryNoteFile, language: String?) {
@@ -507,12 +515,6 @@ public struct MeetingsView: View {
                     transcriptQuery.count < 2 || n.note.segments[i].text.localizedCaseInsensitiveContains(transcriptQuery)
                         || n.note.segments[i].speaker.localizedCaseInsensitiveContains(transcriptQuery)
                 }
-                if let d = deleted, d.url == n.url {
-                    HStack(spacing: Theme.Space.s) {
-                        Text("Line deleted.").textRole(.label, Theme.inkSecondary)
-                        Button("Undo") { deleted = nil; update(d.url) { try ScryNotes.undo(d.url, before: d.before, after: d.after) } }.buttonStyle(QuietButtonStyle())
-                    }
-                }
                 if hits.isEmpty { Text("Nothing said matches “\(transcriptQuery)”.").textRole(.label, Theme.inkTertiary) }
                 LazyVStack(alignment: .leading, spacing: Theme.Space.xs + 2) {
                     ForEach(hits, id: \.self) { i in
@@ -556,7 +558,7 @@ public struct MeetingsView: View {
         .alert("Delete this line?", isPresented: Binding(get: { editing != nil && askDelete }, set: { if !$0 { editing = nil } })) {
             Button("Delete", role: .destructive) { if let e = editing { edit(e.note, e.index, speaker: "", text: nil) } }
             Button("Cancel", role: .cancel) {}
-        } message: { Text("You can undo it until your next edit.") }
+        } message: { Text("You can undo it.") }
     }
 
     private func copy(_ text: String) {
@@ -565,13 +567,8 @@ public struct MeetingsView: View {
     }
 
     private func edit(_ n: ScryNoteFile, _ i: Int, speaker: String, text: String?) {
-        let url = n.url, old = n.note.segments[i], before = n.markdown
-        deleted = nil
-        // Undo writes `before` back, so only when this delete is all that changed in the file.
-        let after = text == nil ? ScryNotes.editedLine(before, index: i, old: old, speaker: "", text: nil) : nil
-        update(url, then: { fresh in if let after, fresh.markdown == after { deleted = (url, before, after) } }) {
-            try ScryNotes.editLine(url, index: i, old: old, speaker: speaker, text: text)
-        }
+        let url = n.url, old = n.note.segments[i]
+        update(url, undo: text == nil ? "Line deleted." : "Line changed.") { try ScryNotes.editLine(url, index: i, old: old, speaker: speaker, text: text) }
     }
 
     private func card<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
@@ -794,18 +791,23 @@ public struct MeetingsView: View {
 
     private func rename(_ n: ScryNoteFile, from: String, to: String) {
         let url = n.url
-        update(url) { try ScryNotes.rename(url, from: from, to: to) }
+        update(url, undo: "Speaker renamed.") { try ScryNotes.rename(url, from: from, to: to) }
     }
 
-    private func update(_ url: URL, then: @escaping (ScryNoteFile) -> Void = { _ in }, _ body: @escaping @Sendable () throws -> ScryNoteFile?) {
+    /// `undo`: what the edit was ("Line deleted."), offered for taking back.
+    private func update(_ url: URL, undo what: String? = nil, _ body: @escaping @Sendable () throws -> ScryNoteFile?) {
+        workError = nil
+        if what != nil { undo = nil }
         Task {
             do {
-                guard let fresh = try await Task.detached(priority: .userInitiated, operation: body).value,
-                      let i = notes?.firstIndex(where: { $0.url == url }) else { return }
+                let (before, fresh) = try await Task.detached(priority: .userInitiated) { (try String(contentsOf: url, encoding: .utf8), try body()) }.value
+                guard let fresh, let i = notes?.firstIndex(where: { $0.url == url }) else { return }
                 notes?[i] = fresh
-                then(fresh)
+                if let what, before != fresh.markdown { undo = (url, what, before, fresh.markdown) }
             } catch {
                 SupportLog.scry.error("scry note not saved: \(String(describing: error), privacy: .public)")
+                workError = "Not saved: \(error)"
+                await reload()
             }
         }
     }

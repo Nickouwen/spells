@@ -9,7 +9,8 @@ public struct ScryLiveTranscript: Equatable, Sendable {
         public var speaker: String, start: TimeInterval, end: TimeInterval, text: String
         /// When its words last changed: about when they stopped talking (`end` is after the pause that settles a line).
         var heard: TimeInterval
-        /// You set this name: it wins over the marker, and goes into the note's vote (`hints`).
+        /// You named all their lines: it wins over the marker, and goes into the note's vote (`given`). A name you gave to
+        /// one line stays in the panel: the note's voices are separated anew.
         public var byHand = false
         /// A mic line that repeats what the far side just said: your speakers, heard by your mic. Hidden, not deleted.
         public var echo = false
@@ -23,7 +24,7 @@ public struct ScryLiveTranscript: Equatable, Sendable {
     public private(set) var lines: [Line] = []
     /// Keyed by `far`.
     public private(set) var partial: [Bool: Partial] = [:]
-    private var aliases: [String: String] = [:], nextID = 0
+    private var aliases: [String: String] = [:], picked: [String: String] = [:], nextID = 0
     public init() {}
 
     /// The words so far of the utterance in progress; blank clears it. `speaking`: who the marker shows now.
@@ -64,22 +65,22 @@ public struct ScryLiveTranscript: Equatable, Sendable {
     }
 
     /// `everywhere`: every far-side line with that name, and the ones still to come. A "You" line is your mic: it stays.
-    public mutating func rename(_ id: Int, to name: String, everywhere: Bool) {
+    /// `person`: the note of someone you know, when you picked them.
+    public mutating func rename(_ id: Int, to name: String, everywhere: Bool, person: String? = nil) {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, let line = lines.first(where: { $0.id == id }), line.far else { return }
         for i in lines.indices where lines[i].far && (lines[i].id == id || everywhere && lines[i].speaker == line.speaker) {
-            lines[i].speaker = name; lines[i].byHand = true
+            lines[i].speaker = name; lines[i].byHand = everywhere
         }
         guard everywhere else { return }
+        picked[name] = person
         for (k, v) in aliases where v == line.speaker { aliases[k] = name }
         aliases[line.speaker] = name
     }
 
-    /// Your names as speaker hints for the note (`ScryMeet.names`): ten a second, so they outvote the marker's two.
-    public var hints: [ScryMeet.Line] {
-        lines.filter(\.byHand).flatMap { l in
-            stride(from: l.start, through: max(l.start, l.end - 0.5), by: 0.1).map { ScryMeet.Line(t: ($0 * 10).rounded() / 10, speaking: l.speaker) }
-        }
+    /// The names you gave, for the note.
+    public var given: [ScryLiveName] {
+        lines.filter(\.byHand).map { ScryLiveName(name: $0.speaker, from: $0.start, to: $0.end, person: picked[$0.speaker]) }
     }
 
     public var visible: [Line] { lines.filter { !$0.echo } }
@@ -118,6 +119,29 @@ public struct ScryLiveTranscript: Equatable, Sendable {
 
     private static func words(_ s: String) -> [String] {
         s.lowercased().split { !$0.isLetter && !$0.isNumber && $0 != "'" }.map(String.init)
+    }
+}
+
+/// A name you gave a far-side voice in the live panel, and when it was speaking; `person` = the path of their note when
+/// you picked someone you know. Written to the capture's `names.jsonl`, apart from the Meet watcher's own file.
+public struct ScryLiveName: Codable, Equatable, Sendable {
+    public var name: String, from: Double, to: Double, person: String?
+    static let file = "names.jsonl"
+
+    /// Ten a second, so they outvote the marker's two.
+    public var hints: [ScryMeet.Hint] {
+        stride(from: from, through: max(from, to - 0.5), by: 0.1).map { ScryMeet.Hint(t: ($0 * 10).rounded() / 10, name: name) }
+    }
+
+    public static func save(_ names: [ScryLiveName], in dir: URL) throws {
+        guard !names.isEmpty else { return }
+        let e = JSONEncoder()
+        try Data(names.map { String(decoding: try e.encode($0), as: UTF8.self) }.joined(separator: "\n").utf8).write(to: dir.appending(path: file), options: .atomic)
+    }
+
+    public static func load(_ dir: URL) -> [ScryLiveName] {
+        guard let text = try? String(contentsOf: dir.appending(path: file), encoding: .utf8) else { return [] }
+        return text.split(whereSeparator: \.isNewline).compactMap { try? JSONDecoder().decode(ScryLiveName.self, from: Data($0.utf8)) }
     }
 }
 
@@ -204,8 +228,11 @@ public enum ScryLiveChat {
         return (people("to:"), people("cc:"), value(lines[s], "subject:")!, body)
     }
 
+    /// Whole addresses only: a piece of a longer one ("billing@x.com" in "mary!billing@x.com") is someone else's.
     static func addresses(_ text: String) -> [String] {
-        text.matches(of: #/[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+/#).map { String($0.output) }
+        text.split { $0.isWhitespace || "<>()[]{},;:\"“”".contains($0) }
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".?*_")) }
+            .filter { $0.wholeMatch(of: #/[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+/#) != nil }
     }
 
     /// Gmail's compose page with the email filled in. Opening it saves a draft; sending is your click there.

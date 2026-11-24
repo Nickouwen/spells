@@ -1,5 +1,6 @@
 import Foundation
 import SpellsKit
+import Synchronization
 import ScryCore
 
 /// Polls the Google Meet tab in a Chromium browser twice a second while a recording runs and appends what it
@@ -18,8 +19,11 @@ public final class ScryMeetWatch: @unchecked Sendable {
     private var lastParticipants: [String] = []
     private var empties = 0, warned = false
     /// The last sample's people, for the recording pill.
-    public private(set) var participants: [String] = []
-    public private(set) var speaking: String?
+    public var participants: [String] { seen.withLock { $0.participants } }
+    public var speaking: String? { seen.withLock { $0.speaking } }
+    public var selfName: String? { seen.withLock { $0.selfName } }
+    /// Written on `queue`, read on the main thread.
+    private let seen = Mutex<(participants: [String], speaking: String?, selfName: String?)>(([], nil, nil))
 
     public init(browser bundleID: String, dir: URL, startedAt: Date) {
         script = NSAppleScript(source: Self.appleScript(bundleID))!
@@ -89,7 +93,7 @@ public final class ScryMeetWatch: @unchecked Sendable {
     }
 
     private func poll() {
-        guard let s = read() else { speaking = nil; return }   // no tab, no answer: nobody is known to be speaking
+        guard let s = read() else { seen.withLock { $0.speaking = nil }; return }   // no tab, no answer: nobody is known to be speaking
         let t = (Date().timeIntervalSince(startedAt) * 10).rounded() / 10
         let people = s.participants
         var lines: [ScryMeet.Line] = []
@@ -100,7 +104,8 @@ public final class ScryMeetWatch: @unchecked Sendable {
         let tile = marker.speaking(s)
         let name = tile.flatMap { $0.isSelf ? nil : $0.name }
         if let name { lines.append(ScryMeet.Line(t: t, speaking: name)) }
-        participants = people; speaking = name
+        let mine = s.selfName ?? s.tiles.first(where: \.isSelf)?.name
+        seen.withLock { $0 = (people, name, mine ?? $0.selfName) }
         guard !lines.isEmpty else { return }
         append(lines.map { $0.encoded + "\n" }.joined())
     }

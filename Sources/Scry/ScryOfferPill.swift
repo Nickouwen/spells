@@ -66,7 +66,7 @@ import SpellsKit
     }
 
     private func layoutRecording(label: NSButton) -> NSRect {
-        guard let body = panel.contentView, let stop = body.subviews.last as? NSButton else { return panel.frame }
+        guard let body = container.subviews.last, let stop = body.subviews.last as? NSButton else { return panel.frame }
         let lw = label.intrinsicContentSize.width, sw = stop.intrinsicContentSize.width, bw: CGFloat = 27
         let width = 10 + bw + 6 + lw + sw + 20
         let full = Self.frame(width: width)
@@ -151,7 +151,7 @@ import SpellsKit
 
     /// Moves the content to `y` (up is out of the screen) from where it is now, or `from` when it isn't on its way.
     private func slide(to y: CGFloat, from start: CGFloat, duration: TimeInterval, then: @escaping @MainActor () -> Void = {}) {
-        guard let layer = panel.contentView?.layer else { then(); return }
+        guard let layer = container.layer else { then(); return }
         let moving = layer.animation(forKey: "slide") != nil
         let now = moving ? layer.presentation()?.value(forKeyPath: "transform.translation.y") as? CGFloat ?? start : start
         CATransaction.begin()
@@ -166,12 +166,16 @@ import SpellsKit
         CATransaction.commit()
     }
 
+    /// Holds the pill's content and does the sliding, so a pill that comes back while leaving goes on from where it is.
+    private let container = NSView()
+
     /// New content: a pill that is already up crossfades into it instead of blinking.
     private func swap(to body: ScryPillView) {
+        if panel.contentView !== container { container.wantsLayer = true; panel.contentView = container }
+        container.subviews.forEach { $0.removeFromSuperview() }
         body.wantsLayer = true
-        let up = panel.isVisible && !hiding
-        panel.contentView = body
-        guard up, let layer = body.layer else { return }
+        container.addSubview(body)
+        guard panel.isVisible, !hiding, let layer = body.layer else { return }
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = 0; fade.toValue = 1; fade.duration = 0.14; fade.timingFunction = Self.easeOut
         layer.add(fade, forKey: "swap")
@@ -209,7 +213,7 @@ import SpellsKit
             guard mine == generation, hiding else { return }   // shown again meanwhile
             hiding = false
             panel.orderOut(nil)
-            panel.contentView?.layer?.removeAnimation(forKey: "slide")
+            container.layer?.removeAnimation(forKey: "slide")
         }
     }
 
@@ -303,6 +307,7 @@ private final class ScryPillView: NSView {
 final class ScryBarsView: NSView {
     private var levels = [Double](repeating: 0, count: 5)
     override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }   // the pill under it takes the click
     func push(_ level: Double) {
         levels.removeFirst(); levels.append(min(max(level, 0), 1)); needsDisplay = true
     }

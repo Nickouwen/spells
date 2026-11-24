@@ -19,7 +19,7 @@ import Testing
     #expect(t.plainText.hasPrefix("Dana Whitfield: Hi there.\nThem: Who is this?\n"))
 }
 
-@Test func namingASpeakerChangesOneLineOrAllOfThemAndReachesTheNote() {
+@Test func namingASpeakerChangesOneLineOrAllOfThemAndReachesTheNote() throws {
     var t = ScryLiveTranscript()
     for (i, s) in ["One.", "Two.", "Three."].enumerated() { t.hear(far: true, s, at: Double(i * 10)); t.commit(far: true, s, at: Double(i * 10 + 5)) }
     t.commit(far: false, "Mine, all mine today.", at: 40)
@@ -33,8 +33,15 @@ import Testing
     let segs = [ScrySegment(speaker: "Speaker A", start: 0, end: 5, text: "One."), ScrySegment(speaker: "Speaker B", start: 10, end: 15, text: "Two."),
                 ScrySegment(speaker: "Speaker A", start: 20, end: 25, text: "Three.")]
     let marker = stride(from: 0.0, to: 25, by: 0.5).map { ScryMeet.Hint(t: $0, name: "Wrong") }
-    let hints = t.hints.map { ScryMeet.Hint(t: $0.t, name: $0.speaking!) }
-    #expect(ScryMeet.names(for: segs, hints: marker + hints, owner: "Nic") == ["Speaker A": "Dana", "Speaker B": "Ellen"])
+    let hints = t.given.flatMap(\.hints)
+    // A name for one line doesn't name a whole voice in the note.
+    #expect(ScryMeet.names(for: segs, hints: marker + hints, owner: "Nic") == ["Speaker A": "Dana", "Speaker B": "Wrong"] && !t.given.contains { $0.name == "Ellen" })
+    t.rename(1, to: "Ellen Park", everywhere: true, person: "/p/Ellen Park.md")
+    let dir = FileManager.default.temporaryDirectory.appending(path: "scry-names-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try ScryLiveName.save(t.given, in: dir)
+    #expect(ScryLiveName.load(dir) == t.given && ScryLiveName.load(dir).contains { $0.person == "/p/Ellen Park.md" && $0.name == "Ellen Park" })
     t.rename(0, to: "Dana W", everywhere: true)
     t.commit(far: true, "Five.", at: 60)
     #expect(t.lines.last?.speaker == "Dana W")
@@ -86,7 +93,9 @@ import Testing
     let a = "Here it is:\n**To:** ellen@parklaw.example, made.up@bluepeak.example\nCc: Dana <dana.w@example.com>\n**Subject:** Next steps & more\n\nHi Ellen,\n\n100% agreed?\n\n---\nI left out a number."
     let e = try #require(ScryLiveChat.email(in: a, known: "my email is Ellen@parklaw.example and dana.w@example.com."))
     #expect(e.to == ["ellen@parklaw.example"] && e.cc == ["dana.w@example.com"] && e.subject == "Next steps & more" && e.body == "Hi Ellen,\n\n100% agreed?")
-    // An address inside another isn't the one that was given.
+    // An address inside another isn't the one that was given, and a piece of an odd one is nobody's.
+    #expect(ScryLiveChat.email(in: "To: billing@example.com\nSubject: x\n\ny", known: "it's mary!billing@example.com")?.to == [])
+    #expect(ScryLiveChat.addresses("Mail <a.b@x.com>, (c@y.org); d@z.io.") == ["a.b@x.com", "c@y.org", "d@z.io"])
     #expect(ScryLiveChat.email(in: "To: w@example.com\nSubject: x\n\ny", known: "dana.w@example.com")?.to == [])
     #expect(ScryLiveChat.email(in: "No email here.", known: "") == nil)
     let url = try #require(ScryLiveChat.gmail(to: e.to, cc: e.cc, subject: e.subject, body: e.body)?.absoluteString)
@@ -108,6 +117,19 @@ import Testing
     #expect(ScryNames.sameFirstName("Samuel", "Sam Rivera") && ScryNames.sameFirstName("Sam", "sam Rivera"))
     #expect(!ScryNames.sameFirstName("Samuel", "Samantha Lee") && !ScryNames.sameFirstName("You", "Alex Smith")
             && !ScryNames.sameFirstName("Al", "Alex") && !ScryNames.sameFirstName("", "Alex"))
+}
+
+@Test func theOnlyOtherPersonIsNeverAGuess() {
+    #expect(ScryNames.others(["Sam Rivera", "Samantha Lee", "Bob"], selfName: nil, userName: "Sam Rivera") == ["Samantha Lee", "Bob"])
+    #expect(ScryNames.others(["Samantha Lee", "Bob"], selfName: nil, userName: "Sam") == nil)           // your tile isn't there: not sure
+    #expect(ScryNames.others(["Sam Rivera", "Bob"], selfName: "sam rivera", userName: "You") == ["Bob"])
+    #expect(ScryNames.others(["Dan", "Dana"], selfName: "Dan", userName: "You") == ["Dana"])
+    let one = ScryInvite(title: "T", invitees: [.init(name: "Dana Whitfield", email: nil)])
+    let two = ScryInvite(title: "T", invitees: one.invitees + [.init(name: "Ellen Park", email: nil)])
+    #expect(ScryNames.soleInvitee(one, onScreen: ["Dana Whitfield", "Mute"], userName: "You") == "Dana Whitfield")
+    #expect(ScryNames.soleInvitee(one, onScreen: ["Dana"], userName: "You") == nil && ScryNames.soleInvitee(nil, onScreen: ["Dana"], userName: "You") == nil)
+    #expect(ScryNames.soleInvitee(two, onScreen: ["Dana Whitfield"], userName: "You") == nil)            // the other may be speaking
+    #expect(ScryNames.soleInvitee(two, onScreen: ["Dana Whitfield"], userName: "Ellen Park") == "Dana Whitfield")
 }
 
 @Test func liveOpenIsOffByDefaultAndRoundTrips() {
@@ -153,7 +175,8 @@ private let noteText = "---\ntitle: \"T\"\ndate: 2026-11-24\nstart: 2026-11-24T1
     #expect(try String(contentsOf: url, encoding: .utf8) == noteText)
     let edited = after + "\nmy own line\n"   // changed in Obsidian meanwhile
     try edited.write(to: url, atomically: true, encoding: .utf8)
-    _ = try ScryNotes.undo(url, before: noteText, after: after)
+    #expect(throws: ScryNotes.Changed.self) { try ScryNotes.undo(url, before: noteText, after: after) }
+    #expect(throws: ScryNotes.Changed.self) { try ScryNotes.editLine(url, index: 0, old: .init(speaker: "You", start: 1, end: 5, text: "Different."), speaker: "You", text: "x") }
     #expect(try String(contentsOf: url, encoding: .utf8) == edited)
 }
 

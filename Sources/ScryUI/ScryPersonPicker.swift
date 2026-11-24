@@ -11,6 +11,7 @@ struct ScryPersonPicker: View {
     let done: (Choice) -> Void
     @State private var name = ""
     @State private var query = ""
+    @State private var newName = ""
     @FocusState private var searching: Bool
 
     private var adding: Bool { person.name.isEmpty }
@@ -36,7 +37,10 @@ struct ScryPersonPicker: View {
                         Button { done(.known(called.isEmpty ? k.name : called, k)) } label: {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(k.name).textRole(.body)
-                                if !k.detail.isEmpty { Text(k.detail).textRole(.label, Theme.inkTertiary).lineLimit(1) }
+                                // Two people of one name: the folder says which.
+                                let twin = known.contains { $0.name == k.name && $0.id != k.id }
+                                let about = [k.detail, twin ? k.url.deletingLastPathComponent().lastPathComponent : ""].filter { !$0.isEmpty }.joined(separator: " · ")
+                                if !about.isEmpty { Text(about).textRole(.label, Theme.inkTertiary).lineLimit(1) }
                             }
                             .padding(.vertical, Theme.Space.xs).padding(.horizontal, Theme.Space.s)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -50,9 +54,11 @@ struct ScryPersonPicker: View {
             .frame(height: 240)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.tile, style: .continuous))
             HStack(spacing: Theme.Space.s) {
-                // The name to give a new note: what was searched for, else the name in the call.
-                let new = query.trimmingCharacters(in: .whitespaces).isEmpty ? called : query.trimmingCharacters(in: .whitespaces)
-                if canCreate, !new.isEmpty { Button("New Person “\(new)”") { done(.new(new)) }.buttonStyle(RewindButtonStyle()) }
+                if canCreate {
+                    TextField("New person's full name", text: $newName).textFieldStyle(.roundedBorder).frame(width: 150)
+                    Button("New Person") { done(.new(newName.trimmingCharacters(in: .whitespaces))) }.buttonStyle(RewindButtonStyle())
+                        .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
                 if adding, !called.isEmpty { Button("Add Without Link") { done(.unlinked(called)) }.buttonStyle(QuietButtonStyle()) }
                 Spacer()
                 Button("Cancel") { done(.cancel) }.buttonStyle(QuietButtonStyle()).keyboardShortcut(.cancelAction)
@@ -61,6 +67,6 @@ struct ScryPersonPicker: View {
         .padding(Theme.Space.l)
         .frame(width: 420)
         .background(Theme.canvas)
-        .onAppear { name = person.name; if !adding { searching = true } }
+        .onAppear { name = person.name; newName = person.name.wholeMatch(of: /Speaker [A-Z0-9]+|Them/) == nil ? person.name : ""; if !adding { searching = true } }
     }
 }

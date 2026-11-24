@@ -19,8 +19,11 @@ public enum ScryPipeline {
         /// Not a fault: no words on either side and no notes typed, so there is nothing to write up.
         case nothingSaid
         case recordingGone
+        /// The note was edited while Claude read it: nothing is written.
+        case noteChanged
         public var description: String {
             switch self {
+            case .noteChanged: "the note changed meanwhile, so nothing was written; try again"
             case .recordingGone: "the recording is gone (it's kept for a week)"
             case .nothingSaid: "nobody spoke in the recording, so no note was made"
             case .noKey: "no ElevenLabs key (ELEVENLABS_API_KEY, Spells/.env or Keychain \(SupportKeychain.elevenLabs))"
@@ -74,6 +77,8 @@ public enum ScryPipeline {
         // Who was on the call: the Meet tab's participant tiles when the recorder could read them (exact names,
         // and who spoke when), else on-screen names completed from the calendar invite; nobody → the invitees.
         let meet = ScryMeet.log(fromJSONL: (try? String(contentsOf: dir.appending(path: "speakers.jsonl"), encoding: .utf8)) ?? "")
+        // The names you gave in the live panel (`ScryLive.saveNames`), with who they are when you picked someone you know.
+        let given = ScryLiveName.load(dir)
         let expected = (capture.invite?.invitees.map(\.name) ?? []) + [settings.userName]
         let seen = meet.participants.isEmpty ? ScryNames.completed(ScryNames.fromOCR(capture.screenshotText, known: expected), capture.invite)
                                              : meet.participants
@@ -93,7 +98,7 @@ public enum ScryPipeline {
         let json: Data, diarized: Bool
         if capture.app == nil {
             // Channel 0 only: channel 1 is silent in person, and averaging it in would halve the level.
-            json = try await scribe(mono(wav, channel: 0).wav, keyterms: terms, diarize: true, voices: voices); diarized = true
+            json = try await scribe(mono(wav, channel: 0).wav, keyterms: terms, diarize: true, voices: voices.map { $0 + 1 }); diarized = true
         } else {
             let far = mono(wav, channel: 1)
             async let you = scribe(mono(wav, channel: 0).wav, keyterms: terms, diarize: false)
@@ -105,19 +110,18 @@ public enum ScryPipeline {
         // On a call, how loud each side was tells the far side's echo in the mic from what you said.
         let levels = capture.app == nil ? nil : levels(wav)
         // SSNs, card and bank numbers never reach the model or the note (the note is synced; the audio goes after a week).
-        let raw = try ScryTranscript.segments(fromScribeJSON: json, levels: levels).map { s in
-            var s = s; s.text = ScryOps.redacted(s.text, numbersOnly: true); return s
-        }
+        let turns = try ScryTranscript.segments(fromScribeJSON: json, levels: levels)
+        let raw = zip(turns, ScryOps.redacted(turns: turns.map(\.text))).map { s, t in var s = s; s.text = t; return s }
         let userNotes = ScryOps.redacted(capture.userNotes, numbersOnly: true)
         // A call nobody spoke in (2026-11-10): asked for a summary of nothing, the model writes a note about an
         // empty transcript and a follow-up email asking what was said. Notes you typed are still worth a note.
         if raw.isEmpty, capture.userNotes.allSatisfy(\.isWhitespace) { throw Failure.nothingSaid }
         // Named before the summary, so its recap says "Alex", not "Speaker A": Meet's speaking indicator votes
         // first; with nothing from it, a lone far-side speaker is the one other person named.
-        let fromMeet = capture.app == nil ? [:] : ScryMeet.names(for: raw, hints: meet.hints, owner: settings.userName)
+        let fromMeet = capture.app == nil ? [:] : ScryMeet.names(for: raw, hints: meet.hints + given.flatMap(\.hints), owner: settings.userName)
         let sole = capture.app == nil || !fromMeet.isEmpty ? [:] : ScryNames.soleSpeaker(raw, names: names, userName: settings.userName)
         let known = fromMeet.merging(sole) { a, _ in a }
-        if !meet.hints.isEmpty {
+        if !meet.hints.isEmpty || !given.isEmpty {
             SupportLog.scry.info("Meet speakers: \(meet.hints.count, privacy: .public) hints named \(fromMeet.count, privacy: .public) of \(Set(raw.map(\.speaker)).subtracting(["You"]).count, privacy: .public) far-side speakers")
         }
         let segments = ScryTranscript.renamed(raw, known)
@@ -146,7 +150,8 @@ public enum ScryPipeline {
         let spoken = ScryTranscript.renamed(segments, summary.speakers)
         let emails = Dictionary((capture.invite?.invitees ?? []).compactMap { i in i.email.map { (i.name, $0) } }, uniquingKeysWith: { a, _ in a })
         let people = ScryPeople.rows(segments: spoken, mentioned: summary.people, emails: emails, owner: settings.userName,
-                                     known: ScryPeople.load(settings.people.compactMap(ScrySettings.folder)), note: url)
+                                     known: ScryPeople.load(settings.people.compactMap(ScrySettings.folder)), note: url,
+                                     picked: Dictionary(given.compactMap { g in g.person.map { (g.name, $0) } }, uniquingKeysWith: { _, b in b }))
         let note = ScryNote(meta: .init(startedAt: capture.startedAt, endedAt: capture.endedAt, app: appName,
                                         participants: participants, speakers: speakers),
                             summary: summary, userNotes: userNotes,
@@ -160,10 +165,13 @@ public enum ScryPipeline {
     /// Re-summarizes a note from its own transcript with the current prompt and rewrites it in place: same
     /// times, participants, transcript and your notes; new title, summary and action items (ticks are lost).
     public static func resummarize(note url: URL, settings: ScrySettings, keyterms: [String], language: String? = nil) async throws -> ScrySummary {
-        guard let note = ScryNote.parse(try String(contentsOf: url, encoding: .utf8)), !note.segments.isEmpty else {
+        let before = try String(contentsOf: url, encoding: .utf8)
+        guard let note = ScryNote.parse(before), !note.segments.isEmpty else {
             throw Failure.claude("\(url.lastPathComponent) isn't a Scry note with a transcript")
         }
-        let prompt = ScryPrompt.summary(segments: note.segments, participants: note.meta.participants, userNotes: note.userNotes,
+        // A note from before 2026-11-24 can still hold numbers: they don't go to the model.
+        let safe = zip(note.segments, ScryOps.redacted(turns: note.segments.map(\.text))).map { s, t in var s = s; s.text = t; return s }
+        let prompt = ScryPrompt.summary(segments: safe, participants: note.meta.participants, userNotes: ScryOps.redacted(note.userNotes, numbersOnly: true),
                                         userName: settings.userName, appName: note.meta.app, startedAt: note.meta.startedAt,
                                         keyterms: keyterms, language: language)
         let summary = try ScryPrompt.parseSummary(try await claude(prompt))
@@ -174,7 +182,10 @@ public enum ScryPipeline {
         let found = ScryPeople.rows(segments: spoken, mentioned: summary.people, emails: [:], owner: settings.userName,
                                     known: ScryPeople.load(settings.people.compactMap(ScrySettings.folder)), note: url)
         let out = ScryNote(meta: meta, summary: summary, userNotes: note.userNotes, segments: spoken,
-                           people: note.people + found.filter { f in !note.people.contains { $0.id == f.id } })
+                           people: ScryPeople.merged(note.people.map { p in
+                               p.role == .speaker ? ScryNotePerson(name: summary.speakers[p.name] ?? p.name, role: p.role, at: p.at, detail: p.detail, link: p.link) : p
+                           }, found))
+        guard try String(contentsOf: url, encoding: .utf8) == before else { throw Failure.noteChanged }
         try Data(out.markdown().utf8).write(to: url, options: .atomic)
         return summary
     }

@@ -36,6 +36,9 @@ private func tempVault() throws -> URL {
     #expect(r("card 4111 1111 1111 1111") == "card [removed]" && r("routing number 021000021") == "routing number [removed]")
     #expect(r("call 864-555-0142, case 2026-CP-23-01234, $14,500") == "call 864-555-0142, case 2026-CP-23-01234, $14,500")
     #expect(r("social media had 1,200 views in 2026") == "social media had 1,200 views in 2026")
+    #expect(ScryOps.redacted(turns: ["What's the account number?", "Sure.", "1234567890", "Call 864-555-0142"]) == ["What's the account number?", "Sure.", "[removed]", "Call 864-555-0142"])
+    #expect(ScryOps.redacted(turns: ["And your social?", "It's 123 45 6789."]) == ["And your social?", "It's [removed]."])
+    #expect(ScryOps.redacted(turns: ["We sold 1234567890 units.", "The account is fine.", "It's 2026."]) == ["We sold 1234567890 units.", "The account is fine.", "It's 2026."])
     #expect(r("the password is hunter2!") == "the password is hunter2!")   // not a number: your words stay
 }
 

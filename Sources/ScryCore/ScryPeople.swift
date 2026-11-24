@@ -98,6 +98,8 @@ public enum ScryPeople {
         }
         let k = matchKey(name)
         guard k.contains(" ") else { return nil }
+        // "D. Whitfield" is an alias for choosing, not for being sure: an initial is nobody's full name.
+        guard k.split(separator: " ").allSatisfy({ $0.count > 1 }) else { return nil }
         let same = people.filter { ([$0.name] + $0.aliases).contains { matchKey($0) == k } }
         return same.count == 1 ? same[0] : nil
     }
@@ -140,12 +142,13 @@ public enum ScryPeople {
         return nil
     }
 
-    /// The known person a note's link points at; nil when that note is gone (renamed, moved).
-    public static func person(for link: String, in people: [ScryPerson]) -> ScryPerson? {
+    /// The known person a note's link points at; nil when that note is gone (renamed, moved). A wiki link is a path in the
+    /// meeting note's own vault.
+    public static func person(for link: String, from note: URL, in people: [ScryPerson]) -> ScryPerson? {
         if let m = link.wholeMatch(of: #/\[\[(.+?)(?:\|.*)?\]\]/#) {
-            let path = "/" + m.1 + ".md"
-            let same = people.filter { $0.url.path.hasSuffix(path) }
-            return same.count == 1 ? same[0] : nil
+            guard let vault = vault(of: note.resolvingSymlinksInPath()) else { return nil }
+            let path = vault.appending(path: String(m.1) + ".md").path
+            return people.first { $0.url.path == path }
         }
         guard let m = link.wholeMatch(of: #/\[.*?\]\((.+)\)/#), let u = URL(string: String(m.1)), u.isFileURL else { return nil }
         return people.first { $0.url.path == u.resolvingSymlinksInPath().path }
@@ -162,12 +165,14 @@ public enum ScryPeople {
 
     /// Everyone in a new note, linked where there is no doubt (`exact`). `emails`: the invite's, by name.
     public static func rows(segments: [ScrySegment], mentioned: [ScryNotePerson], emails: [String: String], owner: String,
-                            known: [ScryPerson], note: URL) -> [ScryNotePerson] {
+                            known: [ScryPerson], note: URL, picked: [String: String] = [:]) -> [ScryNotePerson] {
         var seen: Set<String> = []
         func row(_ p: ScryNotePerson) -> ScryNotePerson? {
             guard !p.name.isEmpty, seen.insert(matchKey(p.name)).inserted else { return nil }
             var p = p
-            p.link = exact(p.name, email: emails[p.name], in: known).map { link(to: $0, from: note) }
+            // Who you picked in the live panel, else no doubt.
+            let who = picked[p.name].flatMap { path in known.first { $0.id == path } } ?? exact(p.name, email: emails[p.name], in: known)
+            p.link = who.map { link(to: $0, from: note) }
             return p
         }
         var speakers: [ScryNotePerson] = [], names: Set<String> = []
@@ -186,7 +191,7 @@ public enum ScryPeople {
             let same = (start + 1..<end).filter { ScryNotePerson.parse(lines[$0])?.id == p.id }
             if let i = same.first {
                 lines[i] = p.markdown
-                for j in same.dropFirst().reversed() { lines.remove(at: j) }   // two voices named as one person
+                for j in same.dropFirst().reversed() { lines.remove(at: j) }
             } else {
                 let last = (start + 1..<end).last { !lines[$0].isEmpty } ?? start
                 lines.insert(contentsOf: last == start ? ["", p.markdown] : [p.markdown], at: last + 1)
@@ -196,6 +201,42 @@ public enum ScryPeople {
         let at = ["## Your notes", "## Follow-up email", "## Transcript"].compactMap { lines[..<min(head + 1, lines.count)].firstIndex(of: $0) }.min() ?? lines.count
         lines.insert(contentsOf: ["## People", "", p.markdown, ""], at: at)
         return lines.joined(separator: "\n")
+    }
+
+    /// Rows for the same person become one, keeping what either knew.
+    public static func merged(_ rows: [ScryNotePerson], _ more: [ScryNotePerson] = []) -> [ScryNotePerson] {
+        (rows + more).reduce(into: []) { out, p in
+            guard let i = out.firstIndex(where: { $0.id == p.id }) else { out.append(p); return }
+            out[i].link = out[i].link ?? p.link
+            out[i].at = out[i].at ?? p.at
+            if out[i].detail.isEmpty { out[i].detail = p.detail }
+        }
+    }
+
+    /// `merged` over a note's "## People" rows; the note is unchanged when no two rows are the same.
+    static func tidied(_ md: String) -> String {
+        let rows = rows(in: md), one = merged(rows.map(\.person))
+        guard one.count < rows.count else { return md }
+        var lines = md.components(separatedBy: "\n")
+        for (i, p) in zip(rows.map(\.line), rows.map(\.person)) where rows.first(where: { $0.person.id == p.id })?.line == i {
+            lines[i] = one.first { $0.id == p.id }!.markdown
+        }
+        for row in rows.reversed() where rows.first(where: { $0.person.id == row.person.id })!.line != row.line { lines.remove(at: row.line) }
+        return lines.joined(separator: "\n")
+    }
+
+    /// The note without one row.
+    static func removing(_ p: ScryNotePerson, from md: String) -> String {
+        var lines = md.components(separatedBy: "\n")
+        for row in rows(in: md).reversed() where row.person.id == p.id { lines.remove(at: row.line) }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func rows(in md: String) -> [(line: Int, person: ScryNotePerson)] {
+        let lines = md.components(separatedBy: "\n"), head = lines.firstIndex(of: "## Transcript") ?? lines.count
+        guard let start = lines[..<head].firstIndex(of: "## People") else { return [] }
+        let end = lines[(start + 1)...].firstIndex { $0.hasPrefix("## ") } ?? lines.count
+        return (start + 1..<end).compactMap { i in ScryNotePerson.parse(lines[i]).map { (i, $0) } }
     }
 
     /// Writes a new person note; throws when one with that name is there.

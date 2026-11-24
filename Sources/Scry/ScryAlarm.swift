@@ -81,6 +81,7 @@ import ScryCore
     private func hide() {
         sound?.stop(); sound = nil
         if let p = panel {
+            p.ignoresMouseEvents = true   // a second click on Join must not open it twice
             NSAnimationContext.runAnimationGroup({ ctx in
                 ctx.duration = 0.12
                 p.animator().alphaValue = 0

@@ -31,7 +31,7 @@ private func md(_ extra: String = "") -> String {
 @Test func onlyNoDoubtLinksByItself() throws {
     let v = try vault(); defer { try? FileManager.default.removeItem(at: v) }
     let all = ScryPeople.load([v.appending(path: "People")])
-    #expect(ScryPeople.exact("dana  WHITFIELD", in: all)?.name == "Dana Whitfield" && ScryPeople.exact("D Whitfield", in: all)?.name == "Dana Whitfield")
+    #expect(ScryPeople.exact("dana  WHITFIELD", in: all)?.name == "Dana Whitfield" && ScryPeople.exact("D Whitfield", in: all) == nil)   // an initial is nobody's full name
     #expect(ScryPeople.exact("Anyone", email: "Dana@Example.com", in: all)?.name == "Dana Whitfield")
     #expect(ScryPeople.exact("Dana", in: all) == nil && ScryPeople.exact("Alex", in: all) == nil)   // a first name alone
     #expect(ScryPeople.exact("Sam Lee", in: all) == nil)                                            // two of them
@@ -56,35 +56,47 @@ private func md(_ extra: String = "") -> String {
     #expect(ScryNote.parse(full.markdown())?.people == full.people && ScryPeople.people(in: full).count == 2)
 }
 
-@Test func linkingASpeakerNamesThemAndOnlyTouchesWhatItMust() throws {
+@Test func linkingNamesAnUnnamedVoiceAndOnlyTouchesWhatItMust() throws {
     let v = try vault(); defer { try? FileManager.default.removeItem(at: v) }
     let url = v.appending(path: "calls/note.md"), all = ScryPeople.load([v.appending(path: "People")])
-    try md().write(to: url, atomically: true, encoding: .utf8)
+    let start = md().replacingOccurrences(of: "] Dana:**", with: "] Speaker A:**")
+    try start.write(to: url, atomically: true, encoding: .utf8)
     let dana = try #require(all.first { $0.name == "Dana Whitfield" })
-    let a = try #require(try ScryNotes.linkPerson(url, .init(name: "Dana", role: .speaker), to: dana))
+    let a = try #require(try ScryNotes.linkPerson(url, .init(name: "Speaker A", role: .speaker), to: dana))
     #expect(a.note.people == [.init(name: "Dana Whitfield", role: .speaker, link: "[[People/Dana Whitfield|Dana Whitfield]]")])
     #expect(a.note.segments.map(\.speaker) == ["You", "Dana Whitfield", "Dana Whitfield"] && a.note.segments[2].text == "## People")
     #expect(a.markdown.contains("\n\n## People\n\n- **Dana Whitfield** (speaker) → [[People/Dana Whitfield|Dana Whitfield]]\n\n## Follow-up email\n"))
-    #expect(ScryPeople.person(for: a.note.people[0].link!, in: all) == dana)
-    let b = try #require(try ScryNotes.linkPerson(url, .init(name: "Marcus", role: .mentioned, at: "00:05", detail: "brother"), to: nil))
+    #expect(ScryPeople.person(for: a.note.people[0].link!, from: url, in: all) == dana)
+    let b = try #require(try ScryNotes.addMention(url, .init(name: "Marcus", role: .mentioned, at: "00:05", detail: "brother")))
     let c = try #require(try ScryNotes.linkPerson(url, b.note.people[1], to: all[0]))   // a mention keeps the name that was said
     #expect(c.note.people.map(\.name) == ["Dana Whitfield", "Marcus"] && c.note.people[1].link == "[[People/Alex (sales rep)|Alex]]" && c.note.people[1].detail == "brother")
     let d = try #require(try ScryNotes.linkPerson(url, c.note.people[0], to: nil))
     #expect(d.note.people[0].link == nil && d.note.people.count == 2)
-    // Renaming the speaker by hand keeps the row; the rest is as it was.
-    let e = try #require(try ScryNotes.rename(url, from: "Dana Whitfield", to: "Dana"))
-    #expect(e.note.people.map(\.name) == ["Dana", "Marcus"])
-    let withoutPeople = e.markdown.replacingOccurrences(of: #"## People\n\n(- .*\n)+\n"#, with: "", options: .regularExpression)
-    #expect(withoutPeople == md())
+    let f = try #require(try ScryNotes.removePerson(url, d.note.people[1]))
+    #expect(f.note.people.map(\.name) == ["Dana Whitfield"])
+    // Undo takes a link back whole, names included.
+    _ = try ScryNotes.undo(url, before: start, after: f.markdown)
+    #expect(try String(contentsOf: url, encoding: .utf8) == start)
 }
 
-@Test func twoVoicesThatAreOnePersonBecomeOneRow() throws {
+@Test func aLinkNeverJoinsTwoVoicesOrRenamesANamedOne() throws {
     let v = try vault(); defer { try? FileManager.default.removeItem(at: v) }
-    let url = v.appending(path: "calls/two.md"), dana = try #require(ScryPeople.load([v.appending(path: "People")]).first { $0.name == "Dana Whitfield" })
-    try md("## People\n\n- **Dana** (speaker)\n- **Speaker B** (speaker)\n\n").replacingOccurrences(of: "**[00:09] Dana:**", with: "**[00:09] Speaker B:**").write(to: url, atomically: true, encoding: .utf8)
-    _ = try ScryNotes.linkPerson(url, .init(name: "Dana", role: .speaker), to: dana)
-    let n = try #require(try ScryNotes.linkPerson(url, .init(name: "Speaker B", role: .speaker), to: dana))
-    #expect(n.note.people.map(\.name) == ["Dana Whitfield"] && Set(n.note.segments.map(\.speaker)) == ["You", "Dana Whitfield"])
+    let url = v.appending(path: "calls/two.md"), all = ScryPeople.load([v.appending(path: "People")]), dana = try #require(all.first { $0.name == "Dana Whitfield" })
+    try md().replacingOccurrences(of: "**[00:09] Dana:**", with: "**[00:09] Speaker B:**").replacingOccurrences(of: "] Dana:**", with: "] Dana Whitfield:**").write(to: url, atomically: true, encoding: .utf8)
+    let a = try #require(try ScryNotes.linkPerson(url, .init(name: "Dana Whitfield", role: .speaker), to: dana))
+    let b = try #require(try ScryNotes.linkPerson(url, .init(name: "Speaker B", role: .speaker), to: dana))
+    #expect(b.note.segments.map(\.speaker) == ["You", "Dana Whitfield", "Speaker B"] && b.note.people.count == 2 && b.note.people.allSatisfy { $0.link == a.note.people[0].link })
+    let c = try #require(try ScryNotes.linkPerson(url, .init(name: "Dana Whitfield", role: .speaker), to: all[0]))   // the wrong Dana? the words keep their name
+    #expect(c.note.segments[1].speaker == "Dana Whitfield" && c.note.people[0].link?.contains("Alex") == true)
+}
+
+@Test func renamingOntoAnotherSpeakerLeavesOneRowThatKnowsWhatEitherDid() throws {
+    let v = try vault(); defer { try? FileManager.default.removeItem(at: v) }
+    let url = v.appending(path: "calls/r.md")
+    try md("## People\n\n- **Dana** (speaker) · seller\n- **Speaker B** (speaker) → [[People/Dana Whitfield|Dana Whitfield]]\n- **Marcus** (mentioned)\n\n").write(to: url, atomically: true, encoding: .utf8)
+    let n = try #require(try ScryNotes.rename(url, from: "Speaker B", to: "Dana"))
+    #expect(n.note.people == [.init(name: "Dana", role: .speaker, detail: "seller", link: "[[People/Dana Whitfield|Dana Whitfield]]"), .init(name: "Marcus", role: .mentioned)])
+    #expect(ScryNotes.shared(n.markdown, transcript: false).contains("- **Dana** (speaker) · seller\n") && !ScryNotes.shared(n.markdown, transcript: true).contains("[[People"))
 }
 
 @Test func linksOutsideTheVaultAreFileLinksAndOddNamesStillWork() throws {
@@ -92,9 +104,13 @@ private func md(_ extra: String = "") -> String {
     let out = FileManager.default.temporaryDirectory.appending(path: "elsewhere-\(UUID().uuidString).md")
     let alex = try #require(ScryPeople.load([v.appending(path: "People")]).first { $0.name == "Alex" })
     let l = ScryPeople.link(to: alex, from: out)
-    #expect(l.hasPrefix("[Alex](file:///") && !l.contains("(sales") && ScryPeople.person(for: l, in: [alex]) == alex)
+    #expect(l.hasPrefix("[Alex](file:///") && !l.contains("(sales") && ScryPeople.person(for: l, from: out, in: [alex]) == alex)
     #expect(ScryNotePerson.parse(ScryNotePerson(name: "Alex", role: .mentioned, link: l).markdown)?.link == l)
-    #expect(ScryPeople.person(for: "[[People/Gone]]", in: [alex]) == nil && ScryPeople.person(for: "[x](https://example.com)", in: [alex]) == nil)
+    #expect(ScryPeople.person(for: "[[People/Gone]]", from: v.appending(path: "calls/n.md"), in: [alex]) == nil && ScryPeople.person(for: "[x](https://example.com)", from: out, in: [alex]) == nil)
+    // The same path in another vault, or deeper in this one, is someone else.
+    let other = try vault(); defer { try? FileManager.default.removeItem(at: other) }
+    let sams = ScryPeople.load([other.appending(path: "People"), v.appending(path: "People")]).filter { $0.name == "Sam Lee" }
+    #expect(ScryPeople.person(for: "[[People/Sam Lee|Sam Lee]]", from: v.appending(path: "calls/n.md"), in: sams)?.url.path == v.appending(path: "People/Sam Lee.md").path)
 }
 
 @Test func aNewNoteLinksSpeakersAndMentionsWithoutDoubles() throws {
@@ -106,6 +122,9 @@ private func md(_ extra: String = "") -> String {
                                emails: ["Dana": "dana@example.com"], owner: "Nic Example", known: all, note: note)
     #expect(rows.map(\.name) == ["Dana", "Alex", "Sam Lee"])
     #expect(rows[0].link == "[[People/Dana Whitfield|Dana Whitfield]]" && rows[1].link == nil && rows[2].link == nil)
+    // Someone you picked in the live panel is who you picked, first name or not.
+    let alex = try #require(all.first { $0.name == "Alex" })
+    #expect(ScryPeople.rows(segments: [s("Alex")], mentioned: [], emails: [:], owner: "", known: all, note: note, picked: ["Alex": alex.id])[0].link?.contains("Alex (sales rep)") == true)
 }
 
 @Test func aNewPersonNoteNeverReplacesOne() throws {

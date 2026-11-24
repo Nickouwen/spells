@@ -111,7 +111,7 @@ import SwiftUI
         }
         let settings = ScryApp.loadSettings().settings
         if model.known.isEmpty, !settings.people.isEmpty {
-            Task { model.known = await Task.detached { ScryPeople.load(settings.people.compactMap(ScrySettings.folder)).map(\.name) }.value }
+            Task { model.known = await Task.detached { ScryPeople.load(settings.people.compactMap(ScrySettings.folder)) }.value }
         }
         model.skills = ScryLiveChat.skills(custom: settings.skills)
         if activate { NSApp.activate() }   // you type in it
@@ -129,18 +129,10 @@ import SwiftUI
         panel?.close()
     }
 
-    /// The names you gave join the Meet watcher's, which has stopped by now, so the note uses them.
     private func saveNames() {
-        let hints = model.transcript.hints
-        guard !hints.isEmpty else { return }
-        let url = dir.appending(path: "speakers.jsonl"), data = Data(hints.map { $0.encoded + "\n" }.joined().utf8)
-        do {
-            if FileManager.default.fileExists(atPath: url.path) {
-                let h = try FileHandle(forWritingTo: url)
-                defer { try? h.close() }
-                try h.seekToEnd(); try h.write(contentsOf: data)
-            } else { try data.write(to: url) }
-        } catch { SupportLog.scry.error("speaker names not saved: \(error.localizedDescription, privacy: .public)") }
+        do { try ScryLiveName.save(model.transcript.given, in: dir) } catch {
+            SupportLog.scry.error("speaker names not saved: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func ask(_ question: String) {
@@ -185,7 +177,7 @@ import SwiftUI
     var paused = false
     var tab = ScryLiveView.Tab.transcript
     /// People you know (`scry_people`), for the names menu.
-    var known: [String] = []
+    var known: [ScryPerson] = []
     var notes = ""
     var catchUp = ""
     var busy = false
@@ -254,7 +246,7 @@ struct ScryLiveView: View {
             Button("All “\(l.speaker)” lines") { model.transcript.rename(l.id, to: newName, everywhere: true) }
             Button("This line") { model.transcript.rename(l.id, to: newName, everywhere: false) }
             Button("Cancel", role: .cancel) {}
-        } message: { _ in Text("The note uses the name too.") }
+        } message: { _ in Text("Naming all their lines names them in the note too.") }
     }
 
     private var header: some View {
@@ -370,9 +362,9 @@ struct ScryLiveView: View {
                         Section("All “\(l.speaker)” lines") { ForEach(names, id: \.self) { n in Button(n) { model.transcript.rename(l.id, to: n, everywhere: true) } } }
                         Section("This line") { ForEach(names, id: \.self) { n in Button(n) { model.transcript.rename(l.id, to: n, everywhere: false) } } }
                     }
-                    let known = model.known.filter { $0 != l.speaker && !names.contains($0) }
+                    let known = model.known.filter { $0.name != l.speaker }
                     if !known.isEmpty {   // all their lines: a name you know is who they are for the whole call
-                        Menu("People You Know") { ForEach(known, id: \.self) { n in Button(n) { model.transcript.rename(l.id, to: n, everywhere: true) } } }
+                        Menu("People You Know") { ForEach(known) { k in Button(k.name) { model.transcript.rename(l.id, to: k.name, everywhere: true, person: k.url.path) } } }
                     }
                     Button("Rename…") { newName = l.speaker == "Them" ? "" : l.speaker; naming = l }
                 } label: { chip(l.speaker, you: false) }

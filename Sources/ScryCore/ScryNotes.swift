@@ -115,7 +115,7 @@ public enum ScryNotes {
     public static func rename(_ url: URL, from: String, to: String) throws -> ScryNoteFile? {
         let name = to.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name != from else { return nil }
-        return try write(renamedText(try String(contentsOf: url, encoding: .utf8), from: from, to: name), to: url)
+        return try write(ScryPeople.tidied(renamedText(try String(contentsOf: url, encoding: .utf8), from: from, to: name)), to: url)
     }
 
     public static func renamedText(_ md: String, from: String, to: String) -> String {
@@ -153,45 +153,54 @@ public enum ScryNotes {
         return (Array(kept) + row + lines[close...]).joined(separator: "\n")
     }
 
-    /// Links a person in the note to `known` (nil: unlinks). A linked speaker also takes that person's name in the note.
+    /// Links a person in the note to `known` (nil: unlinks). A voice that has no name yet ("Speaker B") takes theirs, unless
+    /// someone in the note already has it: two voices are never joined by a link.
     public static func linkPerson(_ url: URL, _ p: ScryNotePerson, to known: ScryPerson?) throws -> ScryNoteFile? {
         var md = try String(contentsOf: url, encoding: .utf8), p = p
-        if let known, p.role == .speaker {
+        if let known, p.role == .speaker, p.name.wholeMatch(of: /Speaker [A-Z0-9]+|Them/) != nil {
             let name = ScryNotePerson.plain(known.name)
-            // Two voices that are one person: the rows become one.
-            if name != p.name { md = renamedText(md, from: p.name, to: name) }
-            p.name = name
+            if ScryNote.parse(md)?.segments.contains(where: { $0.speaker == name }) == false {
+                md = renamedText(md, from: p.name, to: name)
+                p.name = name
+            }
         }
         p.link = known.map { ScryPeople.link(to: $0, from: url) }
         return try write(ScryPeople.setting(p, in: md), to: url)
+    }
+
+    /// Takes a wrongly found person out of the note's people.
+    public static func removePerson(_ url: URL, _ p: ScryNotePerson) throws -> ScryNoteFile? {
+        try write(ScryPeople.removing(p, from: try String(contentsOf: url, encoding: .utf8)), to: url)
     }
 
     public static func addMention(_ url: URL, _ p: ScryNotePerson) throws -> ScryNoteFile? {
         try write(ScryPeople.setting(p, in: try String(contentsOf: url, encoding: .utf8)), to: url)
     }
 
-    /// Undoes an edit: writes `before` back only while the file is still what the edit left (`after`).
+    /// Undoes an edit: writes `before` back only while the file is still what the edit left (`after`); else throws.
     public static func undo(_ url: URL, before: String, after: String) throws -> ScryNoteFile? {
-        let fresh = try String(contentsOf: url, encoding: .utf8)
-        guard fresh == after else { return ScryNote.parse(fresh).map { ScryNoteFile(url: url, markdown: fresh, note: $0) } }
+        guard try String(contentsOf: url, encoding: .utf8) == after else { throw Changed() }
         return try write(before, to: url)
     }
+
+    /// The file isn't what it was expected to be, so nothing was written.
+    public struct Changed: Error, CustomStringConvertible { public var description: String { "the note changed meanwhile, so nothing was written" } }
 
     /// The note to share: no frontmatter, and the transcript only when asked.
     public static func shared(_ md: String, transcript: Bool) -> String {
         var lines = md.components(separatedBy: "\n")
         if lines.first == "---", let close = lines.dropFirst().firstIndex(of: "---") { lines.removeSubrange(...close) }
         if !transcript, let t = lines.lastIndex(of: "## Transcript") { lines.removeSubrange(t...) }
+        // Who you know, and where their notes are, stays here.
+        lines = lines.map { l in ScryNotePerson.parse(l).map { p in var p = p; p.link = nil; return p.markdown } ?? l }
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Changes one transcript line (`text` nil deletes it). The file is re-read and the line matched by its place and
-    /// its old speaker and words; changed meanwhile → nothing is written.
+    /// its old speaker and words; changed meanwhile → throws and nothing is written.
     public static func editLine(_ url: URL, index: Int, old: ScrySegment, speaker: String, text: String?) throws -> ScryNoteFile? {
         let fresh = try String(contentsOf: url, encoding: .utf8)
-        guard let out = editedLine(fresh, index: index, old: old, speaker: speaker, text: text) else {
-            return ScryNote.parse(fresh).map { ScryNoteFile(url: url, markdown: fresh, note: $0) }
-        }
+        guard let out = editedLine(fresh, index: index, old: old, speaker: speaker, text: text) else { throw Changed() }
         return try write(out, to: url)
     }
 

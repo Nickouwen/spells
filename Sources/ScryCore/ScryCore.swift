@@ -383,6 +383,16 @@ public struct ScryLevels: Sendable {
         let m = mic[a..<b].reduce(0, +), e = recent[a..<b].reduce(0, +)
         return e > 0 ? 10 * log10(Double(m) / (coupling * Double(e))) : .infinity
     }
+
+    /// `score` against what the far side plays right then (0–150 ms before), not at the call's usual `lag`: the delay can
+    /// shorten during a call. You, over them, are still far louder.
+    public func scoreNow(start: Double, end: Double) -> Double {
+        guard let coupling else { return .infinity }
+        let a = max(0, Int(start / Self.frame)), b = min(mic.count, max(Int(end / Self.frame), a + 1))
+        guard a < b else { return .infinity }
+        let m = mic[a..<b].reduce(0, +), e = (a..<b).reduce(Float(0)) { $0 + far[max(0, $1 - 3)...$1].max()! }
+        return e > 0 ? 10 * log10(Double(m) / (coupling * Double(e))) : .infinity
+    }
 }
 
 public enum ScryTranscript {
@@ -419,6 +429,9 @@ public enum ScryTranscript {
     static let answers: Set<String> = ["yeah", "yes", "yep", "no", "nope", "okay", "ok", "right", "sure", "hmm", "mhm", "mm", "uh", "huh", "mm-hmm", "mmhmm",
                                        "bye", "hello", "hi", "hey", "thanks", "cool", "perfect", "great", "good"]
 
+    /// dB over the echo of what they say at that moment, below which the same word just after theirs is the echo.
+    static let nowLimit = 10.0   // 2026-11-24: 50 echo words scored at most 8, the owner's words 40 (median)
+
     /// Drops "You" words that are the far side heard through the speakers, judged by how loud each side was
     /// (`levels`) and by what the far side said. Most echo comes back late or transcribed differently (far side
     /// "Claude web", mic "clock lab"), so the 0.4 s word match below missed it (2026-11-17: 900–3500 echo words
@@ -430,8 +443,8 @@ public enum ScryTranscript {
     ///   the channels' word times can be 3 s apart), or when a run of them sits between echo on both sides
     ///   (within 3 s) and averages < 8 dB. A short "Yeah." or "I agree." said over the far side scores 10–20 and stays.
     /// No `levels` (or a far side never loud enough to measure) → the 0.4 s word match.
-    /// - echo when the far side said the same word 20–160 ms before it, unless it's a short answer people give
-    ///   over each other (`answers`).
+    /// - echo when the far side said the same word 20–160 ms before it and the mic is no louder than that word's echo
+    ///   (`scoreNow`), unless it's a short answer people give over each other (`answers`).
     public static func withoutEcho(_ segments: [ScrySegment], levels: ScryLevels?) -> [ScrySegment] {
         guard let levels, levels.coupling != nil else { return withoutEcho(segments) }
         let far = segments.filter { $0.speaker != "You" }   // in time order, like `segments`
@@ -450,11 +463,12 @@ public enum ScryTranscript {
         var verdict: [Verdict] = mine.indices.map { k in
             let w = segments[mine[k]]
             guard !farWords(w.start - 3, w.start + 3).isEmpty else { return .mine }
-            // The same word 20–160 ms after theirs is the speakers: the delay can shorten during a call (60 ms, then
+            // The same word 20–160 ms after theirs, no louder than its echo, is the speakers: the delay can shorten during a call (60 ms, then
             // 320 ms, on 2026-11-24), and then the loudness misses the first word after each pause of theirs.
             let word = normalized(w.text)
             if !word.isEmpty, !answers.contains(word),
-               farWords(w.start - 0.16, w.start - 0.02).contains(where: { normalized($0.text) == word }) { return .echo }
+               farWords(w.start - 0.16, w.start - 0.02).contains(where: { normalized($0.text) == word }),
+               levels.scoreNow(start: w.start, end: w.end) < Self.nowLimit { return .echo }
             return score[k] >= 20 ? .mine : score[k] < 0 ? .echo : .unsure
         }
         for k in mine.indices.dropLast() where verdict[k] == .unsure || verdict[k + 1] == .unsure {
@@ -1033,6 +1047,21 @@ public enum ScryNames {
         guard let x = a.split(separator: " ").first?.lowercased(), let y = b.split(separator: " ").first?.lowercased() else { return false }
         return x == y || min(x.count, y.count) >= 3 && (x.hasPrefix(y) || y.hasPrefix(x))
     }
+    /// Everyone but you, for "the only other person": nil when it isn't sure which tile is yours. Your own name must match
+    /// exactly (`selfName` from Meet, or your name in settings); a first name alone could be a colleague's.
+    public static func others(_ participants: [String], selfName: String?, userName: String) -> [String]? {
+        let me = [selfName, userName].compactMap { $0?.lowercased() }
+        let rest = participants.filter { !me.contains($0.lowercased()) }
+        return rest.count < participants.count ? rest : nil
+    }
+
+    /// Outside Meet: the one other person invited, when the screen shows them.
+    public static func soleInvitee(_ invite: ScryInvite?, onScreen: [String], userName: String) -> String? {
+        let others = (invite?.invitees.map(\.name) ?? []).filter { $0.lowercased() != userName.lowercased() }
+        guard others.count == 1, onScreen.contains(where: { $0.lowercased() == others[0].lowercased() }) else { return nil }
+        return others[0]
+    }
+
     /// On-screen names completed from the invite: "Alex" → "Alex Client" when exactly one invitee has
     /// that first name. Multi-word names stay as shown.
     public static func completed(_ screen: [String], _ invite: ScryInvite?) -> [String] {
