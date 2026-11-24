@@ -142,11 +142,15 @@ public enum ScryPipeline {
         for n in speakers.values.sorted() where !participants.contains(where: { $0 == n || $0.hasPrefix(n + " ") }) {
             participants.append(n)   // "Alex" is already there as "Alex Client"
         }
+        let url = unique(ScryNote.fileURL(root: settings.rootURL, startedAt: capture.startedAt, title: summary.title))
+        let spoken = ScryTranscript.renamed(segments, summary.speakers)
+        let emails = Dictionary((capture.invite?.invitees ?? []).compactMap { i in i.email.map { (i.name, $0) } }, uniquingKeysWith: { a, _ in a })
+        let people = ScryPeople.rows(segments: spoken, mentioned: summary.people, emails: emails, owner: settings.userName,
+                                     known: ScryPeople.load(settings.people.compactMap(ScrySettings.folder)), note: url)
         let note = ScryNote(meta: .init(startedAt: capture.startedAt, endedAt: capture.endedAt, app: appName,
                                         participants: participants, speakers: speakers),
                             summary: summary, userNotes: userNotes,
-                            segments: ScryTranscript.renamed(segments, summary.speakers))
-        let url = unique(ScryNote.fileURL(root: settings.rootURL, startedAt: capture.startedAt, title: summary.title))
+                            segments: spoken, people: people)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(note.markdown().utf8).write(to: url, options: .withoutOverwriting)
         SupportLog.scry.info("note: \(segments.count) segments, \(summary.actionItems.count) actions, diarized \(diarized), scribe \(scribeMs) ms, claude \(claudeMs) ms")
@@ -165,8 +169,12 @@ public enum ScryPipeline {
         let summary = try ScryPrompt.parseSummary(try await claude(prompt))
         var meta = note.meta
         meta.speakers = meta.speakers.merging(summary.speakers) { a, _ in a }
-        let out = ScryNote(meta: meta, summary: summary, userNotes: note.userNotes,
-                           segments: ScryTranscript.renamed(note.segments, summary.speakers))
+        let spoken = ScryTranscript.renamed(note.segments, summary.speakers)
+        // Links already made stay (yours or not linking someone included); people found this time join them.
+        let found = ScryPeople.rows(segments: spoken, mentioned: summary.people, emails: [:], owner: settings.userName,
+                                    known: ScryPeople.load(settings.people.compactMap(ScrySettings.folder)), note: url)
+        let out = ScryNote(meta: meta, summary: summary, userNotes: note.userNotes, segments: spoken,
+                           people: note.people + found.filter { f in !note.people.contains { $0.id == f.id } })
         try Data(out.markdown().utf8).write(to: url, options: .atomic)
         return summary
     }

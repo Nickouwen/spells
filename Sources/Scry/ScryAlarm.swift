@@ -52,7 +52,17 @@ import ScryCore
         if let f = screen?.visibleFrame {
             p.setFrameOrigin(NSPoint(x: f.midX - p.frame.width / 2, y: f.minY + f.height * 0.62 - p.frame.height / 2))
         }
+        // Rises a little into place; with Reduce Motion it only fades.
+        let end = p.frame, move: CGFloat = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 8
+        p.alphaValue = 0
+        p.setFrame(end.offsetBy(dx: 0, dy: -move), display: false)
         p.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.22
+            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+            p.animator().setFrame(end, display: true)
+            p.animator().alphaValue = 1
+        }
         panel = p
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
                              userInfo: [.announcement: "Your meeting is starting now: \(m.title)", .priority: NSAccessibilityPriorityLevel.high.rawValue])
@@ -70,7 +80,13 @@ import ScryCore
 
     private func hide() {
         sound?.stop(); sound = nil
-        panel?.orderOut(nil); panel = nil
+        if let p = panel {
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.12
+                p.animator().alphaValue = 0
+            }) { MainActor.assumeIsolated { p.orderOut(nil) } }
+        }
+        panel = nil
         shown = nil
     }
 }

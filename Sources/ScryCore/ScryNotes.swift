@@ -127,6 +127,9 @@ public enum ScryNotes {
                line[r.upperBound...].hasPrefix(from + ":**") {
                 return String(line[..<r.upperBound]) + to + line[line.index(r.upperBound, offsetBy: from.count)...]
             }
+            if let p = ScryNotePerson.parse(line), p.role == .speaker, p.name == from {
+                return ScryNotePerson(name: to, role: .speaker, at: p.at, detail: p.detail, link: p.link).markdown
+            }
             if line.range(of: #"^\s*- \[[ xX]\] "#, options: .regularExpression) != nil {
                 return line.replacingOccurrences(of: "**\(from)**:", with: "**\(to)**:")
             }
@@ -148,6 +151,23 @@ public enum ScryNotes {
         let e = JSONEncoder(); e.outputFormatting = .withoutEscapingSlashes
         let row = f.isEmpty ? [] : ["folder: " + String(decoding: (try? e.encode(f)) ?? Data(), as: UTF8.self)]
         return (Array(kept) + row + lines[close...]).joined(separator: "\n")
+    }
+
+    /// Links a person in the note to `known` (nil: unlinks). A linked speaker also takes that person's name in the note.
+    public static func linkPerson(_ url: URL, _ p: ScryNotePerson, to known: ScryPerson?) throws -> ScryNoteFile? {
+        var md = try String(contentsOf: url, encoding: .utf8), p = p
+        if let known, p.role == .speaker {
+            let name = ScryNotePerson.plain(known.name)
+            // Two voices that are one person: the rows become one.
+            if name != p.name { md = renamedText(md, from: p.name, to: name) }
+            p.name = name
+        }
+        p.link = known.map { ScryPeople.link(to: $0, from: url) }
+        return try write(ScryPeople.setting(p, in: md), to: url)
+    }
+
+    public static func addMention(_ url: URL, _ p: ScryNotePerson) throws -> ScryNoteFile? {
+        try write(ScryPeople.setting(p, in: try String(contentsOf: url, encoding: .utf8)), to: url)
     }
 
     /// Undoes an edit: writes `before` back only while the file is still what the edit left (`after`).

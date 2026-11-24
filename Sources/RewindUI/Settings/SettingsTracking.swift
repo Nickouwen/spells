@@ -7,6 +7,7 @@ struct SettingsTrackingTab: View {
     @Environment(\.openURL) private var openURL
     /// The pick shown until `model.settings` catches up (it only refetches while the main window is visible).
     @State private var islandChoice: String?
+    @State private var hoverChoice: Bool?
 
     var body: some View {
         let idle = model.idleThresholdS
@@ -40,7 +41,7 @@ struct SettingsTrackingTab: View {
                     .accessibilityLabel("Pause tracking")
                 }
             }
-            SettingsSection("Notch island", detail: "Today's work time beside the camera notch; hover it for details. Without a notch it floats under the menu bar.") {
+            SettingsSection("Notch island", detail: "Today's work time beside the camera notch; hover or click it for details. Without a notch it floats under the menu bar.") {
                 HStack {
                     Text("Notch island").textRole(.body)
                     Spacer()
@@ -51,6 +52,16 @@ struct SettingsTrackingTab: View {
                     }
                     .labelsHidden()
                     .fixedSize()
+                }
+                SettingsDivider()
+                HStack {
+                    Text("Expand on hover").textRole(.body)
+                    Spacer()
+                    Toggle("Expand on hover", isOn: Binding(get: { hoverChoice ?? TrackerIslandHover.on(model.settings) }, set: { on in
+                        hoverChoice = on
+                        Task { await model.setIslandHover(on) }
+                    }))
+                    .labelsHidden().toggleStyle(.switch).disabled(islandStyle == "off")
                 }
             }
             SettingsSection("Tracker") {

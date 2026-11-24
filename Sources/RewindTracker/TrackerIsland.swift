@@ -45,7 +45,8 @@ import notify
     private var queriedLiveStart: Int64?
     private var isExpanded = false
     private var menuOpen = false
-    private var collapseWork: DispatchWorkItem?
+    private var collapseWork: DispatchWorkItem?, expandWork: DispatchWorkItem?
+    private var opensOnHover = true
     private var token: Int32 = NOTIFY_TOKEN_INVALID
     private var refreshPending = false
     private var buttonShowsResume = false
@@ -73,7 +74,23 @@ import notify
                                                object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.relayout() }
         }
+        loadHover()
         applyStyle(loadStyle())
+    }
+
+    private func loadHover() {
+        do { opensOnHover = TrackerIslandHover.on(try SettingStore(db).all()) } catch {   // keeps the last known choice
+            SupportLog.tracker.error("island_hover not read: \(String(describing: error), privacy: .public)")
+        }
+        root.toolTip = opensOnHover ? nil : "Click for today's details"
+    }
+
+    var expandsOnHover: Bool { opensOnHover }
+    func setExpandsOnHover(_ on: Bool) {
+        do { try SettingStore(db).set(TrackerIslandHover.key, on ? "1" : "0") } catch {
+            SupportLog.tracker.error("island_hover not saved: \(String(describing: error), privacy: .public)")
+        }
+        loadHover()
     }
 
     /// Persist + apply (status-item menu). The change-feed post re-applies it — a no-op by then.
@@ -108,6 +125,7 @@ import notify
                 guard let self else { return }
                 self.refreshPending = false
                 self.applyStyle(self.loadStyle())
+                self.loadHover()
                 guard self.style != .off else { return }
                 self.requestQuery()
                 self.render(nowMs: TrackerStateSync.wallMs())
@@ -158,7 +176,7 @@ import notify
         guard s != style else { return }
         style = s
         if s == .off {
-            collapseWork?.cancel()
+            collapseWork?.cancel(); expandWork?.cancel()
             deferredQuery?.cancel(); deferredQuery = nil
             isExpanded = false
             panel.orderOut(nil)
@@ -228,6 +246,7 @@ import notify
         root.frame = .zero
         root.wantsLayer = true
         root.onHover = { [weak self] inside in self?.hover(inside) }
+        root.onClick = { [weak self] in self?.clicked() }
         root.setAccessibilityElement(true)
         root.setAccessibilityRole(.group)
         panel.contentView = root
@@ -387,12 +406,26 @@ import notify
 
     private func hover(_ inside: Bool) {
         guard !forceExpanded else { return }
-        collapseWork?.cancel()
-        if inside { expand(); return }
+        collapseWork?.cancel(); expandWork?.cancel()
+        if inside {
+            guard !isExpanded, opensOnHover else { return }
+            // A moment's rest opens it: a pointer passing to the menu bar doesn't.
+            let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.expand() } }
+            expandWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
+            return
+        }
         guard !menuOpen else { return }
         let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.collapse() } }
         collapseWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+    }
+
+    /// On the shape itself (its buttons take their own clicks): opens it, or closes it when hover doesn't.
+    private func clicked() {
+        guard !forceExpanded else { return }
+        expandWork?.cancel(); collapseWork?.cancel()
+        if !isExpanded { expand() } else if !opensOnHover { collapse() }
     }
 
     private var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
@@ -443,10 +476,12 @@ import notify
             let fade = CABasicAnimation(keyPath: "shadowOpacity")
             fade.fromValue = layer.presentation()?.shadowOpacity ?? layer.shadowOpacity
             fade.toValue = shadow
-            fade.duration = 0.25
+            fade.duration = isExpanded ? 0.22 : 0.14
+            fade.timingFunction = Self.easeOut
             layer.add(fade, forKey: "shadowOpacity")
             // No bounce: it drops down and settles, rather than overshooting (read as a judder).
-            let spring = CASpringAnimation(perceptualDuration: 0.32, bounce: 0)
+            // Closing is quicker than opening: you've already moved on.
+            let spring = CASpringAnimation(perceptualDuration: isExpanded ? 0.3 : 0.22, bounce: 0)
             spring.keyPath = "path"
             spring.fromValue = from
             spring.toValue = target
@@ -458,12 +493,26 @@ import notify
         CATransaction.commit()
     }
 
+    private static let easeOut = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+
+    /// The outgoing side goes first and fast, so the card's text never shows past the edge of the growing shape and the
+    /// two never overlap. With Reduce Motion the shape doesn't move and these fades stay.
     private func fade(ears: CGFloat, card cardAlpha: CGFloat) {
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = reduceMotion ? 0 : (cardAlpha > 0 ? 0.28 : 0.14)
-            for v in [earRing, earDot, earWarn, earTime] as [NSView] { v.animator().alphaValue = ears }
-            card.animator().alphaValue = cardAlpha
+        let opening = cardAlpha > 0
+        func run(_ views: [NSView], to alpha: CGFloat, duration: TimeInterval, delay: TimeInterval) {
+            let go = { [weak self] in
+                guard let self, self.isExpanded == opening else { return }   // turned round meanwhile
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = duration
+                    ctx.timingFunction = Self.easeOut
+                    for v in views { v.animator().alphaValue = alpha }
+                }
+            }
+            if delay == 0 { go() } else { DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { go() } } }
         }
+        let earViews: [NSView] = [earRing, earDot, earWarn, earTime]
+        run(opening ? earViews : [card], to: opening ? ears : cardAlpha, duration: 0.1, delay: 0)
+        run(opening ? [card] : earViews, to: opening ? cardAlpha : ears, duration: 0.18, delay: reduceMotion ? 0 : opening ? 0.08 : 0.1)
     }
 
     // MARK: - Actions

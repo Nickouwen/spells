@@ -53,6 +53,11 @@ public struct MeetingsView: View {
     /// The note a new folder was asked for, and its name so far.
     @State private var foldering: ScryNoteFile?
     @State private var newFolder = ""
+    /// People you know, from the people folders in settings; nil until read.
+    @State private var known: [ScryPerson]?
+    @State private var peopleFolders: [URL] = []
+    /// Who is being linked (the picker's sheet), and a person mentioned being added by hand.
+    @State private var linking: (note: ScryNoteFile, person: ScryNotePerson)?
     /// "Summarize Again": the note and the language, until confirmed. `working`: notes being redone.
     @State private var redoing: (note: ScryNoteFile, language: String?)?
     @State private var working: Set<URL> = []
@@ -308,6 +313,7 @@ public struct MeetingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .card()
                 }
+                peopleCard(n)
                 if !n.note.userNotes.isEmpty {
                     card("Your notes") { Text(n.note.userNotes).textRole(.body).textSelection(.enabled) }
                 }
@@ -331,6 +337,19 @@ public struct MeetingsView: View {
         } message: {
             Text("Replaces “\(renaming ?? "")” throughout this note.")
         }
+        .sheet(isPresented: Binding(get: { linking != nil }, set: { if !$0 { linking = nil } })) {
+            if let l = linking {
+                ScryPersonPicker(person: l.person, known: known ?? [], canCreate: !peopleFolders.isEmpty) { choice in
+                    linking = nil
+                    switch choice {
+                    case .known(let name, let p): link(l.note, l.person, as: name, to: p)
+                    case .new(let name): create(l.note, l.person, as: name)
+                    case .unlinked(let name): mention(l.note, l.person, as: name)
+                    case .cancel: break
+                    }
+                }
+            }
+        }
         .alert("New folder", isPresented: Binding(get: { foldering != nil }, set: { if !$0 { foldering = nil } })) {
             TextField("Name", text: $newFolder)
             Button("Move") { if let f = foldering { move(f, to: newFolder) } }
@@ -340,6 +359,73 @@ public struct MeetingsView: View {
             Button("Summarize") { if let r = redoing { resummarize(r.note, language: r.language) } }
             Button("Cancel", role: .cancel) {}
         } message: { Text("It replaces the title, summary, lists and action items, ticks included. The transcript and your notes stay.") }
+    }
+
+    // MARK: People
+
+    /// Who spoke and who was mentioned, each linked to the person you know, or with a way to say who it is.
+    private func peopleCard(_ n: ScryNoteFile) -> some View {
+        let people = ScryPeople.people(in: n.note)
+        return card("People") {
+            if people.isEmpty { Text("Nobody yet.").textRole(.label, Theme.inkTertiary) }
+            ForEach(people) { p in
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(p.name).textRole(.bodyEmph)
+                        Text([p.role == .speaker ? "Spoke" : p.at.map { "Mentioned at \($0)" } ?? "Mentioned", p.detail].filter { !$0.isEmpty }.joined(separator: " · "))
+                            .textRole(.label, Theme.inkSecondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: Theme.Space.s)
+                    if let l = p.link {
+                        let who = known.flatMap { ScryPeople.person(for: l, in: $0) }
+                        Button { if let who { NSWorkspace.shared.open(who.url) } } label: {
+                            Label(who?.name ?? (known == nil ? "Linked" : "Linked note not found"), systemImage: "link")
+                        }
+                        .buttonStyle(QuietButtonStyle()).disabled(who == nil).help(who.map { $0.detail.isEmpty ? "Open the note" : $0.detail } ?? "")
+                    }
+                    Menu(p.link == nil ? "Link" : "Change") {
+                        let likely = ScryPeople.suggestions(p.name, in: known ?? []).prefix(5)
+                        if !likely.isEmpty { Section("Is this") { ForEach(likely) { k in Button(k.detail.isEmpty ? k.name : "\(k.name), \(k.detail)") { link(n, p, as: p.name, to: k) } } } }
+                        Button("Choose or Create…") { linking = (n, p) }
+                        if p.link != nil { Divider(); Button("Remove Link") { link(n, p, as: p.name, to: nil) } }
+                    }
+                    .menuStyle(.button).fixedSize()
+                }
+            }
+            HStack {
+                Button("Add Someone Mentioned…") { linking = (n, ScryNotePerson(name: "", role: .mentioned)) }.buttonStyle(QuietButtonStyle())
+                Spacer()
+                if known?.isEmpty == true {
+                    Text(peopleFolders.isEmpty ? "Set your people folder in Scry's settings to link people." : "No person notes in your people folder yet.")
+                        .textRole(.label, Theme.inkTertiary)
+                }
+            }
+        }
+    }
+
+    private func link(_ n: ScryNoteFile, _ p: ScryNotePerson, as name: String, to who: ScryPerson?) {
+        let url = n.url, p = ScryNotePerson(name: name, role: p.role, at: p.at, detail: p.detail, link: p.link)
+        update(url) { try ScryNotes.linkPerson(url, p, to: who) }
+    }
+
+    private func mention(_ n: ScryNoteFile, _ p: ScryNotePerson, as name: String) {
+        let url = n.url, p = ScryNotePerson(name: name, role: p.role, at: p.at, detail: p.detail, link: p.link)
+        update(url) { try ScryNotes.linkPerson(url, p, to: nil) }
+    }
+
+    private func create(_ n: ScryNoteFile, _ p: ScryNotePerson, as name: String) {
+        guard let folder = peopleFolders.first else { return }
+        let url = n.url, date = ISO8601DateFormatter.string(from: Date(), timeZone: timeZone, formatOptions: [.withFullDate])
+        Task {
+            do {
+                let who = try await Task.detached { try ScryPeople.create(name, email: nil, detail: p.detail, from: url, in: folder, date: date) }.value
+                known = ((known ?? []) + [who]).sorted { $0.name < $1.name }
+                link(n, p, as: p.name.isEmpty ? name : p.name, to: who)
+            } catch {
+                SupportLog.scry.error("person note not made: \(String(describing: error), privacy: .private)")
+                workError = (error as? CocoaError)?.code == .fileWriteFileExists ? "A note named “\(name)” is already there. Choose it instead." : "Couldn't make the note: \(error.localizedDescription)"
+            }
+        }
     }
 
     @ViewBuilder private func folderItems(_ n: ScryNoteFile) -> some View {
@@ -446,6 +532,9 @@ public struct MeetingsView: View {
                                     }
                                 }
                                 Button("Rename “\(seg.speaker)” Everywhere…") { newName = seg.speaker; renaming = seg.speaker }
+                                Button("Link Someone Mentioned Here…") {
+                                    linking = (n, ScryNotePerson(name: "", role: .mentioned, at: String(format: "%02d:%02d", Int(seg.start) / 60, Int(seg.start) % 60)))
+                                }
                                 Divider()
                                 Button("Delete Line…", role: .destructive) { askDelete = true; editing = (n, i) }
                             } label: { Image(systemName: "ellipsis") }
@@ -665,6 +754,11 @@ public struct MeetingsView: View {
         let root = root
         notes = await Task.detached(priority: .userInitiated) { ScryNotes.load(root) }.value
         failed = await Task.detached(priority: .userInitiated) { ScryCaptures.failed() }.value
+        let (folders, people) = await Task.detached(priority: .userInitiated) {
+            let f = ScrySettings.load(ScryPipeline.settingRows()).people.compactMap(ScrySettings.folder)
+            return (f, ScryPeople.load(f))
+        }.value
+        peopleFolders = folders; known = people
     }
 
     private func toggle(_ n: ScryNoteFile, _ item: ScryActions.Item) {

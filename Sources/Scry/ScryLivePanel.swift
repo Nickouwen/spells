@@ -88,8 +88,9 @@ import SwiftUI
     func pushLevel(_ level: Double) { model.level = level }
 
     /// `activate` false: shown without taking the focus (a recording that just started).
-    func show(activate: Bool = true) {
+    func show(activate: Bool = true, tab: ScryLiveView.Tab? = nil) {
         startSockets()
+        if let tab { model.tab = tab }
         if panel == nil {
             let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: 600),
                             styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .utilityWindow], backing: .buffered, defer: true)
@@ -108,7 +109,11 @@ import SwiftUI
             if let v = NSScreen.main?.visibleFrame { p.setFrameTopLeftPoint(NSPoint(x: v.maxX - 420, y: v.maxY - 20)) }
             panel = p
         }
-        model.skills = ScryLiveChat.skills(custom: ScryApp.loadSettings().settings.skills)
+        let settings = ScryApp.loadSettings().settings
+        if model.known.isEmpty, !settings.people.isEmpty {
+            Task { model.known = await Task.detached { ScryPeople.load(settings.people.compactMap(ScrySettings.folder)).map(\.name) }.value }
+        }
+        model.skills = ScryLiveChat.skills(custom: settings.skills)
         if activate { NSApp.activate() }   // you type in it
         // The panel, its transcript and your notes live as long as the recording: closing or minimising it
         // only hides it, and "Show live panel" (or the pill) brings the same one back.
@@ -178,6 +183,9 @@ import SwiftUI
     var chat: [Chat] = []
     var skills = ScryLiveChat.builtIn
     var paused = false
+    var tab = ScryLiveView.Tab.transcript
+    /// People you know (`scry_people`), for the names menu.
+    var known: [String] = []
     var notes = ""
     var catchUp = ""
     var busy = false
@@ -202,7 +210,6 @@ struct ScryLiveView: View {
     var onNotesChanged: () -> Void
     var onStop: () -> Void
     var onDiscard: () -> Void
-    @State var tab = Tab.transcript
     @State private var pulse = false
     @State private var query = ""
     @State private var question = ""
@@ -212,6 +219,7 @@ struct ScryLiveView: View {
     /// The line whose speaker you are naming, and the name so far.
     @State private var naming: ScryLiveTranscript.Line?
     @State private var newName = ""
+    @State private var copied: String?
     @FocusState private var searching: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -219,9 +227,9 @@ struct ScryLiveView: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             header
             if let p = model.problem { problem(p) }
-            Picker("View", selection: $tab) { ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+            Picker("View", selection: $model.tab) { ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                 .pickerStyle(.segmented).labelsHidden()
-            switch tab {
+            switch model.tab {
             case .transcript: transcript
             case .notes: notes
             case .chat: chat
@@ -295,8 +303,8 @@ struct ScryLiveView: View {
                     Button(showEcho ? "Hide echo" : "\(echoes) echo hidden") { showEcho.toggle() }.buttonStyle(QuietButtonStyle())
                         .help("Lines of yours that repeat the other side: your speakers, heard by your mic")
                 }
-                IconButton(symbol: "hand.raised", help: "Copy a consent notice to paste into the meeting's chat") { copy(ScryLiveChat.consent) }
-                IconButton(symbol: "doc.on.doc", help: "Copy the transcript") { copy(model.transcript.plainText) }
+                IconButton(symbol: copied == ScryLiveChat.consent ? "checkmark" : "hand.raised", help: "Copy a consent notice to paste into the meeting's chat") { copy(ScryLiveChat.consent) }
+                IconButton(symbol: copied != nil && copied != ScryLiveChat.consent ? "checkmark" : "doc.on.doc", help: "Copy the transcript") { copy(model.transcript.plainText) }
             }
             .background { Button("") { searching = true }.keyboardShortcut("f", modifiers: .command).opacity(0).accessibilityHidden(true) }
             GeometryReader { geo in
@@ -315,8 +323,10 @@ struct ScryLiveView: View {
             .overlay(alignment: .bottom) {
                 if !atBottom {
                     Button("Jump to latest") { scroll.scrollTo(edge: .bottom) }.buttonStyle(RewindButtonStyle()).padding(Theme.Space.s)
+                        .transition(.opacity.combined(with: .offset(y: reduceMotion ? 0 : 6)))
                 }
             }
+            .animation(Theme.Motion.animation(Theme.Motion.swap, reduceMotion: reduceMotion), value: atBottom)
         }
     }
 
@@ -360,6 +370,10 @@ struct ScryLiveView: View {
                         Section("All “\(l.speaker)” lines") { ForEach(names, id: \.self) { n in Button(n) { model.transcript.rename(l.id, to: n, everywhere: true) } } }
                         Section("This line") { ForEach(names, id: \.self) { n in Button(n) { model.transcript.rename(l.id, to: n, everywhere: false) } } }
                     }
+                    let known = model.known.filter { $0 != l.speaker && !names.contains($0) }
+                    if !known.isEmpty {   // all their lines: a name you know is who they are for the whole call
+                        Menu("People You Know") { ForEach(known, id: \.self) { n in Button(n) { model.transcript.rename(l.id, to: n, everywhere: true) } } }
+                    }
                     Button("Rename…") { newName = l.speaker == "Them" ? "" : l.speaker; naming = l }
                 } label: { chip(l.speaker, you: false) }
                     .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().help("Say who this is")
@@ -388,6 +402,8 @@ struct ScryLiveView: View {
     private func copy(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+        copied = text   // a checkmark for a moment: copying shows nothing else
+        Task { try? await Task.sleep(for: .seconds(1.2)); if copied == text { copied = nil } }
     }
 
     private var catchUpCard: some View {
@@ -480,7 +496,7 @@ struct ScryLiveView: View {
     private func send(_ text: String) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !model.transcript.lines.isEmpty else { return }
         question = ""
-        tab = .chat
+        model.tab = .chat
         onAsk(text)
     }
 

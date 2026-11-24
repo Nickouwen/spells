@@ -35,6 +35,12 @@ public enum TrackerIdleSetting {
     }
 }
 
+/// `island_hover`: whether the notch island opens when the pointer is over it. Off: a click opens it.
+public enum TrackerIslandHover {
+    public static let key = "island_hover"
+    public static func on(_ settings: [String: String]) -> Bool { settings[key] != "0" }
+}
+
 /// The helper's status row (`tracker_state`, JSON). Written on start, on every state change and on
 /// its 30 s tick — only when the value changed. A dead `pid` means the row is stale.
 public struct TrackerState: Codable, Sendable, Equatable {

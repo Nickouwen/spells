@@ -177,7 +177,7 @@ public struct ScryInvite: Codable, Equatable, Sendable {
 public struct ScrySettings: Equatable, Sendable {
     public static let autoOfferKey = "scry_auto_offer", liveKey = "scry_live", rootKey = "scry_root",
                       neverKey = "scry_never_apps", nameKey = "scry_user_name",
-                      autoRecordKey = "scry_auto_record", meetingAlarmKey = "scry_meeting_alarm", googleClientIDKey = "scry_google_client_id", skillsKey = "scry_skills", liveOpenKey = "scry_live_open", opsPushKey = "scry_ops_push", opsVaultKey = "scry_ops_vault",
+                      autoRecordKey = "scry_auto_record", meetingAlarmKey = "scry_meeting_alarm", googleClientIDKey = "scry_google_client_id", skillsKey = "scry_skills", peopleKey = "scry_people", liveOpenKey = "scry_live_open", opsPushKey = "scry_ops_push", opsVaultKey = "scry_ops_vault",
                       opsSourcesKey = "scry_ops_sources", opsSlackUserKey = "scry_ops_slack_user", opsRulesKey = "scry_ops_rules"
     public static let defaultRoot = "~/Documents/Scry"
     public var autoOffer = true
@@ -193,6 +193,8 @@ public struct ScrySettings: Equatable, Sendable {
     public var liveOpen = false
     /// Your own live-panel skills, one "name: what to do" per line.
     public var skills: [String] = []
+    /// Folders with a note per person you know; new person notes go in the first.
+    public var people: [String] = []
     public var root = defaultRoot
     public var never: [String] = []
     /// How you appear in notes ("You" is the label; this is the name the summary uses for you).
@@ -221,6 +223,7 @@ public struct ScrySettings: Equatable, Sendable {
         if let v = value(googleClientIDKey) { s.googleClientID = v }
         if let v = value(liveKey) { s.live = v == "1" }
         if let v = value(skillsKey) { s.skills = lines(v) }
+        if let v = value(peopleKey) { s.people = lines(v) }
         if let v = value(liveOpenKey) { s.liveOpen = v == "1" }
         if let v = value(rootKey) { s.root = v }
         if let v = value(neverKey) { s.never = lines(v) }
@@ -246,7 +249,7 @@ public struct ScrySettings: Equatable, Sendable {
     }
 
     public var rows: [String: String] {
-        [Self.autoOfferKey: autoOffer ? "1" : "0", Self.autoRecordKey: autoRecord ? "1" : "0", Self.meetingAlarmKey: meetingAlarm ? "1" : "0", Self.googleClientIDKey: googleClientID, Self.liveOpenKey: liveOpen ? "1" : "0", Self.skillsKey: skills.joined(separator: "\n"), Self.liveKey: live ? "1" : "0", Self.rootKey: root,
+        [Self.autoOfferKey: autoOffer ? "1" : "0", Self.autoRecordKey: autoRecord ? "1" : "0", Self.meetingAlarmKey: meetingAlarm ? "1" : "0", Self.googleClientIDKey: googleClientID, Self.liveOpenKey: liveOpen ? "1" : "0", Self.skillsKey: skills.joined(separator: "\n"), Self.peopleKey: people.joined(separator: "\n"), Self.liveKey: live ? "1" : "0", Self.rootKey: root,
          Self.neverKey: never.joined(separator: "\n"), Self.nameKey: userName, Self.opsPushKey: opsPush ? "1" : "0",
          Self.opsVaultKey: opsVault, Self.opsSourcesKey: opsSources.joined(separator: "\n"), Self.opsSlackUserKey: opsSlackUser, Self.opsRulesKey: opsRules]
     }
@@ -610,6 +613,8 @@ public struct ScrySummary: Codable, Equatable, Sendable {
     /// Diarized label → name, only where the transcript/screenshots support it ("Speaker A" → "Alex").
     public var speakers: [String: String]
     public var followUpEmail: String
+    /// People talked about who weren't on the call.
+    public var people: [ScryNotePerson] = []
     public init(title: String, overview: String = "", recap: [Topic] = [], decisions: [String] = [], keyDates: [String] = [],
                 actionItems: [Action] = [], openQuestions: [String] = [], insights: [String] = [],
                 speakers: [String: String] = [:], followUpEmail: String = "") {
@@ -642,6 +647,7 @@ public enum ScryPrompt {
           "openQuestions": ["..."],
           "insights": ["..."],
           "speakers": {"Speaker A": "name"},
+          "people": [{"name": "as said", "detail": "who they are, a few words", "at": "mm:ss"}],
           "followUpEmail": "..."
         }
 
@@ -655,6 +661,8 @@ public enum ScryPrompt {
         - Keep dates as spoken ("Friday", "next Tuesday"), in "due" and in keyDates; "due" is a few words at most.
         - In "speakers", map a label like "Speaker A" to a name only with evidence from the transcript (they're \
         addressed by name, they introduce themselves), the on-screen names or the invite. Leave out labels you can't support.
+        - people: persons talked about who are not on the call ("my brother Marcus"): the name as said, who they \
+        are (their role or relation, never an opinion about them), and the [mm:ss] of the first mention. Not companies, not the speakers, no one without a name.
         - The invite lists who was invited, not who attended; use it for full names and emails.
         - summary: one plain paragraph, 3–5 sentences, of what was talked through, main topics in order. No lists, \
         no small talk unless it was the point of the call. insights: notable dynamics, risks or signals, briefly.
@@ -688,13 +696,17 @@ public enum ScryPrompt {
             guard let s = try? JSONDecoder().decode(LooseSummary.self, from: Data(json.utf8)), s.title != nil,
                   s.actionItems != nil || s.speakers != nil || s.followUpEmail != nil || s.summary != nil || s.recap != nil || s.decisions != nil
             else { continue }
-            return ScrySummary(
+            var summary = ScrySummary(
                 title: s.title ?? "", overview: s.summary ?? "", recap: (s.recap ?? []).map { .init(title: $0.title ?? "", points: $0.points ?? []) },
                 decisions: s.decisions ?? [], keyDates: s.keyDates ?? [],
                 actionItems: (s.actionItems ?? []).map { .init(owner: $0.owner ?? "", task: $0.task ?? "", due: $0.due) },
                 openQuestions: s.openQuestions ?? [], insights: s.insights ?? [],
                 speakers: (s.speakers ?? [:]).compactMapValues { $0 },
                 followUpEmail: s.followUpEmail ?? "")
+            summary.people = (s.people ?? []).map { p in
+                ScryNotePerson(name: p.name ?? "", role: .mentioned, at: p.at.flatMap { $0.wholeMatch(of: /\d+:\d\d/) == nil ? nil : $0 }, detail: p.detail ?? "")
+            }.filter { !$0.name.isEmpty }
+            return summary
         }
         throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "no summary JSON in the reply"))
     }
@@ -745,6 +757,8 @@ public enum ScryPrompt {
         struct Topic: Decodable { var title: String?, points: [String]? }
         struct Action: Decodable { var owner: String?, task: String?, due: String? }
         var title: String?, summary: String?, recap: [Topic]?, decisions: [String]?, keyDates: [String]?, actionItems: [Action]?
+        struct Person: Decodable { var name: String?, detail: String?, at: String? }
+        var people: [Person]?
         var openQuestions: [String]?, insights: [String]?, speakers: [String: String?]?, followUpEmail: String?   // null = unmapped
     }
 }
@@ -770,8 +784,10 @@ public struct ScryNote: Equatable, Sendable {
     public var summary: ScrySummary
     public var userNotes: String
     public var segments: [ScrySegment]
-    public init(meta: Meta, summary: ScrySummary, userNotes: String, segments: [ScrySegment]) {
-        self.meta = meta; self.summary = summary; self.userNotes = userNotes; self.segments = segments
+    /// Who spoke and who was talked about, with links to the people you know (`ScryPeople`).
+    public var people: [ScryNotePerson]
+    public init(meta: Meta, summary: ScrySummary, userNotes: String, segments: [ScrySegment], people: [ScryNotePerson] = []) {
+        self.people = people; self.meta = meta; self.summary = summary; self.userNotes = userNotes; self.segments = segments
     }
 
     /// YAML frontmatter (title, date, start, end, duration_min, app, participants, speakers, source: scry),
@@ -804,6 +820,7 @@ public struct ScryNote: Equatable, Sendable {
             "\($0.speaker) \(stamp($0.seconds)) (\(Int(($0.seconds / total * 100).rounded()))%)"
         }.joined(separator: ", ")] : []
         section("Insights", bullets(s.insights) + talkLine)
+        section("People", people.map(\.markdown))
         section("Your notes", lines(userNotes))
         section("Follow-up email", lines(s.followUpEmail))
         section("Transcript", segments.enumerated().flatMap { i, g in
@@ -874,7 +891,8 @@ public struct ScryNote: Equatable, Sendable {
             speakers: speakers, followUpEmail: text("follow-up email"))
         return ScryNote(meta: Meta(startedAt: startedAt, endedAt: endedAt, app: app, participants: participants, speakers: speakers,
                                    folder: decoded("folder", String.self) ?? fm["folder"].flatMap { $0.isEmpty ? nil : $0 }),
-                        summary: summary, userNotes: text("your notes"), segments: segments)
+                        summary: summary, userNotes: text("your notes"), segments: segments,
+                        people: (sections["people"] ?? []).compactMap(ScryNotePerson.parse))
     }
     /// `**[mm:ss] Speaker:** text` → its parts; nil for any other line. By hand, not Regex: a long call has
     /// thousands of these lines and Swift Regex took ~0.3 ms each (1.7 s per note).

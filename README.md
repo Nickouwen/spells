@@ -44,6 +44,10 @@ Pause records silence until you resume, and the note says when. The hand button 
 
 After the call, each transcript line in Meetings can be edited, given to another speaker, or deleted (with undo). A note's **More** menu shares it, files it in a folder, summarizes it again in another language, or transcribes the recording again for a number of voices. SSNs, card and bank numbers are left out of saved notes. **⌘Q** in Spells asks whether to quit the menu-bar modules too.
 
+## Scry: people
+
+Each note lists who spoke and who was mentioned. Set `scry_people` to one or more folders with a Markdown note per person (the file name is the name; frontmatter may hold `aliases`, `email`, `role`, `company`). Scry links someone by itself only with the same email or the same full name. For anyone else, the note's People card suggests matches, and you choose one or make a new person note. Linking a speaker also renames them in the note. Inside one Obsidian vault the links are wiki links, so backlinks work.
+
 ## Scry: push call items to a team vault
 
 Off by default. After a call, Claude picks out what your team needs from the transcript and says where each item goes in a shared Obsidian vault. The pill offers "Push N items". Nothing is written until you click it. A write only adds a note or a section at the end of a note, with a source line. Sensitive numbers, passwords and keys become `[removed]`.

@@ -228,6 +228,8 @@ final class TrackerIslandButton: NSButton {
 /// Root view: tracks hover over the black shape (`hoverRect`, local) and takes first clicks.
 final class TrackerIslandRootView: NSView {
     var onHover: ((Bool) -> Void)?
+    var onClick: (() -> Void)?
+    override func mouseDown(with event: NSEvent) { onClick?() }
     var hoverRect: CGRect = .zero {
         didSet { if hoverRect != oldValue { updateTrackingAreas() } }
     }

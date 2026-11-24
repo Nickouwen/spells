@@ -54,7 +54,13 @@ import UserNotifications
         refreshIcon()
         pill.onRecord = { [weak self] in self?.start(app: self?.offered, systemAudio: true) }
         pill.onNever = { [weak self] in self?.never(self?.offered) }
-        pill.onOpenLive = { [weak self] in self?.session?.live?.show() }
+        pill.onOpenLive = { [weak self] in self?.openCall() }
+        pill.recordingMenu = { [weak self] in
+            guard let self, session != nil else { return nil }
+            let menu = NSMenu()
+            menuNeedsUpdate(menu)   // what the menu-bar eye offers during a call
+            return menu
+        }
         pill.onStop = { [weak self] in self?.stop() }
         pill.onOpenNote = { url in ScryWindows.showMeetings(url) }
         pill.onPushOps = { [weak self] in self?.pushOps() }
@@ -470,7 +476,12 @@ import UserNotifications
                                   action: nil, keyEquivalent: "")
             info.isEnabled = false
             menu.addItem(info)
-            if s.live != nil { menu.addItem(action("Show live panel", #selector(showLive))) }
+            if s.live != nil {
+                menu.addItem(action("Show live panel", #selector(showLive)))
+                menu.addItem(action("Your notes for this call", #selector(showLiveNotes)))
+            }
+            menu.addItem(action("Meetings", #selector(openMeetings)))
+            menu.addItem(.separator())
             menu.addItem(action(s.paused ? "Resume recording" : "Pause recording", #selector(togglePause)))
             menu.addItem(action("Stop and make notes", #selector(stop)))
             menu.addItem(action("Discard", #selector(discard)))
@@ -495,6 +506,9 @@ import UserNotifications
     @objc private func recordCall() { start(app: watch.callApp, systemAudio: true) }
     @objc private func recordInPerson() { start(app: nil, systemAudio: false) }
     @objc private func showLive() { session?.live?.show() }
+    @objc private func showLiveNotes() { session?.live?.show(tab: .notes) }
+    /// A click on the call signal: the live panel, or the meetings when the live side is off.
+    private func openCall() { if let live = session?.live { live.show() } else { ScryWindows.showMeetings() } }
 
     @objc private func openNotes() {
         let root = Self.loadSettings().settings.rootURL

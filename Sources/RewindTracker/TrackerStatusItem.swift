@@ -79,6 +79,10 @@ import TrackerCore
             let show = action("Show Island", #selector(toggleIsland))
             show.state = island.style == .off ? .off : .on
             menu.addItem(show)
+            let hover = action("Expand Island on Hover", #selector(toggleIslandHover))
+            hover.state = island.expandsOnHover ? .on : .off
+            hover.isEnabled = island.style != .off
+            menu.addItem(hover)
         }
         let open = action("Open Rewind", #selector(openRewind))
         open.isEnabled = Self.appURL() != nil
@@ -99,6 +103,8 @@ import TrackerCore
         guard let island else { return }
         if island.style == .off { island.setStyle(lastIslandStyle) } else { lastIslandStyle = island.style; island.setStyle(.off) }
     }
+
+    @objc private func toggleIslandHover() { if let island { island.setExpandsOnHover(!island.expandsOnHover) } }
 
     // Shared with the island's buttons.
 

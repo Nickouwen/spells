@@ -349,6 +349,9 @@ public final class AppModel {
         await write { try SettingStore(self.db).set(ShellPrefs.idleThresholdS, String(seconds)) }
     }
 
+    /// The tracker applies it live from the change feed.
+    public func setIslandHover(_ on: Bool) async { await write { try SettingStore(self.db).set(TrackerIslandHover.key, on ? "1" : "0") } }
+
     public var idleThresholdS: Int { ShellPrefs.idleThreshold(settings) }
 
     /// Pause tracking until `untilMs` (nil = resume). The helper applies it live from the change feed.
