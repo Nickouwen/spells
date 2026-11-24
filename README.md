@@ -25,7 +25,7 @@ No real user database, recordings, transcripts, exports, API keys, or private pl
 
 ## Scry: meeting alarm and Google Calendar
 
-When a meeting starts and you're not in a call, Scry pops up "Your meeting is starting now". Menu › **Meeting reminders…** adds one by hand and connects Google Calendar (read-only, your main calendar). macOS Calendar accounts count too. The sign-in happens in your browser, and the token stays in your Keychain.
+When a meeting starts and you're not in a call, Scry pops up "Your meeting is starting now". Menu › **Meeting reminders…** adds one by hand and connects Google Calendar (read-only, your main calendar). macOS Calendar accounts count too. Only events with other people count as meetings. The sign-in happens in your browser, and the token stays in your Keychain.
 
 Google needs an OAuth client of your own, once per organization:
 

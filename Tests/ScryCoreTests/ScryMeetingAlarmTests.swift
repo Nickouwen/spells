@@ -70,7 +70,7 @@ private let meeting = ScryMeeting(title: "Check-in", start: t0, end: t0.addingTi
       "organizer": {"email": "a@example.com"},
       "conferenceData": {"entryPoints": [{"entryPointType": "phone", "uri": "tel:+1"}, {"entryPointType": "video", "uri": "https://meet.google.com/abc-defg-hij"}]}},
      {"status": "confirmed", "summary": "Focus", "start": {"dateTime": "2026-11-24T12:45:00Z"}, "end": {"dateTime": "2026-11-24T13:00:00Z"},
-      "organizer": {"email": "me@example.com", "self": true}, "description": "<a href=\\"https://x.slack.com/archives/1\\">notes</a>"},
+      "organizer": {"email": "me@example.com", "self": true}, "description": "<a href=\\"https://x.slack.com/archives/1\\">notes</a> https://meet.google.com/abc-defg-hij"},
      {"status": "confirmed", "summary": "Team block", "start": {"dateTime": "2026-11-24T12:45:00Z"}, "end": {"dateTime": "2026-11-24T13:00:00Z"},
       "organizer": {"email": "c_1@group.calendar.google.com", "displayName": "Team Calendar"}},
      {"status": "confirmed", "summary": "Declined", "start": {"dateTime": "2026-11-24T12:00:00Z"}, "end": {"dateTime": "2026-11-24T13:00:00Z"},

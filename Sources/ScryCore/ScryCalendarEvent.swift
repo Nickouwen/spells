@@ -7,11 +7,10 @@ public struct ScryCalendarEvent: Sendable {
     public var off: Bool
     public init(candidate: ScryInvite.Candidate, off: Bool) { self.candidate = candidate; self.off = off }
 
-    /// A meeting for the alarm: other people or a call link, and not off. Focus blocks aren't meetings.
+    /// A meeting for the alarm: other people, and not off. A block of your own isn't one, even with a call link in it.
     public var meeting: ScryMeeting? {
-        let link = ScryMeeting.callLink(in: candidate.text)
-        guard !off, link != nil || !candidate.invitees.isEmpty else { return nil }
-        return ScryMeeting(title: candidate.title, start: candidate.start, end: candidate.end, link: link)
+        guard !off, !candidate.invitees.isEmpty else { return nil }
+        return ScryMeeting(title: candidate.title, start: candidate.start, end: candidate.end, link: ScryMeeting.callLink(in: candidate.text))
     }
 
     /// Google often sends only an address: `laura.crane@x.com` → "Laura Crane"; kept whole when it isn't plain words.
