@@ -59,7 +59,7 @@ struct SettingsTrackingTab: View {
                     Spacer()
                     Toggle("Expand on hover", isOn: Binding(get: { hoverChoice ?? TrackerIslandHover.on(model.settings) }, set: { on in
                         hoverChoice = on
-                        Task { await model.setIslandHover(on) }
+                        Task { await model.setIslandHover(on); hoverChoice = nil }   // the menu can change it too
                     }))
                     .labelsHidden().toggleStyle(.switch).disabled(islandStyle == "off")
                 }

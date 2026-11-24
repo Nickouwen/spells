@@ -76,9 +76,9 @@ public struct ScryLiveTranscript: Equatable, Sendable {
         }
         guard everywhere else { return }
         guard name != "Them" else { aliases = aliases.filter { $0.value != line.speaker }; return }
-        // A new spelling is the same person; a name with no word in common is someone else.
+        // A longer or shorter form is the same person; any other name is someone else.
         func words(_ s: String) -> Set<String> { Set(s.lowercased().split(separator: " ").map(String.init)) }
-        picked[name] = person ?? (words(name).isDisjoint(with: words(line.speaker)) ? nil : picked[line.speaker])
+        picked[name] = person ?? (words(name).isSubset(of: words(line.speaker)) || words(name).isSuperset(of: words(line.speaker)) ? picked[line.speaker] : nil)
         for (k, v) in aliases where v == line.speaker { aliases[k] = name }
         aliases[line.speaker] = name
     }
@@ -95,7 +95,7 @@ public struct ScryLiveTranscript: Equatable, Sendable {
 
     // MARK: Echo
 
-    /// At least three quarters of the mic's words, in order, within what the far side was saying when the mic started:
+    /// At least three quarters of the mic's words, with no "not", day or number that they didn't say (a correction), in order, within what the far side was saying when the mic started:
     /// an echo starts while they talk, and you repeating a date to confirm it start after. Judged on text because the
     /// live sockets give no word times; the note's filter uses loudness (`ScryTranscript.withoutEcho`).
     private func repeatsFarSide(_ text: String, from start: TimeInterval) -> Bool {
@@ -115,9 +115,13 @@ public struct ScryLiveTranscript: Equatable, Sendable {
                     diagonal = above
                 }
             }
-            if best[window.count] * 4 >= mine.count * 3 { return true }
+            if best[window.count] * 4 >= mine.count * 3, !mine.contains(where: { Self.corrects($0) && !window.contains($0) }) { return true }
         }
         return false
+    }
+
+    private static func corrects(_ w: String) -> Bool {
+        w.hasSuffix("n't") || w.contains(where: \.isNumber) || w.hasSuffix("day") || ["no", "not", "never"].contains(w)
     }
 
     private static func sentences(_ s: String) -> [String] {
@@ -129,7 +133,7 @@ public struct ScryLiveTranscript: Equatable, Sendable {
     }
 
     private static func words(_ s: String) -> [String] {
-        s.lowercased().split { !$0.isLetter && !$0.isNumber && $0 != "'" }.map(String.init)
+        s.lowercased().replacing("’", with: "'").split { !$0.isLetter && !$0.isNumber && $0 != "'" }.map(String.init)
     }
 }
 

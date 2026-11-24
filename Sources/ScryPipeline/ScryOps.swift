@@ -247,12 +247,14 @@ public enum ScryOps {
     private static let numberPatterns = rules.prefix(numberRules).map { (try! NSRegularExpression(pattern: $0.0), $0.1, $0.2) }
 
     /// The first `numberRules` are the numbers.
-    private static let numberRules = 4
+    private static let numberRules = 5
     private static let rules: [(String, Int, @Sendable (String) -> Bool)] = [
         (#"\b\d{3}-\d{2}-\d{4}\b"#, 0, { _ in true }),
-        (#"(?i)\b(?:ssn|social(?: security)?(?: number)?)\D{0,12}(\d(?:[\s.,-]{0,2}\d){8})\b"#, 1, { _ in true }),
+        (#"(?i)\b(?:ssn|social(?: security)?(?: number)|social security|social(?=\s*(?:is\b|\W?s\b|[:?,.]|\d)))\D{0,12}(\d(?:[\s.,-]{0,2}\d){8})\b"#, 1, { _ in true }),
         (#"\b\d(?:(?:[.,]?\n|[ \t-])?\d){12,18}\b"#, 0, luhn),
-        (#"(?i)\b(?:account|acct|routing|aba|iban)(?:\s+(?:number|no\.?|num|#))?[?.,;]?\s*(?:is\s+|it'?s\s+|[:#=]\s*)?([A-Z]{2}\d{2}(?:[A-Z0-9]{8,30}|(?:[.,]?[\s-][A-Z]{4})?(?:[.,]?[\s-](?=[A-Z]*\d)[A-Z0-9]{1,4}){2,8})\b|\d(?:(?:[.,]?\n|[ -])?\d){5,19})\b"#, 1, { _ in true }),
+        // A card with another number right before or after it ("12 4111 …", "… 1111 123").
+        (#"\b\d{4}(?:(?:[.,]?\n|[ \t-])?\d{4}){3}\b|\b\d{4}(?:[.,]?\n|[ \t-])?\d{6}(?:[.,]?\n|[ \t-])?\d{5}\b"#, 0, luhn),
+        (#"(?i)\b(?:(?:account|acct)(?:\s+(?:number|no\.?|num|#)[?.,;]?\s*|[?.,;]?[ \t]*)|(?:routing|aba|iban)(?:\s+(?:number|no\.?|num|#))?[?.,;]?\s*)(?:(?:sure|yes|yeah|yep|okay|ok|so|um|uh)[,.]?\s+){0,2}(?:is\s+|it\W?s\s+|[:#=]\s*)?([A-Z]{2}\d{2}(?:[A-Z0-9]{8,30}|(?:[.,]?[\s-][A-Z]{4})?(?:[.,]?[\s-](?=[A-Z]*\d)[A-Z0-9]{1,4}){2,8})\b|\d(?:(?:[.,]?\n|[ -])?\d){5,19})\b"#, 1, { _ in true }),
         (#"(?i)\b(?:password|passcode|passwd|pwd)\s*(?:is\s+|[:=]\s*)["'“]?([^\s"'”]{4,})"#, 1, { v in v.contains { !$0.isLetter } }),
         (#"(?i)\bpin(?:\s+code)?\s*(?:is\s+|[:=]\s*)?(\d{4,8})\b"#, 1, { _ in true }),
         (#"\b(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|[rs]k_live_[0-9A-Za-z]{16,})"#, 0, { _ in true }),

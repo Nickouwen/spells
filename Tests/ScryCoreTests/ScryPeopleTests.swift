@@ -161,10 +161,11 @@ private func md(_ extra: String = "") -> String {
     let v = try vault(); defer { try? FileManager.default.removeItem(at: v) }
     let url = v.appending(path: "calls/m.md")
     try md("## People\n\n- **Marcus** (mentioned 00:04) · brother\n\n").write(to: url, atomically: true, encoding: .utf8)
+    #expect(throws: ScryNotes.Twice.self) { try ScryNotes.linkPerson(url, .init(name: "Marcus", role: .mentioned, at: "00:04"), to: nil, adding: true) }
     #expect(throws: ScryNotes.Twice.self) { try ScryNotes.addMention(url, .init(name: "Marcus", role: .mentioned, at: "00:09")) }
     let dana = try #require(ScryPeople.load([v.appending(path: "People")]).first { $0.name == "Dana Whitfield" })
-    let n = try #require(try ScryNotes.linkPerson(url, .init(name: "Marcus", role: .mentioned, at: "00:04", detail: "brother"), to: dana))   // the row itself
-    #expect(n.note.people.filter { $0.name == "Marcus" }.count == 1 && n.note.people.contains { $0.detail == "brother" && $0.link != nil })
+    let n = try #require(try ScryNotes.linkPerson(url, .init(name: "Marcus", role: .mentioned, detail: "an old one"), to: dana))   // the row itself, as it is now
+    #expect(n.note.people.filter { $0.name == "Marcus" }.count == 1 && n.note.people.contains { $0.detail == "brother" && $0.at == "00:04" && $0.link != nil })
 }
 
 @Test func anyPersonKindIsAPersonNote() {
@@ -177,7 +178,19 @@ private func md(_ extra: String = "") -> String {
     defer { try? FileManager.default.removeItem(at: url) }
     try md().write(to: url, atomically: true, encoding: .utf8)
     let s = try #require(ScryNote.parse(md())).segments
-    let n = try #require(try ScryNotes.editLine(url, index: 1, old: s[1], speaker: s[1].speaker, text: "The account number is", also: [(2, s[2], "[removed]")]))
+    let n = try #require(try ScryNotes.editLine(url, index: 1, old: s[1], speaker: s[1].speaker, text: "The account number is", redact: { t in t.indices.map { $0 == 2 ? "[removed]" : t[$0] } }))
     #expect(n.note.segments[1].text == "The account number is" && n.note.segments[2].text == "[removed]" && n.note.segments[0] == s[0])
-    #expect(throws: ScryNotes.Changed.self) { try ScryNotes.editLine(url, index: 1, old: n.note.segments[1], speaker: "X", text: "y", also: [(2, s[2], "z")]) }
+}
+
+@Test func theModelNeverJoinsTwoVoicesOrRenamesANamedOne() {
+    let s = ["You", "Dana", "Speaker B", "Speaker C", "Speaker D"].map { ScrySegment(speaker: $0, start: 0, end: 1, text: "x") }
+    #expect(ScryTranscript.safeNames(["Dana": "Robert", "Speaker B": "Dana", "Speaker C": "Jo"], for: s) == ["Speaker C": "Jo"])
+    #expect(ScryTranscript.safeNames(["Speaker B": "Jo", "Speaker C": "Jo", "Speaker D": "Al"], for: s) == ["Speaker D": "Al"])
+}
+
+@Test func aNoteWrittenAnewKeepsYourFieldsAndSections() {
+    let old = "---\ntitle: A\ntags:\n  - deal\nsource: scry\n---\n\n# A\n\n## Summary\n\nOld.\n\n## Corrections\n\nMine.\n\n## Transcript\n\n**[00:01] You:** ## Corrections\n"
+    let new = "---\ntitle: B\nsource: scry\n---\n\n# B\n\n## Summary\n\nNew.\n\n## Transcript\n\n**[00:01] You:** Hi.\n"
+    #expect(ScryNotes.carried(from: old, to: new) == "---\ntitle: B\nsource: scry\ntags:\n  - deal\n---\n\n# B\n\n## Summary\n\nNew.\n\n## Corrections\n\nMine.\n\n## Transcript\n\n**[00:01] You:** Hi.\n")
+    #expect(ScryNotes.carried(from: new, to: new) == new)
 }

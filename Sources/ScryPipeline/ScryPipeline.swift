@@ -119,7 +119,10 @@ public enum ScryPipeline {
         // Named before the summary, so its recap says "Alex", not "Speaker A": Meet's speaking indicator votes
         // first; with nothing from it, a lone far-side speaker is the one other person named.
         let fromMeet = capture.app == nil ? [:] : ScryMeet.names(for: raw, hints: meet.hints, owner: settings.userName, given: given.flatMap(\.hints))
-        let sole = capture.app == nil || !fromMeet.isEmpty ? [:] : ScryNames.soleSpeaker(raw, names: names, userName: settings.userName)
+        // A name you gave beats the screen's: the only voice is the one person you named.
+        let named = Set(given.map(\.name))
+        let sole = capture.app == nil || !fromMeet.isEmpty || named.count > 1 ? [:]
+            : ScryNames.soleSpeaker(raw, names: named.isEmpty ? names : Array(named), userName: named.isEmpty ? settings.userName : "")
         let known = fromMeet.merging(sole) { a, _ in a }
         if !meet.hints.isEmpty || !given.isEmpty {
             SupportLog.scry.info("Meet speakers: \(meet.hints.count, privacy: .public) hints named \(fromMeet.count, privacy: .public) of \(Set(raw.map(\.speaker)).subtracting(["You"]).count, privacy: .public) far-side speakers")
@@ -141,8 +144,7 @@ public enum ScryPipeline {
         }
         let claudeMs = ms(clock.now - t0)
 
-        // The model names voices that have no name yet; one named above (or by you) keeps its name and link.
-        summary.speakers = summary.speakers.filter { !known.values.contains($0.key) }
+        summary.speakers = ScryTranscript.safeNames(summary.speakers, for: segments)
         let speakers = known.merging(summary.speakers) { a, _ in a }
         var participants = names
         for n in speakers.values.sorted() where !participants.contains(where: { $0 == n || $0.hasPrefix(n + " ") }) {
@@ -151,7 +153,7 @@ public enum ScryPipeline {
         let url = unique(ScryNote.fileURL(root: settings.rootURL, startedAt: capture.startedAt, title: summary.title))
         let spoken = ScryTranscript.renamed(segments, summary.speakers)
         let emails = Dictionary(grouping: capture.invite?.invitees ?? [], by: \.name)   // two invitees with one name: neither email is sure
-            .compactMapValues { i in Set(i.compactMap { $0.email?.lowercased() }).count == 1 ? i.compactMap(\.email)[0] : nil }
+            .compactMapValues { $0.count == 1 ? $0[0].email : nil }
         let people = ScryPeople.rows(segments: spoken, mentioned: summary.people, emails: emails, owner: settings.userName,
                                      known: ScryPeople.load(settings.people.compactMap(ScrySettings.folder)), note: url,
                                      picked: Dictionary(given.compactMap { g in g.person.map { (g.name, $0) } }, uniquingKeysWith: { _, b in b }))
@@ -170,7 +172,7 @@ public enum ScryPipeline {
 
     /// Re-summarizes a note from its own transcript with the current prompt and rewrites it in place: same
     /// times, participants, transcript and your notes; new title, summary and action items (ticks are lost).
-    public static func resummarize(note url: URL, settings: ScrySettings, keyterms: [String], language: String? = nil) async throws -> ScrySummary {
+    public static func resummarize(note url: URL, settings: ScrySettings, keyterms: [String], language: String? = nil) async throws -> (summary: ScrySummary, before: String, after: String) {
         let before = try String(contentsOf: url, encoding: .utf8)
         guard let note = ScryNote.parse(before), !note.segments.isEmpty else {
             throw Failure.claude("\(url.lastPathComponent) isn't a Scry note with a transcript")
@@ -184,7 +186,7 @@ public enum ScryPipeline {
                                         keyterms: keyterms, language: language)
         var summary = try ScryPrompt.parseSummary(try await claude(prompt))
         summary.insights += lines   // the model can't know these
-        summary.speakers = summary.speakers.filter { s in !note.segments.contains { $0.speaker == s.value } }   // two voices never become one
+        summary.speakers = ScryTranscript.safeNames(summary.speakers, for: note.segments)
         var meta = note.meta
         meta.speakers = meta.speakers.merging(summary.speakers) { a, _ in a }
         let spoken = ScryTranscript.renamed(safe, summary.speakers)
@@ -197,8 +199,9 @@ public enum ScryPipeline {
         let out = ScryNote(meta: meta, summary: summary, userNotes: userNotes, segments: spoken,
                            people: ScryPeople.merged(kept, found.filter { f in !kept.contains { $0.id == f.id } }))   // one you unlinked stays unlinked
         guard try String(contentsOf: url, encoding: .utf8) == before else { throw Failure.noteChanged }
-        try Data(out.markdown().utf8).write(to: url, options: .atomic)
-        return summary
+        let after = ScryNotes.carried(from: before, to: out.markdown())
+        try Data(after.utf8).write(to: url, options: .atomic)
+        return (summary, before, after)
     }
 
     /// `x.md` → `x-2.md`, `x-3.md`… while the path exists.

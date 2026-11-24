@@ -252,3 +252,14 @@ private let noteText = "---\ntitle: \"T\"\ndate: 2026-11-24\nstart: 2026-11-24T1
     #expect(ScryNames.soleSpeaker(segs, names: ["Sam Rivera", "Alex Client"], userName: "Sam Rivera") == ["Speaker A": "Alex Client"])
     #expect(ScryNames.soleSpeaker(segs, names: ["Sam Rivera", "Sam Chen", "Alex Client"], userName: "Sam").isEmpty)
 }
+
+@Test func aCorrectionOverThemIsNotEcho() {
+    for said in ["We can't ship Friday.", "We can ship Monday.", "We can not ship Friday."] {
+        var t = ScryLiveTranscript()
+        t.hear(far: true, "We can ship Friday", at: 2)
+        t.hear(far: false, "We", at: 2.5)
+        t.commit(far: true, "We can ship Friday.", at: 3)
+        t.commit(far: false, said, at: 4)
+        #expect(t.visible.count == 2, "\(said)")
+    }
+}

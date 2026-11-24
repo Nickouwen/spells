@@ -414,8 +414,8 @@ public struct MeetingsView: View {
     }
 
     private func link(_ n: ScryNoteFile, _ p: ScryNotePerson, as name: String, to who: ScryPerson?) {
-        let url = n.url, p = ScryNotePerson(name: name, role: p.role, at: p.at, detail: p.detail, link: p.link)
-        update(url, undo: who.map { "Linked to \($0.name)." } ?? "Link removed.") { try ScryNotes.linkPerson(url, p, to: who) }
+        let url = n.url, adding = p.name.isEmpty, p = ScryNotePerson(name: name, role: p.role, at: p.at, detail: p.detail, link: p.link)
+        update(url, undo: who.map { "Linked to \($0.name)." } ?? "Link removed.") { try ScryNotes.linkPerson(url, p, to: who, adding: adding) }
     }
 
     private func mention(_ n: ScryNoteFile, _ p: ScryNotePerson, as name: String) {
@@ -452,27 +452,25 @@ public struct MeetingsView: View {
     }
 
     private func resummarize(_ n: ScryNoteFile, language: String?) {
-        work(n, undo: "Summarized again.") { settings, terms in
-            _ = try await ScryPipeline.resummarize(note: n.url, settings: settings, keyterms: terms, language: language)
-            return n.url
+        work(n) { settings, terms in
+            let r = try await ScryPipeline.resummarize(note: n.url, settings: settings, keyterms: terms, language: language)
+            return (n.url, (r.before, r.after))
         }
     }
 
     /// The recording is transcribed again for that many people; the result is a second note, selected when it's done.
     private func separate(_ n: ScryNoteFile, voices: Int) {
-        work(n) { settings, terms in try await ScryPipeline.separate(note: n.note, voices: voices, settings: settings, keyterms: terms).noteURL }
+        work(n) { settings, terms in (try await ScryPipeline.separate(note: n.note, voices: voices, settings: settings, keyterms: terms).noteURL, nil) }
     }
 
-    private func work(_ n: ScryNoteFile, undo what: String? = nil, _ body: @escaping @Sendable (ScrySettings, [String]) async throws -> URL) {
+    private func work(_ n: ScryNoteFile, _ body: @escaping @Sendable (ScrySettings, [String]) async throws -> (URL, (before: String, after: String)?)) {
         working.insert(n.url)
         workError = nil
-        if what != nil { undo = nil }
         Task {
             let rows = await Task.detached { ScryPipeline.settingRows() }.value
             do {
-                let before = try String(contentsOf: n.url, encoding: .utf8)
-                let url = try await body(ScrySettings.load(rows), ScryPipeline.keyterms(rows))
-                if let what { undo = (url, what, before, try String(contentsOf: url, encoding: .utf8)) }
+                let (url, changed) = try await body(ScrySettings.load(rows), ScryPipeline.keyterms(rows))
+                if let c = changed { undo = (url, "Summarized again.", c.before, c.after) }
                 await reload()
                 selection = url
             } catch {
@@ -558,6 +556,7 @@ public struct MeetingsView: View {
             TextField("Speaker", text: $lineSpeaker)
             TextField("Text", text: $lineText)
             Button("Save") { if let e = editing { edit(e.note, e.index, speaker: lineSpeaker, text: lineText) } }
+                .disabled([lineSpeaker, lineText].contains { $0.allSatisfy(\.isWhitespace) })
             Button("Cancel", role: .cancel) {}
         }
         .alert("Delete this line?", isPresented: Binding(get: { editing != nil && askDelete }, set: { if !$0 { editing = nil } })) {
@@ -573,16 +572,9 @@ public struct MeetingsView: View {
 
     private func edit(_ n: ScryNoteFile, _ i: Int, speaker: String, text: String?) {
         let url = n.url, old = n.note.segments[i]
-        // A number typed here is judged with the lines around it.
-        var safe: String?, also: [(index: Int, old: ScrySegment, text: String)] = []
-        if let text {
-            var turns = n.note.segments.map(\.text); turns[i] = text
-            let cut = ScryOps.redacted(turns: turns)
-            safe = cut[i]
-            also = (max(0, i - 2)...min(turns.count - 1, i + 2)).filter { $0 != i && cut[$0] != turns[$0] }.map { ($0, n.note.segments[$0], cut[$0]) }
-        }
+        // A number typed here is judged with the lines around it, as they are in the file.
         update(url, undo: text == nil ? "Line deleted." : "Line changed.") {
-            try ScryNotes.editLine(url, index: i, old: old, speaker: speaker, text: safe, also: also)
+            try ScryNotes.editLine(url, index: i, old: old, speaker: speaker, text: text, redact: ScryOps.redacted(turns:))
         }
     }
 
@@ -812,7 +804,6 @@ public struct MeetingsView: View {
     /// `undo`: what the edit was ("Line deleted."), offered for taking back.
     private func update(_ url: URL, undo what: String? = nil, _ body: @escaping @Sendable () throws -> ScryNoteFile?) {
         workError = nil
-        if what != nil { undo = nil }
         let previous = lastEdit
         lastEdit = Task {
             await previous?.value
@@ -820,7 +811,7 @@ public struct MeetingsView: View {
                 let (before, fresh) = try await Task.detached(priority: .userInitiated) { (try String(contentsOf: url, encoding: .utf8), try body()) }.value
                 guard let fresh, let i = notes?.firstIndex(where: { $0.url == url }) else { return }
                 notes?[i] = fresh
-                if let what, before != fresh.markdown { undo = (url, what, before, fresh.markdown) }
+                if before != fresh.markdown { undo = what.map { (url, $0, before, fresh.markdown) } }   // the last edit's, once it's saved
             } catch {
                 SupportLog.scry.error("scry note not saved: \(String(describing: error), privacy: .public)")
                 workError = "Not saved: \(error)"

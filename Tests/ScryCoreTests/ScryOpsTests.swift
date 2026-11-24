@@ -164,3 +164,14 @@ private func tempVault() throws -> URL {
     #expect(ScryOps.redacted("The account is in 2026 order, ask Dana", numbersOnly: true) == "The account is in 2026 order, ask Dana")
     #expect(ScryOps.redacted("Social media had 12345 likes", numbersOnly: true) == "Social media had 12345 likes")
 }
+
+@Test func numbersAfterAnAnswerWordOrNextToAnotherNumberAreFoundAndOthersStay() {
+    #expect(ScryOps.redacted(turns: ["What's the account number?", "Sure, it's 1234567890."])[1] == "Sure, it's [removed].")
+    #expect(ScryOps.redacted("It's 12 4111 1111 1111 1111 123 ok", numbersOnly: true) == "It's 12 [removed] 123 ok")
+    #expect(ScryOps.redacted("My social is 123456789, her social: 123456789", numbersOnly: true) == "My social is [removed], her social: [removed]")
+    #expect(ScryOps.redacted("social security 123 45 6789 and SSN 123456789", numbersOnly: true) == "social security [removed] and SSN [removed]")
+    #expect(ScryOps.redacted("Our social reach was 120,000,000 last year", numbersOnly: true) == "Our social reach was 120,000,000 last year")
+    let phone = ["Can you look up my account?", "Sure, phone number?", "864-555-0142."]
+    #expect(ScryOps.redacted(turns: phone) == phone)
+    #expect(ScryOps.redacted("My account is 1234567890 and account: 1234567890", numbersOnly: true) == "My account is [removed] and account: [removed]")
+}

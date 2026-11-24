@@ -432,6 +432,15 @@ public enum ScryTranscript {
     /// dB over the echo of what they say at that moment, below which the same word just after theirs is the echo.
     static let nowLimit = 10.0   // 2026-11-24: 50 echo words scored at most 8, the owner's words 40 (median)
 
+    /// The model names only voices that have no name yet, and never joins two: a name someone has, or one given to two
+    /// voices, is left out.
+    public static func safeNames(_ map: [String: String], for segments: [ScrySegment]) -> [String: String] {
+        let taken = Set(segments.map(\.speaker))
+        return map.filter { k, v in
+            k.wholeMatch(of: /Speaker [A-Z0-9]+|Them/) != nil && !taken.contains(v) && map.values.filter { $0 == v }.count == 1
+        }
+    }
+
     /// Drops "You" words that are the far side heard through the speakers, judged by how loud each side was
     /// (`levels`) and by what the far side said. Most echo comes back late or transcribed differently (far side
     /// "Claude web", mic "clock lab"), so the 0.4 s word match below missed it (2026-11-17: 900–3500 echo words
