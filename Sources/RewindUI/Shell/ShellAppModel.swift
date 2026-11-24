@@ -255,6 +255,7 @@ public final class AppModel {
                                                 state: TrackerState.decode(config.settings[TrackerState.key]), nowMs: now)
                 let ctx = ShellContext(db: db, classifier: classifier, categories: config.categories,
                                        projects: config.projects, day: day, today: today,
+                                       cycleStart: ExportPeriod.cycleStart(config.settings),
                                        goal: ShellPrefs.goal(config.settings), timeZone: tz, nowMs: now, health: health)
                 return Fetched(
                     config: config, classifier: changed ? classifier : nil,
@@ -370,6 +371,12 @@ public final class AppModel {
 
     /// Name on the PDF timesheet (`consultant_name`), default `NSFullUserName()`.
     public var consultantName: String { ExportPDF.consultantName(settings) }
+
+    /// The first day of a two-week pay period; nil = semi-months. Transmute's invoices follow it too.
+    public var cycleStart: LocalDate? { ExportPeriod.cycleStart(settings) }
+    public func setCycleStart(_ d: LocalDate?) async {
+        await write { try SettingStore(self.db).set(ExportPeriod.cycleStartKey, d?.description) }
+    }
 
     public func setConsultantName(_ name: String) async {
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)

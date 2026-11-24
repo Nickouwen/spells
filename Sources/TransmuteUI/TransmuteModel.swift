@@ -4,8 +4,8 @@ import RewindCore
 import SpellsKit
 import TransmuteCore
 
-/// Which period the invoice covers: the usual semi-month (1–15 / 16–end) just finished, the one in
-/// progress, or any two dates.
+/// Which period the invoice covers: the one just finished, the one in progress, or any two dates. Rewind's
+/// pay cycle sets the periods: semi-months (1–15 / 16–end), or two weeks when it has a start.
 public enum InvoicePreset: String, CaseIterable, Identifiable, Sendable {
     case previous, current, custom
     public var id: String { rawValue }
@@ -30,6 +30,8 @@ public enum InvoicePreset: String, CaseIterable, Identifiable, Sendable {
     public var preset: InvoicePreset = .previous { didSet { reload() } }
     public var customFrom: LocalDate { didSet { if preset == .custom { reload() } } }
     public var customThrough: LocalDate { didSet { if preset == .custom { reload() } } }
+    /// Rewind's pay cycle, re-read with the hours.
+    private var cycleStart: LocalDate?
     public private(set) var preview: Invoice?
     public private(set) var loading = false
     public private(set) var error: String?
@@ -53,8 +55,8 @@ public enum InvoicePreset: String, CaseIterable, Identifiable, Sendable {
 
     public var period: ExportPeriod {
         switch preset {
-        case .previous: ExportPeriod.parse("previous", today: today)!
-        case .current: ExportPeriod.semiMonth(containing: today)
+        case .previous: ExportPeriod.parse("previous", today: today, cycleStart: cycleStart)!
+        case .current: ExportPeriod.parse("current", today: today, cycleStart: cycleStart)!
         case .custom: ExportPeriod(from: min(customFrom, customThrough), through: max(customFrom, customThrough))
         }
     }
@@ -75,6 +77,9 @@ public enum InvoicePreset: String, CaseIterable, Identifiable, Sendable {
         guard settings.missing.isEmpty else { preview = nil; return }
         generation += 1
         let gen = generation
+        do { cycleStart = ExportPeriod.cycleStart(try SettingStore(db).all()) } catch {   // never bill a period it only guessed
+            preview = nil; loading = false; self.error = "Couldn't read Rewind's pay cycle: \(error)"; return
+        }
         let (db, period, settings, issued) = (db, period, settings, period.through)
         loading = true
         Task {

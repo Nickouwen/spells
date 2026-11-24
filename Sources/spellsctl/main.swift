@@ -85,7 +85,9 @@ func openDB() -> RewindDB {
 }
 func period() -> ExportPeriod {
     let s = options["--period"] ?? "previous"
-    guard let p = ExportPeriod.parse(s, today: today) else { die("bad --period '\(s)' (current, previous, YYYY-MM-DD..YYYY-MM-DD)") }
+    let cycle: LocalDate?
+    do { cycle = ExportPeriod.cycleStart(try SettingStore(openDB()).all()) } catch { die("cannot read the pay cycle: \(error)", 1) }
+    guard let p = ExportPeriod.parse(s, today: today, cycleStart: cycle) else { die("bad --period '\(s)' (current, previous, YYYY-MM-DD..YYYY-MM-DD)") }
     return p
 }
 

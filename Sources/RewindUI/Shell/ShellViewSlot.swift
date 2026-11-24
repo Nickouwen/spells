@@ -9,6 +9,7 @@ public struct ShellContext: Sendable {
     public var projects: [Project]
     public var day: LocalDate
     public var today: LocalDate
+    public var cycleStart: LocalDate?
     public var goal: Goal?
     public var timeZone: TimeZone
     /// Clock at refetch time; the ≤ 1/min "now" tick refetches, so today's DayData advances with it.
@@ -49,9 +50,9 @@ enum ViewSlot {
     typealias RangePayload = RangeData
     nonisolated static func loadRange(_ c: ShellContext, period: RangePeriod) throws -> RangeData {
         try RangeData.load(store: Store(c.db), classifier: c.classifier, categories: c.categories,
-                           projects: c.projects, period: period, today: c.today, timeZone: c.timeZone)
+                           projects: c.projects, period: period, today: c.today, cycleStart: c.cycleStart, timeZone: c.timeZone)
     }
-    static func rangeView(_ d: RangeData, period: Binding<RangePeriod>, today: LocalDate) -> some View {
-        RangeView(data: d, period: period, today: today)
+    static func rangeView(_ d: RangeData, period: Binding<RangePeriod>, today: LocalDate, cycleStart: LocalDate?) -> some View {
+        RangeView(data: d, period: period, today: today, cycleStart: cycleStart)
     }
 }
