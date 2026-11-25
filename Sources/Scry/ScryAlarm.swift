@@ -70,7 +70,11 @@ import ScryCore
         soon = m
         SupportLog.scry.info("meeting heads-up shown")
         let view = ScrySoonView(meeting: m,
-                                join: m.link.map { url in { [weak self] in NSWorkspace.shared.open(url); self?.dismissSoon() } },
+                                join: m.link.map { url in { [weak self] in
+                                    NSWorkspace.shared.open(url)
+                                    self?.alarm.handle(m)   // on your way in: no alarm while you wait to be let in
+                                    self?.dismissSoon()
+                                } },
                                 dismiss: { [weak self] in self?.dismissSoon() })
         // Top middle, below the menu bar. Drops into place.
         soonPanel = present(view, rise: 8) { f, size in NSPoint(x: f.midX - size.width / 2, y: f.maxY - size.height - 10) }
@@ -138,15 +142,18 @@ struct ScrySoonView: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.m) {
-            Text(meeting.title).textRole(.body).lineLimit(1)
+            Image(systemName: join == nil ? "calendar" : "video.fill").foregroundStyle(Theme.ink).accessibilityHidden(true)
+            Text(meeting.title).textRole(.bodyEmph).lineLimit(1)
             Spacer(minLength: 0)
-            Text("In \(Text(timerInterval: min(Date(), meeting.start)...meeting.start, countsDown: true))")
-                .textRole(.label, Theme.inkSecondary).monospacedDigit().fixedSize()
-            if let join { Button("Join", action: join).buttonStyle(PrimaryButtonStyle()) }
-            Button("Dismiss", action: dismiss).buttonStyle(RewindButtonStyle())
+            Text("Starts in \(Text(timerInterval: min(Date(), meeting.start)...meeting.start, countsDown: true))")
+                .textRole(.body).monospacedDigit().fixedSize()
+            HStack(spacing: Theme.Space.xs) {   // Join last, as in the alarm
+                Button("Dismiss", action: dismiss).buttonStyle(QuietButtonStyle())
+                if let join { Button("Join", action: join).buttonStyle(PrimaryButtonStyle()) }
+            }
         }
         .padding(.leading, Theme.Space.l).padding(.trailing, Theme.Space.s).padding(.vertical, Theme.Space.s)
-        .frame(width: 420)
+        .frame(width: 520)
         .background(Theme.canvas, in: RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous).strokeBorder(Theme.hairline, lineWidth: Theme.Stroke.hairline))
         .accessibilityElement(children: .contain)
