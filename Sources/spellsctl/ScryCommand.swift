@@ -23,7 +23,7 @@ import ScryPipeline
     case "resummarize":
         guard positional.count == 2 else { die(usage) }
         let url = URL(filePath: (positional[1] as NSString).expandingTildeInPath)
-        let s = try await ScryPipeline.resummarize(note: url, settings: settings, keyterms: ScryPipeline.keyterms(rows))
+        let s = try await ScryPipeline.resummarize(note: url, settings: settings, keyterms: ScryPipeline.keyterms(rows)).summary
         say("\(url.path)\n\(s.title) — \(s.actionItems.count) action item(s)")
 
     case "ask":

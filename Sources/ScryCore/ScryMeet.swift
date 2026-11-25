@@ -171,14 +171,18 @@ public enum ScryMeet {
     /// Hints in your own name are ignored: your voice is the mic channel, never a far-side speaker, and with
     /// speakers rather than headphones Meet keeps marking you while others talk.
     public static func names(for segments: [ScrySegment], hints: [Hint], owner: String,
-                             slack: Double = 0.5, minVotes: Int = 4) -> [String: String] {
+                             given: [Hint] = [], slack: Double = 0.5, minVotes: Int = 4) -> [String: String] {
         let me = owner.lowercased(), meFirst = owner.split(separator: " ").first.map { $0.lowercased() } ?? ""
         let far = segments.filter { $0.speaker != "You" }.sorted { $0.start < $1.start }
         guard !far.isEmpty else { return [:] }
         var votes: [String: [String: Int]] = [:]
-        for h in hints {
+        // Names you gave (`given`) count as they are: you said it isn't you.
+        let marked = hints.filter { h in
             let n = h.name.lowercased()
-            if n == me || (!meFirst.isEmpty && n.split(separator: " ").first.map(String.init) == meFirst) { continue }
+            // A full name in settings is exactly you; a first name alone covers every form of it.
+            return n != me && (me.contains(" ") || meFirst.isEmpty || n.split(separator: " ").first.map(String.init) != meFirst)
+        }
+        for h in marked + given {
             let inside = far.filter { $0.start - slack <= h.t && h.t <= $0.end + slack }
             guard inside.count == 1 || Set(inside.map(\.speaker)).count == 1, let label = inside.first?.speaker else { continue }
             votes[label, default: [:]][h.name, default: 0] += 1

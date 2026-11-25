@@ -11,6 +11,8 @@ import SpellsKit
     var onNever: () -> Void = {}
     /// Recording mode: the time label opens the live panel; ■ stops and makes notes.
     var onOpenLive: () -> Void = {}
+    /// Right-click on the recording pill.
+    var recordingMenu: () -> NSMenu? = { nil }
     var onStop: () -> Void = {}
     private var recordingLabel: NSButton?
     private var bars: ScryBarsView?
@@ -53,15 +55,18 @@ import SpellsKit
         let levels = ScryBarsView(frame: .zero)
         bars = levels
         let body = ScryPillView(frame: .zero)
+        body.onClick = { [weak self] in self?.onOpenLive() }   // the bars and the gaps open it too
+        body.menuMaker = { [weak self] in self?.recordingMenu() }
+        for v in [label, stop] { v.menuMaker = body.menuMaker }
         body.addSubview(levels); body.addSubview(label); body.addSubview(stop)
         body.setAccessibilityLabel("Scry: recording")
-        panel.contentView = body
+        swap(to: body)
         recordingLabel = label
         present(layoutRecording(label: label))
     }
 
     private func layoutRecording(label: NSButton) -> NSRect {
-        guard let body = panel.contentView, let stop = body.subviews.last as? NSButton else { return panel.frame }
+        guard let body = container.subviews.last, let stop = body.subviews.last as? NSButton else { return panel.frame }
         let lw = label.intrinsicContentSize.width, sw = stop.intrinsicContentSize.width, bw: CGFloat = 27
         let width = 10 + bw + 6 + lw + sw + 20
         let full = Self.frame(width: width)
@@ -110,7 +115,7 @@ import SpellsKit
         close.frame = NSRect(x: width - 8 - close.intrinsicContentSize.width, y: 0, width: close.intrinsicContentSize.width, height: full.height)
         body.addSubview(main); body.addSubview(close)
         body.setAccessibilityLabel(label)
-        panel.contentView = body
+        swap(to: body)
         present(full)
     }
 
@@ -128,19 +133,53 @@ import SpellsKit
         return s
     }
 
+    /// Drops out of the top edge: the window stays put and its layer slides, so the text never squeezes and a hide that
+    /// interrupts it starts from where it is.
     private func present(_ full: NSRect) {
         panel.collectionBehavior = everySpace   // re-asserted per show (see IncantOverlay.show)
-        if !panel.isVisible {   // drop down out of the top edge
-            panel.alphaValue = 0
-            panel.setFrame(Self.retracted(full), display: false)
-        }
+        let wasUp = panel.isVisible && !hiding
+        hiding = false
+        panel.setFrame(full, display: true)
+        panel.alphaValue = 1
         panel.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = reduceMotion ? 0 : 0.18
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().setFrame(full, display: true)
-            panel.animator().alphaValue = 1
-        }
+        guard !wasUp else { return }
+        slide(to: 0, from: full.height, duration: 0.24)
+    }
+
+    private var hiding = false
+    private static let easeOut = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+
+    /// Moves the content to `y` (up is out of the screen) from where it is now, or `from` when it isn't on its way.
+    private func slide(to y: CGFloat, from start: CGFloat, duration: TimeInterval, then: @escaping @MainActor () -> Void = {}) {
+        guard let layer = container.layer else { then(); return }
+        let moving = layer.animation(forKey: "slide") != nil
+        let now = moving ? layer.presentation()?.value(forKeyPath: "transform.translation.y") as? CGFloat ?? start : start
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { MainActor.assumeIsolated { then() } }
+        let a = CABasicAnimation(keyPath: reduceMotion ? "opacity" : "transform.translation.y")   // Reduce Motion: a fade
+        let fading = moving ? layer.presentation()?.opacity ?? 1 : y == 0 ? 0 : 1
+        a.fromValue = reduceMotion ? CGFloat(fading) : now
+        a.toValue = reduceMotion ? (y == 0 ? 1 : 0) : y
+        a.duration = reduceMotion ? 0.12 : duration
+        a.timingFunction = Self.easeOut
+        a.fillMode = .forwards; a.isRemovedOnCompletion = false   // holds until the window is gone or it slides again
+        layer.add(a, forKey: "slide")
+        CATransaction.commit()
+    }
+
+    /// Holds the pill's content and does the sliding, so a pill that comes back while leaving goes on from where it is.
+    private let container = NSView()
+
+    /// New content: a pill that is already up crossfades into it instead of blinking.
+    private func swap(to body: ScryPillView) {
+        if panel.contentView !== container { container.wantsLayer = true; panel.contentView = container }
+        container.subviews.forEach { $0.removeFromSuperview() }
+        body.wantsLayer = true
+        container.addSubview(body)
+        guard panel.isVisible, !hiding, let layer = body.layer else { return }
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0; fade.toValue = 1; fade.duration = 0.14; fade.timingFunction = Self.easeOut
+        layer.add(fade, forKey: "swap")
     }
 
     func show(appName: String) {
@@ -161,21 +200,21 @@ import SpellsKit
         for v in [body, record, close] { v.menu = menu }
         body.addSubview(record); body.addSubview(close)
         body.setAccessibilityLabel("Scry: record \(appName)?")
-        panel.contentView = body
+        swap(to: body)
         present(full)
     }
 
     func hide() {
         recordingLabel = nil; bars = nil
-        guard panel.isVisible else { return }
+        guard panel.isVisible, !hiding else { return }
+        hiding = true
         let mine = generation
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = reduceMotion ? 0 : 0.28
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            panel.animator().setFrame(Self.retracted(panel.frame), display: true)
-            panel.animator().alphaValue = 0
-        }) {
-            MainActor.assumeIsolated { if mine == self.generation { self.panel.orderOut(nil) } }
+        // Out faster than in: it's been dealt with.
+        slide(to: panel.frame.height, from: 0, duration: 0.15) { [self] in
+            guard mine == generation, hiding else { return }   // shown again meanwhile
+            hiding = false
+            panel.orderOut(nil)
+            container.layer?.removeAnimation(forKey: "slide")
         }
     }
 
@@ -183,7 +222,7 @@ import SpellsKit
     @objc private func dismiss() { hide() }
     @objc private func neverFor() { hide(); onNever() }
 
-    private func button(_ title: String, size: CGFloat, _ sel: Selector) -> NSButton {
+    private func button(_ title: String, size: CGFloat, _ sel: Selector) -> ScryFirstMouseButton {
         let b = ScryFirstMouseButton(title: title, target: self, action: sel)
         b.isBordered = false
         b.attributedTitle = NSAttributedString(string: title, attributes: [
@@ -192,11 +231,6 @@ import SpellsKit
     }
 
     private var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
-
-    /// `full` collapsed into the top edge: a sliver a third as wide, kept against its left (notch-side) edge.
-    static func retracted(_ full: NSRect) -> NSRect {
-        NSRect(x: full.minX, y: full.maxY - 2, width: full.width / 3, height: 2)
-    }
 
     /// Flush with the top, left edge `gap` right of the notch (or of the island's rightmost window when
     /// RewindTracker shows a right ear there). No notch: top centre.
@@ -233,11 +267,28 @@ import SpellsKit
 
 /// Clicks land on the first try even though the panel is never key.
 private final class ScryFirstMouseButton: NSButton {
+    var menuMaker: () -> NSMenu? = { nil }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func menu(for event: NSEvent) -> NSMenu? { menuMaker() ?? super.menu(for: event) }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+    /// Dims while pressed: a borderless button shows nothing otherwise.
+    override func highlight(_ flag: Bool) {
+        super.highlight(flag)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = flag ? 0.06 : 0.16
+            animator().alphaValue = flag ? 0.55 : 1
+        }
+    }
 }
 
 /// Black body, square at the top (flush with the screen edge), rounded at the bottom — Incant's shape.
 private final class ScryPillView: NSView {
+    var onClick: (() -> Void)?
+    var menuMaker: () -> NSMenu? = { nil }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseUp(with event: NSEvent) { onClick?() }
+    override func menu(for event: NSEvent) -> NSMenu? { menuMaker() ?? super.menu(for: event) }
+    override func resetCursorRects() { if onClick != nil { addCursorRect(bounds, cursor: .pointingHand) } }
     override func draw(_ dirtyRect: NSRect) {
         let r = bounds, radius: CGFloat = min(10, r.height / 2)
         let body = NSBezierPath()
@@ -257,6 +308,7 @@ private final class ScryPillView: NSView {
 final class ScryBarsView: NSView {
     private var levels = [Double](repeating: 0, count: 5)
     override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }   // the pill under it takes the click
     func push(_ level: Double) {
         levels.removeFirst(); levels.append(min(max(level, 0), 1)); needsDisplay = true
     }

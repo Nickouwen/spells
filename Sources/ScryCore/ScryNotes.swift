@@ -115,17 +115,21 @@ public enum ScryNotes {
     public static func rename(_ url: URL, from: String, to: String) throws -> ScryNoteFile? {
         let name = to.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name != from else { return nil }
-        return try write(renamedText(try String(contentsOf: url, encoding: .utf8), from: from, to: name), to: url)
+        return try write(ScryPeople.tidied(renamedText(try String(contentsOf: url, encoding: .utf8), from: from, to: name)), to: url)
     }
 
     public static func renamedText(_ md: String, from: String, to: String) -> String {
         var inFront = false, frontSeen = false
-        let lines = md.components(separatedBy: "\n").map { line -> String in
+        let rows = Set(ScryPeople.rows(in: md).map(\.line))
+        let lines = md.components(separatedBy: "\n").enumerated().map { i, line -> String in
             if line == "---" { if !frontSeen { inFront = true; frontSeen = true } else if inFront { inFront = false }; return line }
             if inFront, line.hasPrefix("speakers:") { return renamedSpeakersLine(line, from: from, to: to) }
             if let r = line.range(of: #"^\*\*\[\d+:\d\d\] "#, options: .regularExpression),
                line[r.upperBound...].hasPrefix(from + ":**") {
                 return String(line[..<r.upperBound]) + to + line[line.index(r.upperBound, offsetBy: from.count)...]
+            }
+            if rows.contains(i), let p = ScryNotePerson.parse(line), p.role == .speaker, p.name == ScryNotePerson.plain(from) {
+                return ScryNotePerson(name: to, role: .speaker, at: p.at, detail: p.detail, link: p.link).markdown
             }
             if line.range(of: #"^\s*- \[[ xX]\] "#, options: .regularExpression) != nil {
                 return line.replacingOccurrences(of: "**\(from)**:", with: "**\(to)**:")
@@ -150,38 +154,148 @@ public enum ScryNotes {
         return (Array(kept) + row + lines[close...]).joined(separator: "\n")
     }
 
-    /// Undoes an edit: writes `before` back only while the file is still what the edit left (`after`).
+    /// Links a person in the note to `known` (nil: unlinks). A voice that has no name yet ("Speaker B") takes theirs, unless
+    /// someone in the note already has it: two voices are never joined by a link.
+    /// `adding`: a row that isn't there yet.
+    public static func linkPerson(_ url: URL, _ p: ScryNotePerson, to known: ScryPerson?, adding: Bool = false) throws -> ScryNoteFile? {
+        var md = try String(contentsOf: url, encoding: .utf8), p = try linkable(p, in: md, adding: adding)
+        if let known, p.role == .speaker, p.name.wholeMatch(of: /Speaker [A-Z0-9]+|Them/) != nil {
+            let name = ScryNotePerson.plain(known.name)
+            if ScryNote.parse(md)?.segments.contains(where: { $0.speaker == name }) == false {
+                md = renamedText(md, from: p.name, to: name)
+                p.name = name
+            }
+        }
+        p.link = known.map { ScryPeople.link(to: $0, from: url) }
+        return try write(ScryPeople.setting(p, in: md), to: url)
+    }
+
+    /// The row as it is in the file now; throws when it can't be linked.
+    @discardableResult public static func linkable(_ p: ScryNotePerson, in md: String, adding: Bool) throws -> ScryNotePerson {
+        try readable(md)
+        if adding { try free(p, in: md); return p }
+        if let now = ScryPeople.rows(in: md).first(where: { $0.person.id == p.id })?.person { return now }   // edited in Obsidian meanwhile
+        guard p.role == .speaker, ScryNote.parse(md)?.segments.contains(where: { ScryNotePerson.plain($0.speaker) == p.name }) == true else {
+            throw Changed()   // gone: a link doesn't bring them back
+        }
+        return p
+    }
+
+    /// Takes a wrongly found person out of the note's people.
+    public static func removePerson(_ url: URL, _ p: ScryNotePerson) throws -> ScryNoteFile? {
+        let md = try String(contentsOf: url, encoding: .utf8)
+        try readable(md)
+        return try write(ScryPeople.removing(p, from: md), to: url)
+    }
+
+    public static func addMention(_ url: URL, _ p: ScryNotePerson) throws -> ScryNoteFile? {
+        let md = try String(contentsOf: url, encoding: .utf8)
+        try readable(md)
+        try free(p, in: md)
+        return try write(ScryPeople.setting(p, in: md), to: url)
+    }
+
+    /// A "## People" moved below the transcript is out of reach: a second one above it would hide from the reader.
+    private static func readable(_ md: String) throws {
+        if ScryPeople.rows(in: md).isEmpty, ScryNote.parse(md)?.people.isEmpty == false { throw Moved() }
+    }
+    public struct Moved: Error, CustomStringConvertible { public var description: String { "move the note's People section above its Transcript first" } }
+
+    /// A row is its name: a second person mentioned by the same name would replace the first.
+    private static func free(_ p: ScryNotePerson, in md: String) throws {
+        if ScryPeople.rows(in: md).contains(where: { $0.person.id == p.id }) { throw Twice(name: p.name) }
+    }
+    public struct Twice: Error, CustomStringConvertible {
+        let name: String
+        public var description: String { "“\(name)” is already in People. Use a fuller name for this one." }
+    }
+
+    /// Undoes an edit: writes `before` back only while the file is still what the edit left (`after`); else throws.
     public static func undo(_ url: URL, before: String, after: String) throws -> ScryNoteFile? {
-        let fresh = try String(contentsOf: url, encoding: .utf8)
-        guard fresh == after else { return ScryNote.parse(fresh).map { ScryNoteFile(url: url, markdown: fresh, note: $0) } }
+        guard try String(contentsOf: url, encoding: .utf8) == after else { throw Changed() }
         return try write(before, to: url)
     }
+
+    /// `to`, a note written anew, with what you added to `from`: your own frontmatter fields, words under the title,
+    /// sections, and lines in People and the transcript.
+    public static func carried(from: String, to: String) -> String {
+        func parts(_ md: String) -> (fields: [[String]], preamble: String?, sections: [(head: String, lines: [String])]) {
+            let lines = md.components(separatedBy: "\n"), close = lines.dropFirst().firstIndex(of: "---") ?? 0
+            var fields: [[String]] = [], sections: [(String, [String])] = []
+            for l in lines[..<close].dropFirst() {   // a list's rows belong to the field above them
+                if fields.isEmpty || l.contains(":") && !l.hasPrefix(" ") && !l.hasPrefix("-") { fields.append([l]) } else { fields[fields.count - 1].append(l) }
+            }
+            for l in lines[close...] {
+                if l.hasPrefix("## ") { sections.append((l, [])) } else if !sections.isEmpty { sections[sections.count - 1].1.append(l) }
+            }
+            let above = lines[(close + 1)...].prefix { !$0.hasPrefix("## ") }.filter { !$0.hasPrefix("# ") }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            return (fields, above.isEmpty ? nil : above, sections)
+        }
+        func key(_ f: [String]) -> Substring { f[0].prefix { $0 != ":" } }
+        let own: Set = ["title", "date", "start", "end", "duration_min", "app", "folder", "participants", "speakers", "source"]
+        let written = Set(["summary", "decisions", "key dates", "action items", "open questions", "insights", "people", "your notes", "follow-up email", "transcript"].map { "## " + $0 })
+        let old = parts(from), fields = old.fields.filter { !own.contains(String(key($0))) }.flatMap { $0 }
+        let sections = old.sections.filter { !written.contains($0.head.lowercased().trimmingCharacters(in: .whitespaces)) }.flatMap { [$0.head] + $0.lines }
+        let people = old.sections.first { ScryPeople.isHeading($0.head) }.map { $0.lines.filter { !$0.allSatisfy(\.isWhitespace) && ScryNotePerson.parse($0) == nil } } ?? []
+        var out = to.components(separatedBy: "\n")
+        if !sections.isEmpty { out.insert(contentsOf: sections + (sections.last == "" ? [] : [""]), at: out.firstIndex(of: "## Transcript") ?? out.count) }
+        if !people.isEmpty {
+            if let row = ScryPeople.rows(in: out.joined(separator: "\n")).last { out.insert(contentsOf: people, at: row.line + 1) }
+            else { out.insert(contentsOf: ["## People", ""] + people + [""], at: out.firstIndex(of: "## Transcript") ?? out.count) }
+        }
+        // Words of yours between or below the transcript's lines go below it.
+        let loose = old.sections.filter { ScryPeople.isTranscript($0.head) }.flatMap(\.lines).filter { !$0.allSatisfy(\.isWhitespace) && ScryNote.transcriptLine($0) == nil }
+        if !loose.isEmpty { out += (out.last == "" ? [] : [""]) + loose + [""] }
+        if let title = out.firstIndex(where: { $0.hasPrefix("# ") }), let words = old.preamble { out.insert(contentsOf: ["", words], at: title + 1) }
+        if let close = out.dropFirst().firstIndex(of: "---") { out.insert(contentsOf: fields, at: close) }
+        return out.joined(separator: "\n")
+    }
+
+    /// The file isn't what it was expected to be, so nothing was written.
+    public struct Changed: Error, CustomStringConvertible { public var description: String { "the note changed meanwhile, so nothing was written" } }
 
     /// The note to share: no frontmatter, and the transcript only when asked.
     public static func shared(_ md: String, transcript: Bool) -> String {
         var lines = md.components(separatedBy: "\n")
+        var people = false   // who you know, and where their notes are, stays here, wherever the section is
+        for i in lines.indices {
+            if lines[i].hasPrefix("## ") { people = ScryPeople.isHeading(lines[i]) }
+            else if people, var p = ScryNotePerson.parse(lines[i]) { p.link = nil; lines[i] = p.markdown }
+        }
+        if !transcript, let t = lines.lastIndex(where: ScryPeople.isTranscript) { lines.removeSubrange(t...) }
         if lines.first == "---", let close = lines.dropFirst().firstIndex(of: "---") { lines.removeSubrange(...close) }
-        if !transcript, let t = lines.lastIndex(of: "## Transcript") { lines.removeSubrange(t...) }
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Changes one transcript line (`text` nil deletes it). The file is re-read and the line matched by its place and
-    /// its old speaker and words; changed meanwhile → nothing is written.
-    public static func editLine(_ url: URL, index: Int, old: ScrySegment, speaker: String, text: String?) throws -> ScryNoteFile? {
+    /// its old speaker and words; changed meanwhile → throws and nothing is written.
+    /// `redact`: all the lines' words, with the change, → without numbers; the lines near it can change too.
+    public static func editLine(_ url: URL, index: Int, old: ScrySegment, speaker: String, text: String?,
+                                redact: ([String]) -> [String] = { $0 }) throws -> ScryNoteFile? {
         let fresh = try String(contentsOf: url, encoding: .utf8)
-        guard let out = editedLine(fresh, index: index, old: old, speaker: speaker, text: text) else {
-            return ScryNote.parse(fresh).map { ScryNoteFile(url: url, markdown: fresh, note: $0) }
+        guard var out = editedLine(fresh, index: index, old: old, speaker: speaker, text: text) else { throw Changed() }
+        if text != nil, let lines = ScryNote.parse(out)?.segments {
+            let words = redact(lines.map(\.text))
+            for j in max(0, index - 2)...min(lines.count - 1, index + 2) where words[j] != lines[j].text {
+                guard let next = editedLine(out, index: j, old: lines[j], speaker: lines[j].speaker, text: words[j]) else { throw Changed() }
+                out = next
+            }
+        }
+        // Their last line went to someone else, or went: so does their row.
+        if let n = ScryNote.parse(out), !n.segments.contains(where: { $0.speaker == old.speaker }) {
+            out = ScryPeople.removing(ScryNotePerson(name: old.speaker, role: .speaker), from: out)
         }
         return try write(out, to: url)
     }
 
     public static func editedLine(_ md: String, index: Int, old: ScrySegment, speaker: String, text: String?) -> String? {
         var lines = md.components(separatedBy: "\n")
-        guard let start = lines.lastIndex(of: "## Transcript") else { return nil }
+        guard let start = lines.lastIndex(where: ScryPeople.isTranscript) else { return nil }
         let turns = lines.indices.filter { $0 > start && lines[$0].range(of: #"^\*\*\[\d+:\d\d\] "#, options: .regularExpression) != nil }
         guard turns.indices.contains(index) else { return nil }
         let i = turns[index], stamp = lines[i].prefix(through: lines[i].firstIndex(of: "]")!)
-        guard lines[i] == "\(stamp) \(old.speaker):** \(old.text)" else { return nil }
+        let at = stamp.split { !$0.isNumber }.compactMap { Int($0) }   // "**[69:21]"
+        guard at.count == 2, at[0] * 60 + at[1] == Int(old.start), lines[i] == "\(stamp) \(old.speaker):** \(old.text)" else { return nil }
         // One line in the file, whatever was typed.
         func flat(_ s: String) -> String { s.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces) }
         if let text {

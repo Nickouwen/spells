@@ -99,14 +99,19 @@ private let cases: [EchoCase] = [
 /// The first word after each pause of theirs, on a call whose echo delay changed (2026-11-24): 60 ms after theirs, and
 /// loud next to a far side that was silent a moment before. The other words are yours.
 @Test func theSameWordRightAfterTheirsIsEchoAndAnswersAndYourWordsStay() {
-    let quiet = [Float](repeating: 1e-7, count: 4000)
-    var mic = quiet
-    for i in 0..<40 { mic[i] = 0.01 }   // 0–2 s: the mic is loud, the far side's level says nothing played
-    let levels = ScryLevels(mic: mic, far: quiet, lag: 6, coupling: 0.0005)
+    // Echo: the far side starts each word after silence, and the mic holds 0.0005 of it one frame later. `lag` (300 ms)
+    // looks at the silence before, so only `scoreNow` sees it. At "Yeah," and "Tuesday" the mic is you, 40 dB louder.
+    var mic = [Float](repeating: 1e-9, count: 4000), far = mic
+    for t in [0.20, 0.60, 1.00, 1.56, 2.10] { for i in 0..<3 { far[Int(t / 0.05) + i] = 0.1; mic[Int(t / 0.05) + 1 + i] = 0.1 * 0.0005 } }
+    for i in 30..<33 { mic[i] = 0.01 }
+    for i in [13, 14, 42, 43, 44, 45] { mic[i] = 0.5 }   // your "Yeah," too
+    let levels = ScryLevels(mic: mic, far: far, lag: 6, coupling: 0.0005)
     func w(_ s: String, _ t: Double, _ text: String) -> ScrySegment { ScrySegment(speaker: s, start: t, end: t + 0.1, text: text) }
     let words = [w("Speaker A", 0.20, "provided"), w("You", 0.26, "provided"),
                  w("Speaker A", 0.60, "Yeah,"), w("You", 0.66, "Yeah,"),              // a real answer can land there
                  w("Speaker A", 1.00, "phone."), w("You", 1.30, "phone"),             // 300 ms: not this rule's
-                 w("You", 1.50, "prototype"), w("Speaker A", 1.56, "prototype")]      // you said it first
-    #expect(ScryTranscript.withoutEcho(words, levels: levels).filter { $0.speaker == "You" }.map(\.text) == ["Yeah,", "phone", "prototype"])
+                 w("You", 1.50, "prototype"), w("Speaker A", 1.56, "prototype"),      // you said it first
+                 w("Speaker A", 2.10, "Tuesday"), w("You", 2.16, "Tuesday")]          // you, over them, the same word
+    let kept = ScryTranscript.withoutEcho(words, levels: levels).filter { $0.speaker == "You" }.map(\.text)
+    #expect(!kept.contains("provided") && kept.contains("Tuesday") && kept.contains("prototype") && kept.contains("Yeah,"))
 }

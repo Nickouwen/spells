@@ -44,7 +44,7 @@ public enum ScryOps {
     /// `rules` is what to look for (empty = `defaultRules`).
     public static func extract(transcript: URL, vault: URL, userName: String, rules: String = "") async throws -> Offer {
         guard FileManager.default.fileExists(atPath: vault.path) else { throw Failure.noVault(vault.path) }
-        let text = String(try String(contentsOf: transcript, encoding: .utf8).prefix(400_000))
+        let text = redacted(String(try String(contentsOf: transcript, encoding: .utf8).prefix(400_000)))   // any app's transcript: numbers and keys don't go to the model
         let agents = (try? String(contentsOf: vault.appending(path: "AGENTS.md"), encoding: .utf8)).map { String($0.prefix(30_000)) }
         let date = callDate(text) ?? day((try? transcript.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date())
         let reply = try await ScryPipeline.claude(prompt(transcript: text, name: transcript.lastPathComponent, date: date,
@@ -213,18 +213,60 @@ public enum ScryOps {
         return s
     }
 
+    /// A call's turns, numbers only. A number said a turn or two after its keyword ("account number?" … "1234567890"), or
+    /// split between two turns, is found across them, and each turn loses its part. Two turns later only over a short answer
+    /// ("Sure."): after another question the number is something else. The rules stop here: a wider one takes out phone
+    /// numbers and prices, so a new one needs a real line that got through and a kept number beside it in the tests.
+    public static func redacted(turns: [String]) -> [String] {
+        var cuts = [[NSRange]](repeating: [], count: turns.count)
+        for i in turns.indices {
+            for k in 0...2 where k <= i {
+                if k == 2, turns[i - 1].contains("?") || turns[i - 1].split(whereSeparator: \.isWhitespace).count > 3 { continue }
+                let head = k == 0 ? "" : turns[i - k] + "\n", start = (head as NSString).length
+                for m in numbers(in: head + turns[i]) {
+                    let tail = NSRange(location: max(m.location, start), length: max(0, NSMaxRange(m) - max(m.location, start)))
+                    if tail.length > 0 { cuts[i].append(NSRange(location: tail.location - start, length: tail.length)) }
+                    let front = NSRange(location: m.location, length: max(0, min(NSMaxRange(m), start - 1) - m.location))
+                    if k > 0, front.length > 0, tail.length > 0 { cuts[i - k].append(front) }
+                }
+            }
+        }
+        return zip(turns, cuts).map { turn, ranges in
+            var s = turn
+            // Last first, overlaps as one.
+            for r in ranges.sorted(by: { $0.location < $1.location }).reduce(into: [NSRange]()) { out, r in
+                if let l = out.last, r.location <= NSMaxRange(l) { out[out.count - 1] = NSUnionRange(l, r) } else { out.append(r) }
+            }.reversed() { if let x = Range(r, in: s) { s.replaceSubrange(x, with: "[removed]") } }
+            return s
+        }
+    }
+
+    private static func numbers(in s: String) -> [NSRange] {
+        let ns = s as NSString
+        return numberPatterns.flatMap { re, group, check in
+            re.matches(in: s, range: NSRange(location: 0, length: ns.length)).map { $0.range(at: group) }.filter { check(ns.substring(with: $0)) }
+        }
+    }
+    private static let numberPatterns = rules.prefix(numberRules).map { (try! NSRegularExpression(pattern: $0.0), $0.1, $0.2) }
+
     /// The first `numberRules` are the numbers.
-    private static let numberRules = 4
+    private static let numberRules = 5
     private static let rules: [(String, Int, @Sendable (String) -> Bool)] = [
         (#"\b\d{3}-\d{2}-\d{4}\b"#, 0, { _ in true }),
-        (#"(?i)\b(?:ssn|social(?: security)?(?: number)?)\D{0,12}(\d{3}[\s.,-]{0,2}\d{2}[\s.,-]{0,2}\d{4})\b"#, 1, { _ in true }),
-        (#"\b\d(?:[ -]?\d){12,18}\b"#, 0, luhn),
-        (#"(?i)\b(?:account|acct|routing|aba|iban)(?:\s+(?:number|no\.?|num|#))?\s*(?:is\s+|[:#=]\s*)?([A-Z]{2}\d{2}[A-Z0-9]{8,30}|\d(?:[ -]?\d){5,19})\b"#, 1, { _ in true }),
+        (#"(?i)\b(?:ssn|social(?: security)?(?: number)|social security|social(?=\s*(?:is\b|\W?s\b|[:?,.]|\d)))\D{0,12}(\d(?:[\s.,-]{0,2}\d){8})\b"#, 1, notCount),
+        (#"\b\d(?:[ \t-]?\d){12,18}\b"#, 0, luhn),   // in one turn: two phone numbers in two turns can pass Luhn
+        // A card with another number right before or after it ("12 4111 …", "… 1111 123").
+        (#"\b\d{4}(?:(?:[.,]?\n|[ \t-])?\d{4}){3}\b|\b\d{4}(?:[.,]?\n|[ \t-])?\d{6}(?:[.,]?\n|[ \t-])?\d{5}\b"#, 0, luhn),
+        (#"(?i)\b(?:(?:account|acct)(?:\s+(?:number|no\.?|num|#)[?.,;]?\s*|[?.,;]?[ \t]*)|(?:routing|aba|iban)(?:\s+(?:number|no\.?|num|#))?[?.,;]?\s*)(?:(?:sure|yes|yeah|yep|okay|ok|so|um|uh)[,.]?\s+){0,2}(?:is\s+|it\W?s\s+|[:#=]\s*)?([A-Z]{2}\d{2}(?:[A-Z0-9]{8,30}|(?:[.,]?[\s-][A-Z]{4})?(?:[.,]?[\s-](?=[A-Z]*\d)[A-Z0-9]{1,4}){2,8})\b|\d(?:(?:[.,]?\n|[ -])?\d){5,19})\b"#, 1, notPhone),
         (#"(?i)\b(?:password|passcode|passwd|pwd)\s*(?:is\s+|[:=]\s*)["'“]?([^\s"'”]{4,})"#, 1, { v in v.contains { !$0.isLetter } }),
         (#"(?i)\bpin(?:\s+code)?\s*(?:is\s+|[:=]\s*)?(\d{4,8})\b"#, 1, { _ in true }),
         (#"\b(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|[rs]k_live_[0-9A-Za-z]{16,})"#, 0, { _ in true }),
         (#"(?i)\b(?:api[ _-]?key|token|secret)\s*(?:is\s+|[:=]\s*)["'“]?([A-Za-z0-9_\-.]{16,})"#, 1, { _ in true }),
     ]
+
+    /// "864-555-0142": what they said next, not an account. "120,000,000": a count.
+    static func notPhone(_ s: String) -> Bool { s.wholeMatch(of: #/(?:1-)?\d{3}-\d{3}-\d{4}/#) == nil }
+    static func notCount(_ s: String) -> Bool { s.wholeMatch(of: #/\d{1,3}(?:,\d{3})+/#) == nil }
 
     /// 13–19 digits passing the Luhn check: a card number, not a phone number or a price.
     static func luhn(_ s: String) -> Bool {

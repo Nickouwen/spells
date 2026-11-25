@@ -36,6 +36,16 @@ private func tempVault() throws -> URL {
     #expect(r("card 4111 1111 1111 1111") == "card [removed]" && r("routing number 021000021") == "routing number [removed]")
     #expect(r("call 864-555-0142, case 2026-CP-23-01234, $14,500") == "call 864-555-0142, case 2026-CP-23-01234, $14,500")
     #expect(r("social media had 1,200 views in 2026") == "social media had 1,200 views in 2026")
+    #expect(ScryOps.redacted(turns: ["What's the account number?", "Sure.", "1234567890", "Call 864-555-0142"]) == ["What's the account number?", "Sure.", "[removed]", "Call 864-555-0142"])
+    #expect(ScryOps.redacted(turns: ["And your social?", "It's 123 45 6789."]) == ["And your social?", "It's [removed]."])
+    #expect(ScryOps.redacted(turns: ["We sold 1234567890 units.", "The account is fine.", "It's 2026."]) == ["We sold 1234567890 units.", "The account is fine.", "It's 2026."])
+    #expect(ScryOps.redacted(turns: ["My social is 123", "45 6789, okay?"]) == ["My social is [removed]", "[removed], okay?"])
+    #expect(ScryOps.redacted(turns: ["It's 4111 1111 1111", "1111."]) == ["It's [removed]", "[removed]."])
+    #expect(ScryOps.redacted(turns: ["It's 4111 1111 1111.", "1111."]) == ["It's [removed]", "[removed]."])
+    #expect(ScryOps.redacted(turns: ["My account number is 1234", "567890, yes."]) == ["My account number is [removed]", "[removed], yes."])
+    #expect(ScryOps.redacted(turns: ["We have 1,234.", "5678 of them.", "$4,111.50"]) == ["We have 1,234.", "5678 of them.", "$4,111.50"])
+    let long = "The account number is something " + String(repeating: "that we talked about ", count: 10) + "and the account number?"
+    #expect(ScryOps.redacted(turns: [long, "1234567890"])[1] == "[removed]" && ScryOps.redacted(turns: []).isEmpty)
     #expect(r("the password is hunter2!") == "the password is hunter2!")   // not a number: your words stay
 }
 
@@ -144,4 +154,37 @@ private func tempVault() throws -> URL {
     t.opsPush = true; t.opsVault = "~/Ops"; t.opsSources = ["~/Gemini", "/tmp/Whisper"]; t.opsSlackUser = "U123"; t.opsRules = "- deal: x\n- ask: y"
     #expect(ScrySettings.load(t.rows) == t)
     #expect(ScrySettings.folder("relative") == nil && ScrySettings.folder("  ") == nil && ScrySettings.folder("~/Ops")?.path.hasSuffix("/Ops") == true)
+}
+
+@Test func numbersSplitOrGroupedAnywhereAreFound() {
+    #expect(ScryOps.redacted(turns: ["My social is 123-4", "5-6789."]) == ["My social is [removed]", "[removed]."])
+    #expect(ScryOps.redacted("IBAN is GB29 NWBK 6016 1331 9268 19 and that is it", numbersOnly: true) == "IBAN is [removed] and that is it")
+    let split = ScryOps.redacted(turns: ["The IBAN is GB29 NWBK 6016", "1331 9268 19 ok"])
+    #expect(split == ["The IBAN is [removed]", "[removed] ok"])
+    #expect(ScryOps.redacted("The account is in 2026 order, ask Dana", numbersOnly: true) == "The account is in 2026 order, ask Dana")
+    #expect(ScryOps.redacted("Social media had 12345 likes", numbersOnly: true) == "Social media had 12345 likes")
+}
+
+@Test func numbersAfterAnAnswerWordOrNextToAnotherNumberAreFoundAndOthersStay() {
+    #expect(ScryOps.redacted(turns: ["What's the account number?", "Sure, it's 1234567890."])[1] == "Sure, it's [removed].")
+    #expect(ScryOps.redacted("It's 12 4111 1111 1111 1111 123 ok", numbersOnly: true) == "It's 12 [removed] 123 ok")
+    #expect(ScryOps.redacted("My social is 123456789, her social: 123456789", numbersOnly: true) == "My social is [removed], her social: [removed]")
+    #expect(ScryOps.redacted("social security 123 45 6789 and SSN 123456789", numbersOnly: true) == "social security [removed] and SSN [removed]")
+    #expect(ScryOps.redacted("Our social reach was 120,000,000 last year", numbersOnly: true) == "Our social reach was 120,000,000 last year")
+    let phone = ["Can you look up my account?", "Sure, phone number?", "864-555-0142."]
+    #expect(ScryOps.redacted(turns: phone) == phone)
+    #expect(ScryOps.redacted("My account is 1234567890 and account: 1234567890", numbersOnly: true) == "My account is [removed] and account: [removed]")
+}
+
+@Test func phonesAndCountsNearAKeywordStay() {
+    for kept in [["It's 864-555-0105.", "864-555-0105?"],
+                 ["What's the account number?", "I don't have it. What's your phone?", "864-555-0142"],
+                 ["What's the account number?", "Actually, phone number?", "8645550142"],
+                 ["What's the account number?", "Sure.", "864-555-0142."],
+                 ["Call the number on your account, 1-800-555-0142."],
+                 ["Social: 120,000,000 people."]] {
+        #expect(ScryOps.redacted(turns: kept) == kept)
+    }
+    #expect(ScryOps.redacted(turns: ["What's the account number?", "Sure.", "1234567890."])[2] == "[removed].")
+    #expect(ScryOps.redacted(turns: ["It's 4111 1111", "1111 1111 ok"]) == ["It's [removed]", "[removed] ok"])
 }

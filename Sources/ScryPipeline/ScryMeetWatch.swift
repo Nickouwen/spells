@@ -1,5 +1,6 @@
 import Foundation
 import SpellsKit
+import Synchronization
 import ScryCore
 
 /// Polls the Google Meet tab in a Chromium browser twice a second while a recording runs and appends what it
@@ -18,8 +19,16 @@ public final class ScryMeetWatch: @unchecked Sendable {
     private var lastParticipants: [String] = []
     private var empties = 0, warned = false
     /// The last sample's people, for the recording pill.
-    public private(set) var participants: [String] = []
-    public private(set) var speaking: String?
+    public var participants: [String] { seen.withLock { $0.participants } }
+    public var speaking: String? { seen.withLock { $0.speaking } }
+    public var selfName: String? { seen.withLock { $0.selfName } }
+    /// Written on `queue`, read on the main thread.
+    /// Meet answered the last poll: after a miss the participants may be old.
+    public var fresh: Bool { seen.withLock { $0.fresh } }
+    /// While the recording is paused nothing is read or written.
+    public var paused: Bool { get { pausing.withLock { $0 } } set { pausing.withLock { $0 = newValue } } }
+    private let pausing = Mutex(false)
+    private let seen = Mutex<(participants: [String], speaking: String?, selfName: String?, fresh: Bool)>(([], nil, nil, false))
 
     public init(browser bundleID: String, dir: URL, startedAt: Date) {
         script = NSAppleScript(source: Self.appleScript(bundleID))!
@@ -89,7 +98,7 @@ public final class ScryMeetWatch: @unchecked Sendable {
     }
 
     private func poll() {
-        guard let s = read() else { speaking = nil; return }   // no tab, no answer: nobody is known to be speaking
+        guard !paused, let s = read() else { seen.withLock { $0.speaking = nil; $0.fresh = false }; return }   // no tab, no answer: nobody is known to be speaking
         let t = (Date().timeIntervalSince(startedAt) * 10).rounded() / 10
         let people = s.participants
         var lines: [ScryMeet.Line] = []
@@ -98,9 +107,10 @@ public final class ScryMeetWatch: @unchecked Sendable {
             lines.append(ScryMeet.Line(t: t, participants: people))
         }
         let tile = marker.speaking(s)
-        let name = tile.flatMap { $0.isSelf ? nil : $0.name }
+        let mine = s.selfName ?? s.tiles.first(where: \.isSelf)?.name   // Meet doesn't mark your tile itself every time
+        let name = tile.flatMap { $0.isSelf || $0.name == mine ? nil : $0.name }
         if let name { lines.append(ScryMeet.Line(t: t, speaking: name)) }
-        participants = people; speaking = name
+        seen.withLock { $0 = (people, name, mine ?? $0.selfName, true) }
         guard !lines.isEmpty else { return }
         append(lines.map { $0.encoded + "\n" }.joined())
     }

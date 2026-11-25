@@ -177,7 +177,7 @@ public struct ScryInvite: Codable, Equatable, Sendable {
 public struct ScrySettings: Equatable, Sendable {
     public static let autoOfferKey = "scry_auto_offer", liveKey = "scry_live", rootKey = "scry_root",
                       neverKey = "scry_never_apps", nameKey = "scry_user_name",
-                      autoRecordKey = "scry_auto_record", meetingAlarmKey = "scry_meeting_alarm", googleClientIDKey = "scry_google_client_id", skillsKey = "scry_skills", liveOpenKey = "scry_live_open", opsPushKey = "scry_ops_push", opsVaultKey = "scry_ops_vault",
+                      autoRecordKey = "scry_auto_record", meetingAlarmKey = "scry_meeting_alarm", meetingSoonKey = "scry_meeting_soon", googleClientIDKey = "scry_google_client_id", skillsKey = "scry_skills", peopleKey = "scry_people", liveOpenKey = "scry_live_open", opsPushKey = "scry_ops_push", opsVaultKey = "scry_ops_vault",
                       opsSourcesKey = "scry_ops_sources", opsSlackUserKey = "scry_ops_slack_user", opsRulesKey = "scry_ops_rules"
     public static let defaultRoot = "~/Documents/Scry"
     public var autoOffer = true
@@ -185,6 +185,8 @@ public struct ScrySettings: Equatable, Sendable {
     public var autoRecord = false
     /// Pop up "Your meeting is starting now" when a meeting starts and you're in no call.
     public var meetingAlarm = true
+    /// A quiet bar with the countdown: a notice five minutes before a meeting, and Join two minutes before.
+    public var meetingSoon = true
     /// Your Google Cloud OAuth client (type iOS, bundle ID dev.nic.spells.scry) for Google Calendar; not a secret.
     public var googleClientID = ""
     /// Live transcript + "What did I miss?" during the call (two realtime sockets, $0.39/h each).
@@ -193,6 +195,8 @@ public struct ScrySettings: Equatable, Sendable {
     public var liveOpen = false
     /// Your own live-panel skills, one "name: what to do" per line.
     public var skills: [String] = []
+    /// Folders with a note per person you know; new person notes go in the first.
+    public var people: [String] = []
     public var root = defaultRoot
     public var never: [String] = []
     /// How you appear in notes ("You" is the label; this is the name the summary uses for you).
@@ -218,9 +222,11 @@ public struct ScrySettings: Equatable, Sendable {
         if let v = value(autoOfferKey) { s.autoOffer = v == "1" }
         if let v = value(autoRecordKey) { s.autoRecord = v == "1" }
         if let v = value(meetingAlarmKey) { s.meetingAlarm = v == "1" }
+        if let v = value(meetingSoonKey) { s.meetingSoon = v == "1" }
         if let v = value(googleClientIDKey) { s.googleClientID = v }
         if let v = value(liveKey) { s.live = v == "1" }
         if let v = value(skillsKey) { s.skills = lines(v) }
+        if let v = value(peopleKey) { s.people = lines(v) }
         if let v = value(liveOpenKey) { s.liveOpen = v == "1" }
         if let v = value(rootKey) { s.root = v }
         if let v = value(neverKey) { s.never = lines(v) }
@@ -246,7 +252,7 @@ public struct ScrySettings: Equatable, Sendable {
     }
 
     public var rows: [String: String] {
-        [Self.autoOfferKey: autoOffer ? "1" : "0", Self.autoRecordKey: autoRecord ? "1" : "0", Self.meetingAlarmKey: meetingAlarm ? "1" : "0", Self.googleClientIDKey: googleClientID, Self.liveOpenKey: liveOpen ? "1" : "0", Self.skillsKey: skills.joined(separator: "\n"), Self.liveKey: live ? "1" : "0", Self.rootKey: root,
+        [Self.autoOfferKey: autoOffer ? "1" : "0", Self.autoRecordKey: autoRecord ? "1" : "0", Self.meetingAlarmKey: meetingAlarm ? "1" : "0", Self.meetingSoonKey: meetingSoon ? "1" : "0", Self.googleClientIDKey: googleClientID, Self.liveOpenKey: liveOpen ? "1" : "0", Self.skillsKey: skills.joined(separator: "\n"), Self.peopleKey: people.joined(separator: "\n"), Self.liveKey: live ? "1" : "0", Self.rootKey: root,
          Self.neverKey: never.joined(separator: "\n"), Self.nameKey: userName, Self.opsPushKey: opsPush ? "1" : "0",
          Self.opsVaultKey: opsVault, Self.opsSourcesKey: opsSources.joined(separator: "\n"), Self.opsSlackUserKey: opsSlackUser, Self.opsRulesKey: opsRules]
     }
@@ -380,6 +386,16 @@ public struct ScryLevels: Sendable {
         let m = mic[a..<b].reduce(0, +), e = recent[a..<b].reduce(0, +)
         return e > 0 ? 10 * log10(Double(m) / (coupling * Double(e))) : .infinity
     }
+
+    /// `score` against what the far side plays right then (0–150 ms before), not at the call's usual `lag`: the delay can
+    /// shorten during a call. You, over them, are still far louder.
+    public func scoreNow(start: Double, end: Double) -> Double {
+        guard let coupling else { return .infinity }
+        let a = max(0, Int(start / Self.frame)), b = min(mic.count, max(Int(end / Self.frame), a + 1))
+        guard a < b else { return .infinity }
+        let m = mic[a..<b].reduce(0, +), e = (a..<b).reduce(Float(0)) { $0 + far[max(0, $1 - 3)...$1].max()! }
+        return e > 0 ? 10 * log10(Double(m) / (coupling * Double(e))) : .infinity
+    }
 }
 
 public enum ScryTranscript {
@@ -416,6 +432,18 @@ public enum ScryTranscript {
     static let answers: Set<String> = ["yeah", "yes", "yep", "no", "nope", "okay", "ok", "right", "sure", "hmm", "mhm", "mm", "uh", "huh", "mm-hmm", "mmhmm",
                                        "bye", "hello", "hi", "hey", "thanks", "cool", "perfect", "great", "good"]
 
+    /// dB over the echo of what they say at that moment, below which the same word just after theirs is the echo.
+    static let nowLimit = 10.0   // 2026-11-24: 50 echo words scored at most 8, the owner's words 40 (median)
+
+    /// The model names only voices that have no name yet, and never joins two: a name someone has, or one given to two
+    /// voices, is left out.
+    public static func safeNames(_ map: [String: String], for segments: [ScrySegment]) -> [String: String] {
+        let taken = Set(segments.map(\.speaker))
+        return map.filter { k, v in
+            k.wholeMatch(of: /Speaker [A-Z0-9]+|Them/) != nil && !taken.contains(v) && v.contains { $0.isLetter } && map.values.filter { $0 == v }.count == 1
+        }
+    }
+
     /// Drops "You" words that are the far side heard through the speakers, judged by how loud each side was
     /// (`levels`) and by what the far side said. Most echo comes back late or transcribed differently (far side
     /// "Claude web", mic "clock lab"), so the 0.4 s word match below missed it (2026-11-17: 900–3500 echo words
@@ -427,8 +455,8 @@ public enum ScryTranscript {
     ///   the channels' word times can be 3 s apart), or when a run of them sits between echo on both sides
     ///   (within 3 s) and averages < 8 dB. A short "Yeah." or "I agree." said over the far side scores 10–20 and stays.
     /// No `levels` (or a far side never loud enough to measure) → the 0.4 s word match.
-    /// - echo when the far side said the same word 20–160 ms before it, unless it's a short answer people give
-    ///   over each other (`answers`).
+    /// - echo when the far side said the same word 20–160 ms before it and the mic is no louder than that word's echo
+    ///   (`scoreNow`), unless it's a short answer people give over each other (`answers`).
     public static func withoutEcho(_ segments: [ScrySegment], levels: ScryLevels?) -> [ScrySegment] {
         guard let levels, levels.coupling != nil else { return withoutEcho(segments) }
         let far = segments.filter { $0.speaker != "You" }   // in time order, like `segments`
@@ -444,14 +472,16 @@ public enum ScryTranscript {
         enum Verdict { case mine, echo, unsure }
         let mine = segments.indices.filter { segments[$0].speaker == "You" }
         let score = mine.map { levels.score(start: segments[$0].start, end: segments[$0].end) }
+        var alone: Set<Int> = []   // echo by the same-word rule: says nothing about the words around it
         var verdict: [Verdict] = mine.indices.map { k in
             let w = segments[mine[k]]
             guard !farWords(w.start - 3, w.start + 3).isEmpty else { return .mine }
-            // The same word 20–160 ms after theirs is the speakers: the delay can shorten during a call (60 ms, then
+            // The same word 20–160 ms after theirs, no louder than its echo, is the speakers: the delay can shorten during a call (60 ms, then
             // 320 ms, on 2026-11-24), and then the loudness misses the first word after each pause of theirs.
             let word = normalized(w.text)
             if !word.isEmpty, !answers.contains(word),
-               farWords(w.start - 0.16, w.start - 0.02).contains(where: { normalized($0.text) == word }) { return .echo }
+               farWords(w.start - 0.16, w.start - 0.02).contains(where: { normalized($0.text) == word }),
+               levels.scoreNow(start: w.start, end: w.end) < Self.nowLimit, score[k] >= 0 { alone.insert(k); return .echo }
             return score[k] >= 20 ? .mine : score[k] < 0 ? .echo : .unsure
         }
         for k in mine.indices.dropLast() where verdict[k] == .unsure || verdict[k + 1] == .unsure {
@@ -467,7 +497,7 @@ public enum ScryTranscript {
             var end = k
             while end + 1 < mine.count, verdict[end + 1] == .unsure { end += 1 }
             func echo(_ j: Int, near i: Int) -> Bool {
-                mine.indices.contains(j) && verdict[j] == .echo && abs(segments[mine[j]].start - segments[mine[i]].start) < 3
+                mine.indices.contains(j) && verdict[j] == .echo && !alone.contains(j) && abs(segments[mine[j]].start - segments[mine[i]].start) < 3
             }
             let mean = score[k...end].reduce(0, +) / Double(end - k + 1)
             let isEcho = echo(k - 1, near: k) && echo(end + 1, near: end) && mean < 8
@@ -610,6 +640,8 @@ public struct ScrySummary: Codable, Equatable, Sendable {
     /// Diarized label → name, only where the transcript/screenshots support it ("Speaker A" → "Alex").
     public var speakers: [String: String]
     public var followUpEmail: String
+    /// People talked about who weren't on the call.
+    public var people: [ScryNotePerson] = []
     public init(title: String, overview: String = "", recap: [Topic] = [], decisions: [String] = [], keyDates: [String] = [],
                 actionItems: [Action] = [], openQuestions: [String] = [], insights: [String] = [],
                 speakers: [String: String] = [:], followUpEmail: String = "") {
@@ -642,6 +674,7 @@ public enum ScryPrompt {
           "openQuestions": ["..."],
           "insights": ["..."],
           "speakers": {"Speaker A": "name"},
+          "people": [{"name": "as said", "detail": "who they are, a few words", "at": "mm:ss"}],
           "followUpEmail": "..."
         }
 
@@ -655,6 +688,8 @@ public enum ScryPrompt {
         - Keep dates as spoken ("Friday", "next Tuesday"), in "due" and in keyDates; "due" is a few words at most.
         - In "speakers", map a label like "Speaker A" to a name only with evidence from the transcript (they're \
         addressed by name, they introduce themselves), the on-screen names or the invite. Leave out labels you can't support.
+        - people: persons talked about who are not on the call ("my brother Marcus"): the name as said, who they \
+        are (their role or relation, never an opinion about them), and the [mm:ss] of the first mention. Not companies, not the speakers, no one without a name.
         - The invite lists who was invited, not who attended; use it for full names and emails.
         - summary: one plain paragraph, 3–5 sentences, of what was talked through, main topics in order. No lists, \
         no small talk unless it was the point of the call. insights: notable dynamics, risks or signals, briefly.
@@ -688,13 +723,17 @@ public enum ScryPrompt {
             guard let s = try? JSONDecoder().decode(LooseSummary.self, from: Data(json.utf8)), s.title != nil,
                   s.actionItems != nil || s.speakers != nil || s.followUpEmail != nil || s.summary != nil || s.recap != nil || s.decisions != nil
             else { continue }
-            return ScrySummary(
+            var summary = ScrySummary(
                 title: s.title ?? "", overview: s.summary ?? "", recap: (s.recap ?? []).map { .init(title: $0.title ?? "", points: $0.points ?? []) },
                 decisions: s.decisions ?? [], keyDates: s.keyDates ?? [],
                 actionItems: (s.actionItems ?? []).map { .init(owner: $0.owner ?? "", task: $0.task ?? "", due: $0.due) },
                 openQuestions: s.openQuestions ?? [], insights: s.insights ?? [],
                 speakers: (s.speakers ?? [:]).compactMapValues { $0 },
                 followUpEmail: s.followUpEmail ?? "")
+            summary.people = (s.people ?? []).map { p in
+                ScryNotePerson(name: p.name ?? "", role: .mentioned, at: p.at.flatMap { $0.wholeMatch(of: /\d+:\d\d/) == nil ? nil : $0 }, detail: p.detail ?? "")
+            }.filter { !$0.name.isEmpty }
+            return summary
         }
         throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "no summary JSON in the reply"))
     }
@@ -745,6 +784,8 @@ public enum ScryPrompt {
         struct Topic: Decodable { var title: String?, points: [String]? }
         struct Action: Decodable { var owner: String?, task: String?, due: String? }
         var title: String?, summary: String?, recap: [Topic]?, decisions: [String]?, keyDates: [String]?, actionItems: [Action]?
+        struct Person: Decodable { var name: String?, detail: String?, at: String? }
+        var people: [Person]?
         var openQuestions: [String]?, insights: [String]?, speakers: [String: String?]?, followUpEmail: String?   // null = unmapped
     }
 }
@@ -770,8 +811,10 @@ public struct ScryNote: Equatable, Sendable {
     public var summary: ScrySummary
     public var userNotes: String
     public var segments: [ScrySegment]
-    public init(meta: Meta, summary: ScrySummary, userNotes: String, segments: [ScrySegment]) {
-        self.meta = meta; self.summary = summary; self.userNotes = userNotes; self.segments = segments
+    /// Who spoke and who was talked about, with links to the people you know (`ScryPeople`).
+    public var people: [ScryNotePerson]
+    public init(meta: Meta, summary: ScrySummary, userNotes: String, segments: [ScrySegment], people: [ScryNotePerson] = []) {
+        self.people = people; self.meta = meta; self.summary = summary; self.userNotes = userNotes; self.segments = segments
     }
 
     /// YAML frontmatter (title, date, start, end, duration_min, app, participants, speakers, source: scry),
@@ -804,6 +847,7 @@ public struct ScryNote: Equatable, Sendable {
             "\($0.speaker) \(stamp($0.seconds)) (\(Int(($0.seconds / total * 100).rounded()))%)"
         }.joined(separator: ", ")] : []
         section("Insights", bullets(s.insights) + talkLine)
+        section("People", people.map(\.markdown))
         section("Your notes", lines(userNotes))
         section("Follow-up email", lines(s.followUpEmail))
         section("Transcript", segments.enumerated().flatMap { i, g in
@@ -874,7 +918,8 @@ public struct ScryNote: Equatable, Sendable {
             speakers: speakers, followUpEmail: text("follow-up email"))
         return ScryNote(meta: Meta(startedAt: startedAt, endedAt: endedAt, app: app, participants: participants, speakers: speakers,
                                    folder: decoded("folder", String.self) ?? fm["folder"].flatMap { $0.isEmpty ? nil : $0 }),
-                        summary: summary, userNotes: text("your notes"), segments: segments)
+                        summary: summary, userNotes: text("your notes"), segments: segments,
+                        people: (sections["people"] ?? []).compactMap(ScryNotePerson.parse))
     }
     /// `**[mm:ss] Speaker:** text` → its parts; nil for any other line. By hand, not Regex: a long call has
     /// thousands of these lines and Swift Regex took ~0.3 ms each (1.7 s per note).
@@ -1015,6 +1060,23 @@ public enum ScryNames {
         guard let x = a.split(separator: " ").first?.lowercased(), let y = b.split(separator: " ").first?.lowercased() else { return false }
         return x == y || min(x.count, y.count) >= 3 && (x.hasPrefix(y) || y.hasPrefix(x))
     }
+    /// Everyone but you, for "the only other person": nil when it isn't sure which tile is yours. Your own name must match
+    /// exactly (`selfName` from Meet, or your name in settings); a first name alone could be a colleague's.
+    public static func others(_ participants: [String], selfName: String?, userName: String) -> [String]? {
+        let me = [selfName, userName].compactMap { $0?.lowercased() }
+        let rest = participants.filter { !me.contains($0.lowercased()) }
+        return rest.count < participants.count ? rest : nil
+    }
+
+    /// Outside Meet: the one other person invited, when the screen shows them.
+    public static func soleInvitee(_ invite: ScryInvite?, onScreen: [String], userName: String) -> String? {
+        let others = (invite?.invitees.map(\.name) ?? []).filter { $0.lowercased() != userName.lowercased() }
+        let seen = onScreen.filter { $0.lowercased() != userName.lowercased() }
+        // Anyone else on screen, invited or not, may be the one speaking.
+        guard others.count == 1, !seen.isEmpty, seen.allSatisfy({ $0.lowercased() == others[0].lowercased() }) else { return nil }
+        return others[0]
+    }
+
     /// On-screen names completed from the invite: "Alex" → "Alex Client" when exactly one invitee has
     /// that first name. Multi-word names stay as shown.
     public static func completed(_ screen: [String], _ invite: ScryInvite?) -> [String] {
@@ -1047,8 +1109,14 @@ public enum ScryNames {
     /// On a call, a far side that diarized to one speaker with exactly one other person named → that
     /// speaker is them (["Speaker A": "Alex Client"]); otherwise [:], and the summary maps on evidence.
     public static func soleSpeaker(_ segments: [ScrySegment], names: [String], userName: String) -> [String: String] {
-        let far = Set(segments.map(\.speaker).filter { $0 != "You" }), people = others(names, userName: userName)
+        let far = Set(segments.map(\.speaker).filter { $0 != "You" })
+        // Your full name exactly, or your first name alone: a colleague with your first name is a person on the call too.
+        let me = userName.lowercased(), first = me.split(separator: " ").first.map(String.init) ?? ""
+        let mine = names.filter { $0.lowercased().split(separator: " ").first.map(String.init) == first }
+        let people = names.filter { n in !(n.lowercased() == me || n.lowercased() == first || me == first && mine == [n]) }
         guard far.count == 1, people.count == 1, let label = far.first else { return [:] }
+        // "Sam R." alone may be your own tile ("Sam Rivera").
+        if people[0].lowercased().hasPrefix(first + " "), me != first, !names.contains(where: { $0.lowercased() == me }) { return [:] }
         return [label: people[0]]
     }
 }

@@ -17,6 +17,7 @@ public struct ScrySettingsView: View {
     @State private var name = ""
     @State private var never = ""
     @State private var skills = ""
+    @State private var people = ""
     @State private var claudePath = ""
     @State private var key = ""
     @State private var keySaved = SupportKeychain.read(SupportKeychain.elevenLabs) != nil
@@ -38,6 +39,10 @@ public struct ScrySettingsView: View {
                 SettingsDivider()
                 SettingsToggleRow("Record calls automatically (no offer)", isOn: Binding(get: { saved.autoRecord }, set: { v in
                     var s = saved; s.autoRecord = v; persist(s)
+                }))
+                SettingsDivider()
+                SettingsToggleRow("Show a notice 5 minutes before a meeting, and Join 2 minutes before", isOn: Binding(get: { saved.meetingSoon }, set: { v in
+                    var s = saved; s.meetingSoon = v; persist(s)
                 }))
                 SettingsDivider()
                 SettingsToggleRow("Alarm when a meeting starts and you're not in a call", isOn: Binding(get: { saved.meetingAlarm }, set: { v in
@@ -81,6 +86,8 @@ public struct ScrySettingsView: View {
                 }
                 SettingsDivider()
                 editor("Never offer for these apps (bundle IDs, one per line)", $never, lines: 3)
+                SettingsDivider()
+                editor("Folders with a note for each person you know (one per line)", $people, lines: 2)
                 SettingsDivider()
                 editor("Your live-panel skills (one per line: \u{201C}name: what to do\u{201D})", $skills, lines: 3)
                 SettingsDivider()
@@ -145,6 +152,7 @@ public struct ScrySettingsView: View {
 
     private var edited: ScrySettings {
         var s = ScrySettings.edited(saved, root: root, name: name, never: never)
+        s.people = people.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         s.skills = skills.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         return s
     }
@@ -174,6 +182,7 @@ public struct ScrySettingsView: View {
         name = s.userName
         never = s.never.joined(separator: "\n")
         skills = s.skills.joined(separator: "\n")
+        people = s.people.joined(separator: "\n")
     }
 
     private func showOps(_ s: ScrySettings) {

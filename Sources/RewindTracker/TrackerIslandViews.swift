@@ -111,6 +111,7 @@ final class TrackerIslandShapeView: NSView {
 
 /// Goal ring: white arc on a dark grey track, starting at 12 o'clock, clockwise. Clamped to 1.
 final class TrackerIslandRingView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }   // the island takes the click
     private let track = CAShapeLayer(), arc = CAShapeLayer()
     private let lineWidth: CGFloat
 
@@ -152,6 +153,7 @@ final class TrackerIslandRingView: NSView {
 
 /// Category dot; hollow (outline only) while paused.
 final class TrackerIslandDotView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }   // the island takes the click
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
@@ -225,9 +227,24 @@ final class TrackerIslandButton: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
+/// The card takes clicks only on its buttons and the hero: the rest is the island's own (it covers the ears too, at
+/// alpha 0, and a view that doesn't accept the first mouse would swallow the click that opens it).
+final class TrackerIslandCardView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard alphaValue > 0, let v = super.hitTest(point), v !== self else { return nil }
+        return v
+    }
+}
+
+final class TrackerIslandWarnView: NSImageView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 /// Root view: tracks hover over the black shape (`hoverRect`, local) and takes first clicks.
 final class TrackerIslandRootView: NSView {
     var onHover: ((Bool) -> Void)?
+    var onClick: (() -> Void)?
+    override func mouseDown(with event: NSEvent) { onClick?() }
     var hoverRect: CGRect = .zero {
         didSet { if hoverRect != oldValue { updateTrackingAreas() } }
     }

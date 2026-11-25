@@ -54,7 +54,13 @@ import UserNotifications
         refreshIcon()
         pill.onRecord = { [weak self] in self?.start(app: self?.offered, systemAudio: true) }
         pill.onNever = { [weak self] in self?.never(self?.offered) }
-        pill.onOpenLive = { [weak self] in self?.session?.live?.show() }
+        pill.onOpenLive = { [weak self] in self?.openCall() }
+        pill.recordingMenu = { [weak self] in
+            guard let self, session != nil else { return nil }
+            let menu = NSMenu()
+            menuNeedsUpdate(menu)   // what the menu-bar eye offers during a call
+            return menu
+        }
         pill.onStop = { [weak self] in self?.stop() }
         pill.onOpenNote = { url in ScryWindows.showMeetings(url) }
         pill.onPushOps = { [weak self] in self?.pushOps() }
@@ -135,8 +141,8 @@ import UserNotifications
         // ever seen (all screenshots go to the pipeline).
         // Nobody on screen yet → the invite's title (still says it's the right meeting), else the app.
         let onScreen = s.meet?.participants ?? []
-        let now = ScryNames.completed(onScreen.isEmpty ? s.screens.last.map { ScryNames.fromOCR([$0], known: (s.invite?.invitees.map(\.name) ?? []) + [s.settings.userName]) } ?? [] : onScreen, s.invite)
-        s.onScreen = now
+        s.onScreen = onScreen.isEmpty ? s.screens.last.map { ScryNames.fromOCR([$0], known: (s.invite?.invitees.map(\.name) ?? []) + [s.settings.userName]) } ?? [] : onScreen
+        let now = ScryNames.completed(s.onScreen, s.invite)
         let who = ScryNames.pillLabel(now, userName: s.settings.userName,
                                       fallback: s.invite?.title ?? s.app.map(Self.name) ?? "In person")
         // The tap stopped delivering (it's being rebuilt), or it delivers too little of the call: say so, rather
@@ -190,14 +196,18 @@ import UserNotifications
                 s.live?.onPause = { [weak self] in self?.togglePause() }
                 s.live?.who = { [weak s] in
                     guard let s else { return (nil, []) }
-                    // Meet doesn't always mark your own tile: your Mac account's name says which one it is.
-                    let me = [s.settings.userName, NSFullUserName()]
-                    func other(_ n: String) -> Bool { !me.contains { ScryNames.sameFirstName($0, n) } }
-                    let inMeet = (s.meet?.participants ?? []).filter(other)
-                    if !inMeet.isEmpty { return (s.meet?.speaking.flatMap { other($0) ? $0 : nil }, inMeet) }
-                    // Outside Meet, only people who are both invited and on screen: screen text alone can be a button.
-                    let invited = s.invite?.invitees.map(\.name) ?? []
-                    return (nil, s.onScreen.filter { n in other(n) && invited.contains { ScryNames.sameFirstName($0, n) } })
+                    // Meet doesn't always mark your own tile. While nothing says which name is yours, one with your first
+                    // name is left out rather than put on someone else's line.
+                    let exact = [s.meet?.selfName, s.settings.userName == ScrySettings().userName ? nil : s.settings.userName].compactMap { $0?.lowercased() }
+                    if let people = s.meet?.participants, !people.isEmpty {
+                        let speaking = s.meet?.speaking.flatMap { n in
+                            (exact.isEmpty ? ScryNames.sameFirstName(NSFullUserName(), n) : exact.contains(n.lowercased()) || s.settings.userName != ScrySettings().userName && s.settings.userName.split(separator: " ").count == 1 && ScryNames.sameFirstName(s.settings.userName, n)) ? nil : n
+                        }
+                        let others = ScryNames.others(people, selfName: s.meet?.selfName, userName: s.settings.userName) ?? []
+                        // Someone may have left or joined since Meet last answered: then nobody is "the only other person".
+                        return (speaking, others.count == 1 && s.meet?.fresh != true ? [] : others)
+                    }
+                    return (nil, ScryNames.soleInvitee(s.invite, onScreen: s.onScreen, userName: s.settings.userName).map { [$0] } ?? [])
                 }
             }
             if systemAudio {   // off main: the first run blocks on the System Audio Recording prompt
@@ -243,6 +253,7 @@ import UserNotifications
         if s.paused { s.pauses[s.pauses.count - 1].append(t) } else { s.pauses.append([t]) }
         s.recorder.paused = s.paused
         s.live?.model.paused = s.paused
+        s.meet?.paused = s.paused
         SupportLog.scry.info("recording \(s.paused ? "paused" : "resumed", privacy: .public)")
         tickRecording(nil)
     }
@@ -470,7 +481,12 @@ import UserNotifications
                                   action: nil, keyEquivalent: "")
             info.isEnabled = false
             menu.addItem(info)
-            if s.live != nil { menu.addItem(action("Show live panel", #selector(showLive))) }
+            if s.live != nil {
+                menu.addItem(action("Show live panel", #selector(showLive)))
+                menu.addItem(action("Your notes for this call", #selector(showLiveNotes)))
+            }
+            menu.addItem(action("Meetings", #selector(openMeetings)))
+            menu.addItem(.separator())
             menu.addItem(action(s.paused ? "Resume recording" : "Pause recording", #selector(togglePause)))
             menu.addItem(action("Stop and make notes", #selector(stop)))
             menu.addItem(action("Discard", #selector(discard)))
@@ -495,6 +511,9 @@ import UserNotifications
     @objc private func recordCall() { start(app: watch.callApp, systemAudio: true) }
     @objc private func recordInPerson() { start(app: nil, systemAudio: false) }
     @objc private func showLive() { session?.live?.show() }
+    @objc private func showLiveNotes() { session?.live?.show(tab: .notes) }
+    /// A click on the call signal: the live panel, or the meetings when the live side is off.
+    private func openCall() { if let live = session?.live { live.show() } else { ScryWindows.showMeetings() } }
 
     @objc private func openNotes() {
         let root = Self.loadSettings().settings.rootURL

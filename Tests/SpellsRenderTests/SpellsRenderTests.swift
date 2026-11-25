@@ -76,6 +76,7 @@ import WardUI
         m.liveSince = Date().addingTimeInterval(-14 * 60)
         m.level = 0.55
         m.others = ["Alex", "Jordan"]
+        m.tab = tab
         for (i, s) in Fixture.segments.enumerated() {
             let far = s.speaker != "Sam"
             m.transcript.hear(far: far, s.text, at: s.start, speaking: i == 3 ? nil : s.speaker)
@@ -85,7 +86,7 @@ import WardUI
         m.notes = "Ask about the return address"
         m.chat = [.init(question: "/email", answer: "To: alex@example.com\nSubject: Next steps\n\nHi Alex,\n\nThe mail is built. It stays off until we have your return address. You said you will send it by Friday.\n\nThanks,\nSam",
                         gmail: URL(string: "https://mail.google.com/")), .init(question: "What did Jordan promise?")]
-        return ScryLiveView(model: m, onCatchUp: {}, onNotesChanged: {}, onStop: {}, onDiscard: {}, tab: tab)
+        return ScryLiveView(model: m, onCatchUp: {}, onNotesChanged: {}, onStop: {}, onDiscard: {})
     }
 
     /// The listening indicator in each state, on a menu-bar-grey strip like the top of the screen.
