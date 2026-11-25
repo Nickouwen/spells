@@ -66,22 +66,23 @@ public struct ScryLiveTranscript: Equatable, Sendable {
     }
 
     /// `everywhere`: every far-side line with that name, and the ones still to come. A "You" line is your mic: it stays.
-    /// `person`: the note of someone you know, when you picked them.
+    /// `person`: the note of someone you know, when you picked them. A line picked so counts in the note also by itself:
+    /// "Them" can be several voices, and only the one you clicked is sure.
     public mutating func rename(_ id: Int, to name: String, everywhere: Bool, person: String? = nil) {
         var name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if name.lowercased() == "them" { name = "Them" }
         guard !name.isEmpty, let line = lines.first(where: { $0.id == id }), line.far else { return }
         for i in lines.indices where lines[i].far && (lines[i].id == id || everywhere && lines[i].speaker == line.speaker) {
-            lines[i].speaker = name; lines[i].byHand = everywhere && name != "Them"   // "Them" takes a name back
+            lines[i].speaker = name; lines[i].byHand = (everywhere || person != nil) && name != "Them"   // "Them" takes a name back
         }
-        guard everywhere else { return }
+        guard everywhere || person != nil else { return }
         guard name != "Them" else { aliases = aliases.filter { $0.value != line.speaker }; return }
         // A longer or shorter form is the same person; any other name is someone else.
         func words(_ s: String) -> Set<String> { Set(s.lowercased().split(separator: " ").map(String.init)) }
         // Two people picked under one name: which lines are whose isn't sure, so neither is linked.
-        if let person, let other = picked[name], other != person, line.speaker != name { picked[name] = ""; return alias(line.speaker, name) }
+        if let person, let other = picked[name], other != person, line.speaker != name { picked[name] = ""; return everywhere ? alias(line.speaker, name) : () }
         picked[name] = person ?? (words(name).isSubset(of: words(line.speaker)) || words(name).isSuperset(of: words(line.speaker)) ? picked[line.speaker] : nil)
-        alias(line.speaker, name)
+        if everywhere { alias(line.speaker, name) }
     }
 
     private mutating func alias(_ old: String, _ name: String) {

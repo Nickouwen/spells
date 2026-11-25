@@ -178,7 +178,9 @@ public enum ScryNotes {
 
     /// Takes a wrongly found person out of the note's people.
     public static func removePerson(_ url: URL, _ p: ScryNotePerson) throws -> ScryNoteFile? {
-        try write(ScryPeople.removing(p, from: try String(contentsOf: url, encoding: .utf8)), to: url)
+        let md = try String(contentsOf: url, encoding: .utf8)
+        try readable(md)
+        return try write(ScryPeople.removing(p, from: md), to: url)
     }
 
     public static func addMention(_ url: URL, _ p: ScryNotePerson) throws -> ScryNoteFile? {
@@ -237,7 +239,7 @@ public enum ScryNotes {
             else { out.insert(contentsOf: ["## People", ""] + people + [""], at: out.firstIndex(of: "## Transcript") ?? out.count) }
         }
         // Words of yours between or below the transcript's lines go below it.
-        let loose = old.sections.filter { $0.head == "## Transcript" }.flatMap(\.lines).filter { !$0.allSatisfy(\.isWhitespace) && ScryNote.transcriptLine($0) == nil }
+        let loose = old.sections.filter { $0.head.lowercased().trimmingCharacters(in: .whitespaces) == "## transcript" }.flatMap(\.lines).filter { !$0.allSatisfy(\.isWhitespace) && ScryNote.transcriptLine($0) == nil }
         if !loose.isEmpty { out += (out.last == "" ? [] : [""]) + loose + [""] }
         if let title = out.firstIndex(where: { $0.hasPrefix("# ") }), let words = old.preamble { out.insert(contentsOf: ["", words], at: title + 1) }
         if let close = out.dropFirst().firstIndex(of: "---") { out.insert(contentsOf: fields, at: close) }

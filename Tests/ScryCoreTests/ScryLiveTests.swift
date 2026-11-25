@@ -281,3 +281,12 @@ private let noteText = "---\ntitle: \"T\"\ndate: 2026-11-24\nstart: 2026-11-24T1
     if let guest { two.rename(guest.id, to: "Sam Lee", everywhere: true, person: "/b/Sam Lee.md") }
     #expect(guest != nil && two.given.count == 2 && two.given.allSatisfy { $0.person?.isEmpty != false })
 }
+
+@Test func aPickOnThemNamesOnlyThatLine() {
+    var t = ScryLiveTranscript()
+    for (i, w) in ["One here.", "Two there."].enumerated() { t.commit(far: true, w, at: 2 + Double(i) * 5, others: []) }
+    t.rename(t.lines[0].id, to: "Alex Reed", everywhere: false, person: "/p/Alex Reed.md")
+    t.commit(far: true, "Three now.", at: 20, others: [])
+    #expect(t.lines.map(\.speaker) == ["Alex Reed", "Them", "Them"])
+    #expect(t.given.map(\.name) == ["Alex Reed"] && t.given.first?.person == "/p/Alex Reed.md")
+}

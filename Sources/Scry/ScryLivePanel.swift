@@ -371,8 +371,8 @@ struct ScryLiveView: View {
                         Section("This line") { ForEach(names, id: \.self) { n in Button(n) { model.rename(l.id, to: n, everywhere: false) } } }
                     }
                     let known = model.known
-                    if !known.isEmpty {   // all their lines: a name you know is who they are for the whole call
-                        Menu("People You Know") { ForEach(known) { k in Button(ScryPeople.label(k, among: known)) { model.rename(l.id, to: k.name, everywhere: true, person: k.url.path) } } }
+                    if !known.isEmpty {   // all their lines, but only this one of "Them", which can be several people
+                        Menu(l.speaker == "Them" ? "This Line: People You Know" : "People You Know") { ForEach(known) { k in Button(ScryPeople.label(k, among: known)) { model.rename(l.id, to: k.name, everywhere: l.speaker != "Them", person: k.url.path) } } }
                     }
                     if l.speaker != "Them" { Button("Not Sure (Them)") { model.rename(l.id, to: "Them", everywhere: true) } }
                     Button("Rename…") { newName = l.speaker == "Them" ? "" : l.speaker; naming = l }

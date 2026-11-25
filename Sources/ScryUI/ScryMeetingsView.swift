@@ -771,7 +771,7 @@ public struct MeetingsView: View {
     }
 
     private func addAction(_ n: ScryNoteFile) {
-        let url = n.url, task = newTask.trimmingCharacters(in: .whitespacesAndNewlines)
+        let url = n.url, task = ScryOps.redacted(newTask.trimmingCharacters(in: .whitespacesAndNewlines), numbersOnly: true)
         guard !task.isEmpty else { return }
         newTask = ""
         update(url, undo: "Item added.") { try ScryNotes.addAction(url, owner: "You", task: task) }

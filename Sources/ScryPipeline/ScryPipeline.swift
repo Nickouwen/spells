@@ -132,7 +132,7 @@ public enum ScryPipeline {
         let appName = capture.app.flatMap { ScryCallApps.known[$0] }
         let prompt = ScryPrompt.summary(segments: segments, participants: names, userNotes: userNotes,
                                         userName: settings.userName, appName: appName, startedAt: capture.startedAt,
-                                        keyterms: terms, invite: capture.invite)
+                                        keyterms: terms, invite: safe(capture.invite))
         t0 = clock.now
         var summary = try ScryPrompt.parseSummary(try await claude(prompt))
         if levels?.throughSpeakers == true {
@@ -154,9 +154,12 @@ public enum ScryPipeline {
         let spoken = ScryTranscript.renamed(segments, summary.speakers)
         let emails = Dictionary(grouping: capture.invite?.invitees ?? [], by: \.name)   // two invitees with one name: neither email is sure
             .compactMapValues { $0.count == 1 ? $0[0].email : nil }
+        var picked = Dictionary(given.compactMap { g in g.person.map { (g.name, $0) } }, uniquingKeysWith: { _, b in b })
+        // Named only because one person was invited and nobody was seen: that's a guess, so the link is yours to make.
+        if seen.isEmpty, named.isEmpty { for n in sole.values where picked[n] == nil { picked[n] = "" } }
         let people = ScryPeople.rows(segments: spoken, mentioned: summary.people, emails: emails, owner: settings.userName,
                                      known: ScryPeople.load(settings.people.compactMap(ScrySettings.folder)), note: url,
-                                     picked: Dictionary(given.compactMap { g in g.person.map { (g.name, $0) } }, uniquingKeysWith: { _, b in b }))
+                                     picked: picked)
         let note = ScryNote(meta: .init(startedAt: capture.startedAt, endedAt: capture.endedAt, app: appName,
                                         participants: participants, speakers: speakers),
                             summary: summary, userNotes: userNotes,
@@ -165,6 +168,11 @@ public enum ScryPipeline {
         try Data(note.markdown().utf8).write(to: url, options: .withoutOverwriting)
         SupportLog.scry.info("note: \(segments.count) segments, \(summary.actionItems.count) actions, diarized \(diarized), scribe \(scribeMs) ms, claude \(claudeMs) ms")
         return Result(noteURL: url, summary: summary, scribeMs: scribeMs, claudeMs: claudeMs, diarized: diarized)
+    }
+
+    /// The invite for a prompt: its title without numbers.
+    static func safe(_ invite: ScryInvite?) -> ScryInvite? {
+        invite.map { var i = $0; i.title = ScryOps.redacted(i.title, numbersOnly: true); return i }
     }
 
     private static let pausePrefix = "Recording paused:"
@@ -364,7 +372,7 @@ public enum ScryLiveAsk {
         let safe = zip(transcript.segments, ScryOps.redacted(turns: transcript.segments.map(\.text))).map { s, t in var s = s; s.text = t; return s }
         let text = safe.map { String(format: "[%02d:%02d] ", Int($0.start) / 60, Int($0.start) % 60) + "\($0.speaker): \($0.text)" }
         let prompt = ScryLiveChat.prompt(ScryOps.redacted(ScryLiveChat.expand(question, skills: skills)), transcript: ScryOps.redacted(text.joined(separator: "\n")),
-                                         notes: ScryOps.redacted(notes), invite: invite)
+                                         notes: ScryOps.redacted(notes), invite: ScryPipeline.safe(invite))
         return try await ScryPipeline.claude(prompt, model: "haiku").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
