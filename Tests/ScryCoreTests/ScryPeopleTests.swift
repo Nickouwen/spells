@@ -210,3 +210,26 @@ private func md(_ extra: String = "") -> String {
     }
     #expect(links([:], "D") == [true, false] && links(["Dana Whitfield": ""], "D") == [false, false])
 }
+
+@Test func wordsTypedInTheTranscriptStay() {
+    let old = "---\ntitle: A\nsource: scry\n---\n\n# A\n\n## Transcript\n\n**[00:01] You:** Hi.\n\nCall back Monday.\n"
+    let new = "---\ntitle: B\nsource: scry\n---\n\n# B\n\n## Transcript\n\n**[00:01] You:** Hi.\n"
+    #expect(ScryNotes.carried(from: old, to: new) == new + "\nCall back Monday.\n" && ScryNotes.carried(from: new + "\nCall back Monday.\n", to: new) == new + "\nCall back Monday.\n")
+}
+
+@Test func uncertainLinksAreRefused() throws {
+    let v = try vault(); defer { try? FileManager.default.removeItem(at: v) }
+    let people = v.appending(path: "People")
+    try "---\nemail: office@example.com\n---\n# Marcus Whitfield\n\n# Ellen Park (wife)\n".write(to: people.appending(path: "Marcus Whitfield.md"), atomically: true, encoding: .utf8)
+    try "# Pat\n".write(to: people.appending(path: "Pat (lender).md"), atomically: true, encoding: .utf8)
+    try "# Pat\n".write(to: people.appending(path: "Pat (sales).md"), atomically: true, encoding: .utf8)
+    let all = ScryPeople.load([people])
+    #expect(ScryPeople.exact("Dana Whitfield", email: "office@example.com", in: all) == nil)                    // the email says Marcus
+    #expect(ScryPeople.exact("M. W.", email: "office@example.com", in: all)?.name == "Marcus Whitfield" && ScryPeople.exact("Ellen Park", in: all) == nil)
+    #expect(all.filter { $0.name == "Pat" }.map { ScryPeople.label($0, among: all) } == ["Pat (People/Pat (lender).md)", "Pat (People/Pat (sales).md)"])
+    let url = v.appending(path: "calls/moved.md"), dana = try #require(all.first { $0.name == "Dana Whitfield" })
+    try (md() + "\n## People\n\n- **Marcus** (mentioned)\n").write(to: url, atomically: true, encoding: .utf8)
+    #expect(throws: ScryNotes.Moved.self) { try ScryNotes.linkPerson(url, .init(name: "Dana", role: .speaker), to: dana) }
+    try md().write(to: url, atomically: true, encoding: .utf8)
+    #expect(throws: ScryNotes.Changed.self) { try ScryNotes.linkPerson(url, .init(name: "Nobody", role: .speaker), to: dana) }
+}

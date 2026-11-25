@@ -161,6 +161,7 @@ public struct MeetingsView: View {
             }
             .padding(Theme.Space.gutter)
         }
+        .onChange(of: folders) { if let f = folder, !folders.contains(f) { folder = nil } }
     }
 
     private func row(_ n: ScryNoteFile, selected: Bool) -> some View {
@@ -386,13 +387,13 @@ public struct MeetingsView: View {
                     if let l = p.link {
                         let who = known.flatMap { ScryPeople.person(for: l, from: n.url, in: $0) }
                         Button { if let who { NSWorkspace.shared.open(who.url) } } label: {
-                            Label(who?.name ?? (known == nil ? "Linked" : "Linked note not found"), systemImage: "link")
+                            Label(who.map { ScryPeople.label($0, among: known ?? []) } ?? (known == nil ? "Linked" : "Linked note not found"), systemImage: "link")
                         }
                         .buttonStyle(QuietButtonStyle()).disabled(who == nil).help(who.map { $0.detail.isEmpty ? "Open the note" : $0.detail } ?? "")
                     }
                     Menu(p.link == nil ? "Link" : "Change") {
                         let likely = ScryPeople.suggestions(p.name, in: known ?? []).prefix(5)
-                        if !likely.isEmpty { Section("Is this") { ForEach(likely) { k in Button(k.detail.isEmpty ? k.name : "\(k.name), \(k.detail)") { link(n, p, as: p.name, to: k) } } } }
+                        if !likely.isEmpty { Section("Is this") { ForEach(likely) { k in Button(ScryPeople.label(k, among: known ?? []) + (k.detail.isEmpty ? "" : ", \(k.detail)")) { link(n, p, as: p.name, to: k) } } } }
                         Button("Choose or Create…") { linking = (n, p) }
                         Divider()
                         if p.link != nil { Button("Remove Link") { link(n, p, as: p.name, to: nil) } }

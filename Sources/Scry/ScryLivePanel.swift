@@ -372,7 +372,7 @@ struct ScryLiveView: View {
                     }
                     let known = model.known
                     if !known.isEmpty {   // all their lines: a name you know is who they are for the whole call
-                        Menu("People You Know") { ForEach(known) { k in Button(known.filter { $0.name == k.name }.count > 1 ? "\(k.name) (\(k.url.deletingLastPathComponent().lastPathComponent)/\(k.url.lastPathComponent))" : k.name) { model.rename(l.id, to: k.name, everywhere: true, person: k.url.path) } } }
+                        Menu("People You Know") { ForEach(known) { k in Button(ScryPeople.label(k, among: known)) { model.rename(l.id, to: k.name, everywhere: true, person: k.url.path) } } }
                     }
                     if l.speaker != "Them" { Button("Not Sure (Them)") { model.rename(l.id, to: "Them", everywhere: true) } }
                     Button("Rename…") { newName = l.speaker == "Them" ? "" : l.speaker; naming = l }

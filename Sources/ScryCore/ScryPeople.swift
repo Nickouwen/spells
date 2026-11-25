@@ -77,7 +77,9 @@ public enum ScryPeople {
         if let t = fm["type"]?.first, ["project", "meeting", "company", "organization", "transcript", "daily", "index", "template"].contains(t.lowercased()) { return nil }
         let file = url.deletingPathExtension().lastPathComponent, name = bare(file)
         guard !name.isEmpty else { return nil }
-        let heading = lines.first { $0.hasPrefix("# ") }.map { bare(String($0.dropFirst(2))) }
+        // The note's title only: a later heading can be someone else.
+        let close = lines.first == "---" ? lines.dropFirst().firstIndex(of: "---") ?? 0 : -1
+        let heading = lines[(close + 1)...].first { !$0.isEmpty }.flatMap { $0.hasPrefix("# ") ? $0 : nil }.map { bare(String($0.dropFirst(2))) }
         let aliases = ((fm["aliases"] ?? fm["alias"] ?? []) + [heading].compactMap { $0 }).filter { !$0.isEmpty && matchKey($0) != matchKey(name) }
         return ScryPerson(name: name, aliases: aliases, emails: (fm["email"] ?? []) + (fm["emails"] ?? []),
                           detail: [fm["role"]?.first, fm["company"]?.first].compactMap { $0 }.joined(separator: ", "), url: url)
@@ -88,6 +90,11 @@ public enum ScryPeople {
     private static func bare(_ s: String) -> String { s.replacing(/\s*\([^)]*\)/, with: "").trimmingCharacters(in: .whitespaces) }
     static func matchKey(_ s: String) -> String { s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).split(whereSeparator: { !$0.isLetter && !$0.isNumber }).joined(separator: " ") }
 
+    /// The name; for one of two people of one name, with the folder and file that tell them apart.
+    public static func label(_ p: ScryPerson, among people: [ScryPerson]) -> String {
+        people.contains { $0.name == p.name && $0.id != p.id } ? "\(p.name) (\(p.url.deletingLastPathComponent().lastPathComponent)/\(p.url.lastPathComponent))" : p.name
+    }
+
     // MARK: Matching
 
     /// The one person this must be: the same email, or the same full name (two words or more). Two people who fit, or a
@@ -95,7 +102,10 @@ public enum ScryPeople {
     public static func exact(_ name: String, email: String? = nil, in people: [ScryPerson]) -> ScryPerson? {
         if let e = email?.lowercased(), !e.isEmpty {
             let same = people.filter { $0.emails.contains { $0.lowercased() == e } }
-            if !same.isEmpty { return same.count == 1 ? same[0] : nil }
+            if !same.isEmpty {   // a shared mailbox: the email says one person and the full name another
+                let named = exact(name, in: people)
+                return same.count == 1 && (named == nil || named?.id == same[0].id) ? same[0] : nil
+            }
         }
         let k = matchKey(name)
         guard k.contains(" ") else { return nil }
@@ -173,8 +183,8 @@ public enum ScryPeople {
             var p = p
             // Who you picked in the live panel (two people under one name: neither), else no doubt. An invite's email is a
             // speaker's: someone only mentioned may be another person of that name.
-            let who = picked[p.name] == "" ? nil : picked[p.name].flatMap { path in known.first { $0.id == path } }
-                ?? exact(p.name, email: p.role == .speaker ? emails[p.name] : nil, in: known)
+            let who = if let path = picked[p.name] { known.first { $0.id == path } }
+                else { exact(p.name, email: p.role == .speaker ? emails[p.name] : nil, in: known) }
             p.link = who.map { link(to: $0, from: note) }
             return p
         }

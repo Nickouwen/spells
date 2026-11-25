@@ -36,11 +36,8 @@ struct ScryPersonPicker: View {
                     ForEach(list) { k in
                         Button { done(.known(called.isEmpty ? k.name : called, k)) } label: {
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(k.name).textRole(.body)
-                                // Two people of one name: the folder says which.
-                                let twin = known.contains { $0.name == k.name && $0.id != k.id }
-                                let about = [k.detail, twin ? k.url.deletingLastPathComponent().lastPathComponent : ""].filter { !$0.isEmpty }.joined(separator: " · ")
-                                if !about.isEmpty { Text(about).textRole(.label, Theme.inkTertiary).lineLimit(1) }
+                                Text(ScryPeople.label(k, among: known)).textRole(.body)
+                                if !k.detail.isEmpty { Text(k.detail).textRole(.label, Theme.inkTertiary).lineLimit(1) }
                             }
                             .padding(.vertical, Theme.Space.xs).padding(.horizontal, Theme.Space.s)
                             .frame(maxWidth: .infinity, alignment: .leading)

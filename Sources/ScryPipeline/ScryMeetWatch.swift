@@ -23,7 +23,9 @@ public final class ScryMeetWatch: @unchecked Sendable {
     public var speaking: String? { seen.withLock { $0.speaking } }
     public var selfName: String? { seen.withLock { $0.selfName } }
     /// Written on `queue`, read on the main thread.
-    private let seen = Mutex<(participants: [String], speaking: String?, selfName: String?)>(([], nil, nil))
+    /// Meet answered the last poll: after a miss the participants may be old.
+    public var fresh: Bool { seen.withLock { $0.fresh } }
+    private let seen = Mutex<(participants: [String], speaking: String?, selfName: String?, fresh: Bool)>(([], nil, nil, false))
 
     public init(browser bundleID: String, dir: URL, startedAt: Date) {
         script = NSAppleScript(source: Self.appleScript(bundleID))!
@@ -93,7 +95,7 @@ public final class ScryMeetWatch: @unchecked Sendable {
     }
 
     private func poll() {
-        guard let s = read() else { seen.withLock { $0.speaking = nil }; return }   // no tab, no answer: nobody is known to be speaking
+        guard let s = read() else { seen.withLock { $0.speaking = nil; $0.fresh = false }; return }   // no tab, no answer: nobody is known to be speaking
         let t = (Date().timeIntervalSince(startedAt) * 10).rounded() / 10
         let people = s.participants
         var lines: [ScryMeet.Line] = []
@@ -105,7 +107,7 @@ public final class ScryMeetWatch: @unchecked Sendable {
         let name = tile.flatMap { $0.isSelf ? nil : $0.name }
         if let name { lines.append(ScryMeet.Line(t: t, speaking: name)) }
         let mine = s.selfName ?? s.tiles.first(where: \.isSelf)?.name
-        seen.withLock { $0 = (people, name, mine ?? $0.selfName) }
+        seen.withLock { $0 = (people, name, mine ?? $0.selfName, true) }
         guard !lines.isEmpty else { return }
         append(lines.map { $0.encoded + "\n" }.joined())
     }

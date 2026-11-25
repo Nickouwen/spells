@@ -159,9 +159,12 @@ public enum ScryNotes {
     /// `adding`: a row that isn't there yet.
     public static func linkPerson(_ url: URL, _ p: ScryNotePerson, to known: ScryPerson?, adding: Bool = false) throws -> ScryNoteFile? {
         var md = try String(contentsOf: url, encoding: .utf8), p = p
+        try readable(md)
         if adding { try free(p, in: md) }
         else if let now = ScryPeople.rows(in: md).first(where: { $0.person.id == p.id })?.person { p = now }   // edited in Obsidian meanwhile
-        else if p.role == .mentioned { throw Changed() }   // gone: a link doesn't bring it back
+        else if p.role == .mentioned || ScryNote.parse(md)?.segments.contains(where: { ScryNotePerson.plain($0.speaker) == p.name }) != true {
+            throw Changed()   // gone: a link doesn't bring them back
+        }
         if let known, p.role == .speaker, p.name.wholeMatch(of: /Speaker [A-Z0-9]+|Them/) != nil {
             let name = ScryNotePerson.plain(known.name)
             if ScryNote.parse(md)?.segments.contains(where: { $0.speaker == name }) == false {
@@ -180,9 +183,16 @@ public enum ScryNotes {
 
     public static func addMention(_ url: URL, _ p: ScryNotePerson) throws -> ScryNoteFile? {
         let md = try String(contentsOf: url, encoding: .utf8)
+        try readable(md)
         try free(p, in: md)
         return try write(ScryPeople.setting(p, in: md), to: url)
     }
+
+    /// A "## People" moved below the transcript is out of reach: a second one above it would hide from the reader.
+    private static func readable(_ md: String) throws {
+        if ScryPeople.rows(in: md).isEmpty, ScryNote.parse(md)?.people.isEmpty == false { throw Moved() }
+    }
+    public struct Moved: Error, CustomStringConvertible { public var description: String { "move the note's People section above its Transcript first" } }
 
     /// A row is its name: a second person mentioned by the same name would replace the first.
     private static func free(_ p: ScryNotePerson, in md: String) throws {
@@ -200,7 +210,7 @@ public enum ScryNotes {
     }
 
     /// `to`, a note written anew, with what you added to `from`: your own frontmatter fields, words under the title,
-    /// sections, and lines in People.
+    /// sections, and lines in People and the transcript.
     public static func carried(from: String, to: String) -> String {
         func parts(_ md: String) -> (fields: [[String]], preamble: String?, sections: [(head: String, lines: [String])]) {
             let lines = md.components(separatedBy: "\n"), close = lines.dropFirst().firstIndex(of: "---") ?? 0
@@ -226,6 +236,9 @@ public enum ScryNotes {
             if let row = ScryPeople.rows(in: out.joined(separator: "\n")).last { out.insert(contentsOf: people, at: row.line + 1) }
             else { out.insert(contentsOf: ["## People", ""] + people + [""], at: out.firstIndex(of: "## Transcript") ?? out.count) }
         }
+        // Words of yours between or below the transcript's lines go below it.
+        let loose = old.sections.filter { $0.head == "## Transcript" }.flatMap(\.lines).filter { !$0.allSatisfy(\.isWhitespace) && ScryNote.transcriptLine($0) == nil }
+        if !loose.isEmpty { out += (out.last == "" ? [] : [""]) + loose + [""] }
         if let title = out.firstIndex(where: { $0.hasPrefix("# ") }), let words = old.preamble { out.insert(contentsOf: ["", words], at: title + 1) }
         if let close = out.dropFirst().firstIndex(of: "---") { out.insert(contentsOf: fields, at: close) }
         return out.joined(separator: "\n")

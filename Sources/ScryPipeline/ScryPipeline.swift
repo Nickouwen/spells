@@ -382,7 +382,7 @@ public enum ScryAsk {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
         // Summary sections only: five whole transcripts could overrun claude's context or the timeout.
         let prompt = ScryPrompt.ask(ScryOps.redacted(question), notes: top.map {
-            ($0.note.summary.title, f.string(from: $0.note.meta.startedAt), ScryOps.redacted(withoutTranscript($0.markdown), numbersOnly: true))
+            (ScryOps.redacted($0.note.summary.title, numbersOnly: true), f.string(from: $0.note.meta.startedAt), ScryOps.redacted(withoutTranscript($0.markdown), numbersOnly: true))
         })
         return (try await ScryPipeline.claude(prompt).trimmingCharacters(in: .whitespacesAndNewlines), top.map(\.url))
     }

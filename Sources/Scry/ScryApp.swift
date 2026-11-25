@@ -203,7 +203,9 @@ import UserNotifications
                         let speaking = s.meet?.speaking.flatMap { n in
                             (exact.isEmpty ? ScryNames.sameFirstName(NSFullUserName(), n) : exact.contains(n.lowercased()) || s.settings.userName != ScrySettings().userName && s.settings.userName.split(separator: " ").count == 1 && ScryNames.sameFirstName(s.settings.userName, n)) ? nil : n
                         }
-                        return (speaking, ScryNames.others(people, selfName: s.meet?.selfName, userName: s.settings.userName) ?? [])
+                        let others = ScryNames.others(people, selfName: s.meet?.selfName, userName: s.settings.userName) ?? []
+                        // Someone may have left or joined since Meet last answered: then nobody is "the only other person".
+                        return (speaking, others.count == 1 && s.meet?.fresh != true ? [] : others)
                     }
                     return (nil, ScryNames.soleInvitee(s.invite, onScreen: s.onScreen, userName: s.settings.userName).map { [$0] } ?? [])
                 }
