@@ -141,8 +141,8 @@ import UserNotifications
         // ever seen (all screenshots go to the pipeline).
         // Nobody on screen yet → the invite's title (still says it's the right meeting), else the app.
         let onScreen = s.meet?.participants ?? []
-        let now = ScryNames.completed(onScreen.isEmpty ? s.screens.last.map { ScryNames.fromOCR([$0], known: (s.invite?.invitees.map(\.name) ?? []) + [s.settings.userName]) } ?? [] : onScreen, s.invite)
-        s.onScreen = now
+        s.onScreen = onScreen.isEmpty ? s.screens.last.map { ScryNames.fromOCR([$0], known: (s.invite?.invitees.map(\.name) ?? []) + [s.settings.userName]) } ?? [] : onScreen
+        let now = ScryNames.completed(s.onScreen, s.invite)
         let who = ScryNames.pillLabel(now, userName: s.settings.userName,
                                       fallback: s.invite?.title ?? s.app.map(Self.name) ?? "In person")
         // The tap stopped delivering (it's being rebuilt), or it delivers too little of the call: say so, rather
@@ -253,6 +253,7 @@ import UserNotifications
         if s.paused { s.pauses[s.pauses.count - 1].append(t) } else { s.pauses.append([t]) }
         s.recorder.paused = s.paused
         s.live?.model.paused = s.paused
+        s.meet?.paused = s.paused
         SupportLog.scry.info("recording \(s.paused ? "paused" : "resumed", privacy: .public)")
         tickRecording(nil)
     }

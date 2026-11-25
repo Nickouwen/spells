@@ -103,18 +103,19 @@ public enum ScryPeople {
     /// The one person this must be: the same email, or the same full name (two words or more). Two people who fit, or a
     /// first name alone, is nobody: that's for you to say.
     public static func exact(_ name: String, email: String? = nil, in people: [ScryPerson]) -> ScryPerson? {
+        let k = matchKey(name)
+        func called() -> [ScryPerson] { people.filter { ([$0.name] + $0.aliases).contains { matchKey($0) == k } } }
         if let e = email?.lowercased(), !e.isEmpty {
             let same = people.filter { $0.emails.contains { $0.lowercased() == e } }
             if !same.isEmpty {   // a shared mailbox: the email says one person and the full name another
-                let named = exact(name, in: people)
-                return same.count == 1 && (named == nil || named?.id == same[0].id) ? same[0] : nil
+                let named = called()
+                return same.count == 1 && (named.isEmpty || named.contains { $0.id == same[0].id }) ? same[0] : nil
             }
         }
-        let k = matchKey(name)
         guard k.contains(" ") else { return nil }
         // "D. Whitfield" is an alias for choosing, not for being sure: an initial is nobody's full name.
         guard k.split(separator: " ").allSatisfy({ $0.count > 1 }) else { return nil }
-        let same = people.filter { ([$0.name] + $0.aliases).contains { matchKey($0) == k } }
+        let same = called()
         return same.count == 1 ? same[0] : nil
     }
 
@@ -162,7 +163,10 @@ public enum ScryPeople {
         if let m = link.wholeMatch(of: #/\[\[(.+?)(?:\|.*)?\]\]/#) {
             guard let vault = vault(of: note.resolvingSymlinksInPath()) else { return nil }
             let path = vault.appending(path: String(m.1) + ".md").path
-            return people.first { $0.url.path == path }
+            if let there = people.first(where: { $0.url.path == path }) { return there }
+            // Obsidian writes "[[Dana Whitfield]]" after a rename or move: the one note of that name in the vault.
+            let same = people.filter { !m.1.contains("/") && $0.url.deletingPathExtension().lastPathComponent == m.1 && Self.vault(of: $0.url) == vault }
+            return same.count == 1 ? same[0] : nil
         }
         guard let m = link.wholeMatch(of: #/\[.*?\]\((.+)\)/#), let u = URL(string: String(m.1)), u.isFileURL else { return nil }
         return people.first { $0.url.path == u.resolvingSymlinksInPath().path }

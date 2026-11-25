@@ -25,6 +25,9 @@ public final class ScryMeetWatch: @unchecked Sendable {
     /// Written on `queue`, read on the main thread.
     /// Meet answered the last poll: after a miss the participants may be old.
     public var fresh: Bool { seen.withLock { $0.fresh } }
+    /// While the recording is paused nothing is read or written.
+    public var paused: Bool { get { pausing.withLock { $0 } } set { pausing.withLock { $0 = newValue } } }
+    private let pausing = Mutex(false)
     private let seen = Mutex<(participants: [String], speaking: String?, selfName: String?, fresh: Bool)>(([], nil, nil, false))
 
     public init(browser bundleID: String, dir: URL, startedAt: Date) {
@@ -95,7 +98,7 @@ public final class ScryMeetWatch: @unchecked Sendable {
     }
 
     private func poll() {
-        guard let s = read() else { seen.withLock { $0.speaking = nil; $0.fresh = false }; return }   // no tab, no answer: nobody is known to be speaking
+        guard !paused, let s = read() else { seen.withLock { $0.speaking = nil; $0.fresh = false }; return }   // no tab, no answer: nobody is known to be speaking
         let t = (Date().timeIntervalSince(startedAt) * 10).rounded() / 10
         let people = s.participants
         var lines: [ScryMeet.Line] = []

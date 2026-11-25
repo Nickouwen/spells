@@ -158,13 +158,7 @@ public enum ScryNotes {
     /// someone in the note already has it: two voices are never joined by a link.
     /// `adding`: a row that isn't there yet.
     public static func linkPerson(_ url: URL, _ p: ScryNotePerson, to known: ScryPerson?, adding: Bool = false) throws -> ScryNoteFile? {
-        var md = try String(contentsOf: url, encoding: .utf8), p = p
-        try readable(md)
-        if adding { try free(p, in: md) }
-        else if let now = ScryPeople.rows(in: md).first(where: { $0.person.id == p.id })?.person { p = now }   // edited in Obsidian meanwhile
-        else if p.role == .mentioned || ScryNote.parse(md)?.segments.contains(where: { ScryNotePerson.plain($0.speaker) == p.name }) != true {
-            throw Changed()   // gone: a link doesn't bring them back
-        }
+        var md = try String(contentsOf: url, encoding: .utf8), p = try linkable(p, in: md, adding: adding)
         if let known, p.role == .speaker, p.name.wholeMatch(of: /Speaker [A-Z0-9]+|Them/) != nil {
             let name = ScryNotePerson.plain(known.name)
             if ScryNote.parse(md)?.segments.contains(where: { $0.speaker == name }) == false {
@@ -174,6 +168,17 @@ public enum ScryNotes {
         }
         p.link = known.map { ScryPeople.link(to: $0, from: url) }
         return try write(ScryPeople.setting(p, in: md), to: url)
+    }
+
+    /// The row as it is in the file now; throws when it can't be linked.
+    @discardableResult public static func linkable(_ p: ScryNotePerson, in md: String, adding: Bool) throws -> ScryNotePerson {
+        try readable(md)
+        if adding { try free(p, in: md); return p }
+        if let now = ScryPeople.rows(in: md).first(where: { $0.person.id == p.id })?.person { return now }   // edited in Obsidian meanwhile
+        guard p.role == .speaker, ScryNote.parse(md)?.segments.contains(where: { ScryNotePerson.plain($0.speaker) == p.name }) == true else {
+            throw Changed()   // gone: a link doesn't bring them back
+        }
+        return p
     }
 
     /// Takes a wrongly found person out of the note's people.
@@ -252,7 +257,11 @@ public enum ScryNotes {
     /// The note to share: no frontmatter, and the transcript only when asked.
     public static func shared(_ md: String, transcript: Bool) -> String {
         var lines = md.components(separatedBy: "\n")
-        for row in ScryPeople.rows(in: md) { var p = row.person; p.link = nil; lines[row.line] = p.markdown }   // who you know, and where their notes are, stays here
+        var people = false   // who you know, and where their notes are, stays here, wherever the section is
+        for i in lines.indices {
+            if lines[i].hasPrefix("## ") { people = ScryPeople.isHeading(lines[i]) }
+            else if people, var p = ScryNotePerson.parse(lines[i]) { p.link = nil; lines[i] = p.markdown }
+        }
         if !transcript, let t = lines.lastIndex(where: ScryPeople.isTranscript) { lines.removeSubrange(t...) }
         if lines.first == "---", let close = lines.dropFirst().firstIndex(of: "---") { lines.removeSubrange(...close) }
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)

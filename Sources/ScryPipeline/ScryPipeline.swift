@@ -159,6 +159,7 @@ public enum ScryPipeline {
         // only other name on the screen as it stood there, or a name you gave.
         let sure = named.union(fromMeet.values).union(sole.values.filter(shown.contains))
         for s in spoken where !sure.contains(s.speaker) && picked[s.speaker] == nil { picked[s.speaker] = "" }
+        for n in summary.speakers.values { picked[n] = "" }   // the model's, also when you picked that name for another voice
         let people = ScryPeople.rows(segments: spoken, mentioned: summary.people, emails: emails, owner: settings.userName,
                                      known: ScryPeople.load(settings.people.compactMap(ScrySettings.folder)), note: url,
                                      picked: picked)
@@ -203,7 +204,7 @@ public enum ScryPipeline {
         // Links already made stay (yours or not linking someone included); people found this time join them.
         let found = ScryPeople.rows(segments: spoken, mentioned: summary.people, emails: [:], owner: settings.userName,
                                     known: ScryPeople.load(settings.people.compactMap(ScrySettings.folder)), note: url,
-                                    picked: Dictionary(summary.speakers.values.map { ($0, "") }, uniquingKeysWith: { a, _ in a }))   // the model's names: guesses
+                                    picked: Dictionary(spoken.map { ($0.speaker, "") }, uniquingKeysWith: { a, _ in a }))   // nothing says who gave these names
         let kept = note.people.map { p in
             p.role == .speaker ? ScryNotePerson(name: summary.speakers[p.name] ?? p.name, role: p.role, at: p.at, detail: p.detail, link: p.link) : p
         }

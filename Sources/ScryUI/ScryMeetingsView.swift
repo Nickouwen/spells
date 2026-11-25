@@ -425,20 +425,19 @@ public struct MeetingsView: View {
 
     private func create(_ n: ScryNoteFile, _ p: ScryNotePerson, said: String, as name: String) {
         guard let folder = peopleFolders.first else { return }
-        // Before the person's note is written, not after.
-        if p.name.isEmpty, n.note.people.contains(where: { $0.role == p.role && $0.name == ScryNotePerson(name: said.isEmpty ? name : said, role: p.role).name }) {
-            workError = "“\(said.isEmpty ? name : said)” is already in People. Use a fuller name for this one."
-            return
-        }
+        let row = ScryNotePerson(name: said.isEmpty ? name : said, role: p.role), adding = p.name.isEmpty
         let url = n.url, date = ISO8601DateFormatter.string(from: Date(), timeZone: timeZone, formatOptions: [.withFullDate])
         Task {
             do {
-                let who = try await Task.detached { try ScryPeople.create(name, email: nil, detail: p.detail, from: url, in: folder, date: date) }.value
+                let who = try await Task.detached {
+                    try ScryNotes.linkable(row, in: try String(contentsOf: url, encoding: .utf8), adding: adding)   // before the person's note is written
+                    return try ScryPeople.create(name, email: nil, detail: p.detail, from: url, in: folder, date: date)
+                }.value
                 known = ((known ?? []) + [who]).sorted { $0.name < $1.name }
                 link(n, p, as: said.isEmpty ? name : said, to: who)
             } catch {
                 SupportLog.scry.error("person note not made: \(String(describing: error), privacy: .private)")
-                workError = (error as? CocoaError)?.code == .fileWriteFileExists ? "A note named “\(name)” is already there. Choose it instead." : "Couldn't make the note: \(error.localizedDescription)"
+                workError = (error as? CocoaError)?.code == .fileWriteFileExists ? "A note named “\(name)” is already there. Choose it instead." : "Couldn't make the note: \(error is CocoaError ? error.localizedDescription : "\(error)")"
             }
         }
     }

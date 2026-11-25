@@ -242,3 +242,14 @@ private func md(_ extra: String = "") -> String {
     #expect(ScryNote.parse(ScryPeople.setting(.init(name: "Zoe", role: .mentioned), in: lower))?.segments == s)
     #expect(ScryNotes.editedLine(lower, index: 1, old: s[1], speaker: "X", text: "y")?.contains("X:** y") == true)
 }
+
+@Test func aRenamedNotesShortLinkIsFoundAndASharedEmailWithAnyoneCalledThatIsNobody() throws {
+    let v = try vault(); defer { try? FileManager.default.removeItem(at: v) }
+    let people = v.appending(path: "People"), note = v.appending(path: "calls/n.md")
+    try "---\nemail: office@example.com\n---\n".write(to: people.appending(path: "Jamie Chen.md"), atomically: true, encoding: .utf8)
+    let all = ScryPeople.load([people])
+    #expect(ScryPeople.person(for: "[[Dana Whitfield|Dana]]", from: note, in: all)?.name == "Dana Whitfield" && ScryPeople.person(for: "[[Sam Lee]]", from: note, in: all) == nil)
+    #expect(ScryPeople.exact("Sam Lee", email: "office@example.com", in: all) == nil && ScryPeople.exact("J", email: "office@example.com", in: all)?.name == "Jamie Chen")
+    let moved = md() + "\n## People\n\n- **Dana** (speaker) → [Dana Whitfield](file:///x/Dana.md)\n"
+    #expect(!ScryNotes.shared(moved, transcript: true).contains("file:"))
+}
