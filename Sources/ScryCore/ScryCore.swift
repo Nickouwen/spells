@@ -1112,6 +1112,8 @@ public enum ScryNames {
         let mine = names.filter { $0.lowercased().split(separator: " ").first.map(String.init) == first }
         let people = names.filter { n in !(n.lowercased() == me || n.lowercased() == first || me == first && mine == [n]) }
         guard far.count == 1, people.count == 1, let label = far.first else { return [:] }
+        // "Sam R." alone may be your own tile ("Sam Rivera").
+        if people[0].lowercased().hasPrefix(first + " "), me != first, !names.contains(where: { $0.lowercased() == me }) { return [:] }
         return [label: people[0]]
     }
 }

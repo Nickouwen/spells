@@ -171,8 +171,10 @@ public enum ScryPeople {
         func row(_ p: ScryNotePerson) -> ScryNotePerson? {
             guard !p.name.isEmpty, seen.insert(matchKey(p.name)).inserted else { return nil }
             var p = p
-            // Who you picked in the live panel, else no doubt.
-            let who = picked[p.name].flatMap { path in known.first { $0.id == path } } ?? exact(p.name, email: emails[p.name], in: known)
+            // Who you picked in the live panel (two people under one name: neither), else no doubt. An invite's email is a
+            // speaker's: someone only mentioned may be another person of that name.
+            let who = picked[p.name] == "" ? nil : picked[p.name].flatMap { path in known.first { $0.id == path } }
+                ?? exact(p.name, email: p.role == .speaker ? emails[p.name] : nil, in: known)
             p.link = who.map { link(to: $0, from: note) }
             return p
         }
@@ -187,7 +189,7 @@ public enum ScryPeople {
     public static func setting(_ p: ScryNotePerson, in md: String) -> String {
         var lines = md.components(separatedBy: "\n")
         let head = lines.firstIndex(of: "## Transcript") ?? lines.count   // never inside the transcript
-        if let start = lines[..<head].firstIndex(of: "## People") {
+        if let start = lines[..<head].firstIndex(where: isHeading) {
             let end = lines[(start + 1)...].firstIndex { $0.hasPrefix("## ") } ?? lines.count
             let same = (start + 1..<end).filter { ScryNotePerson.parse(lines[$0])?.id == p.id }
             if let i = same.first {
@@ -233,9 +235,11 @@ public enum ScryPeople {
         return lines.joined(separator: "\n")
     }
 
+    static func isHeading(_ l: String) -> Bool { l.trimmingCharacters(in: .whitespaces).lowercased() == "## people" }   // as `ScryNote.parse` reads it
+
     static func rows(in md: String) -> [(line: Int, person: ScryNotePerson)] {
         let lines = md.components(separatedBy: "\n"), head = lines.firstIndex(of: "## Transcript") ?? lines.count
-        guard let start = lines[..<head].firstIndex(of: "## People") else { return [] }
+        guard let start = lines[..<head].firstIndex(where: isHeading) else { return [] }
         let end = lines[(start + 1)...].firstIndex { $0.hasPrefix("## ") } ?? lines.count
         return (start + 1..<end).compactMap { i in ScryNotePerson.parse(lines[i]).map { (i, $0) } }
     }

@@ -265,7 +265,7 @@ public enum ScryOps {
     ]
 
     /// "864-555-0142": what they said next, not an account. "120,000,000": a count.
-    static func notPhone(_ s: String) -> Bool { s.wholeMatch(of: #/\d{3}-\d{3}-\d{4}/#) == nil }
+    static func notPhone(_ s: String) -> Bool { s.wholeMatch(of: #/(?:1-)?\d{3}-\d{3}-\d{4}/#) == nil }
     static func notCount(_ s: String) -> Bool { s.wholeMatch(of: #/\d{1,3}(?:,\d{3})+/#) == nil }
 
     /// 13–19 digits passing the Luhn check: a card number, not a phone number or a price.

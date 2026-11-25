@@ -128,7 +128,7 @@ public enum ScryNotes {
                line[r.upperBound...].hasPrefix(from + ":**") {
                 return String(line[..<r.upperBound]) + to + line[line.index(r.upperBound, offsetBy: from.count)...]
             }
-            if rows.contains(i), let p = ScryNotePerson.parse(line), p.role == .speaker, p.name == from {
+            if rows.contains(i), let p = ScryNotePerson.parse(line), p.role == .speaker, p.name == ScryNotePerson.plain(from) {
                 return ScryNotePerson(name: to, role: .speaker, at: p.at, detail: p.detail, link: p.link).markdown
             }
             if line.range(of: #"^\s*- \[[ xX]\] "#, options: .regularExpression) != nil {
@@ -199,9 +199,10 @@ public enum ScryNotes {
         return try write(before, to: url)
     }
 
-    /// `to`, a note written anew, with what you added to `from`: your own frontmatter fields and your own sections.
+    /// `to`, a note written anew, with what you added to `from`: your own frontmatter fields, words under the title,
+    /// sections, and lines in People.
     public static func carried(from: String, to: String) -> String {
-        func parts(_ md: String) -> (fields: [[String]], sections: [(head: String, lines: [String])]) {
+        func parts(_ md: String) -> (fields: [[String]], preamble: String?, sections: [(head: String, lines: [String])]) {
             let lines = md.components(separatedBy: "\n"), close = lines.dropFirst().firstIndex(of: "---") ?? 0
             var fields: [[String]] = [], sections: [(String, [String])] = []
             for l in lines[..<close].dropFirst() {   // a list's rows belong to the field above them
@@ -210,15 +211,22 @@ public enum ScryNotes {
             for l in lines[close...] {
                 if l.hasPrefix("## ") { sections.append((l, [])) } else if !sections.isEmpty { sections[sections.count - 1].1.append(l) }
             }
-            return (fields, sections)
+            let above = lines[(close + 1)...].prefix { !$0.hasPrefix("## ") }.filter { !$0.hasPrefix("# ") }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            return (fields, above.isEmpty ? nil : above, sections)
         }
         func key(_ f: [String]) -> Substring { f[0].prefix { $0 != ":" } }
         let own: Set = ["title", "date", "start", "end", "duration_min", "app", "folder", "participants", "speakers", "source"]
-        let written: Set = ["## Summary", "## Decisions", "## Key dates", "## Action items", "## Open questions", "## Insights", "## People", "## Your notes", "## Follow-up email", "## Transcript"]
+        let written = Set(["summary", "decisions", "key dates", "action items", "open questions", "insights", "people", "your notes", "follow-up email", "transcript"].map { "## " + $0 })
         let old = parts(from), fields = old.fields.filter { !own.contains(String(key($0))) }.flatMap { $0 }
-        let sections = old.sections.filter { !written.contains($0.head) }.flatMap { [$0.head] + $0.lines }
+        let sections = old.sections.filter { !written.contains($0.head.lowercased().trimmingCharacters(in: .whitespaces)) }.flatMap { [$0.head] + $0.lines }
+        let people = old.sections.first { ScryPeople.isHeading($0.head) }.map { $0.lines.filter { !$0.allSatisfy(\.isWhitespace) && ScryNotePerson.parse($0) == nil } } ?? []
         var out = to.components(separatedBy: "\n")
         if !sections.isEmpty { out.insert(contentsOf: sections + (sections.last == "" ? [] : [""]), at: out.firstIndex(of: "## Transcript") ?? out.count) }
+        if !people.isEmpty {
+            if let row = ScryPeople.rows(in: out.joined(separator: "\n")).last { out.insert(contentsOf: people, at: row.line + 1) }
+            else { out.insert(contentsOf: ["## People", ""] + people + [""], at: out.firstIndex(of: "## Transcript") ?? out.count) }
+        }
+        if let title = out.firstIndex(where: { $0.hasPrefix("# ") }), let words = old.preamble { out.insert(contentsOf: ["", words], at: title + 1) }
         if let close = out.dropFirst().firstIndex(of: "---") { out.insert(contentsOf: fields, at: close) }
         return out.joined(separator: "\n")
     }

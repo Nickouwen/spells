@@ -119,20 +119,19 @@ public struct MeetingsView: View {
 
     private func list(_ notes: [ScryNoteFile]) -> some View {
         let folders = Set(notes.compactMap(\.note.meta.folder)).sorted()
-        let shown = folder.map { f in notes.filter { $0.note.meta.folder == f } } ?? notes
+        // A folder its last note left shows all rather than an empty list.
+        let shown = folder.flatMap { f in folders.contains(f) ? notes.filter { $0.note.meta.folder == f } : nil } ?? notes
         let open = shown.flatMap { n in n.actions.filter { !$0.done }.map { (id: "\(n.url.path)#\($0.line)", note: n, item: $0) } }
         let current = selection ?? notes.first?.url
         return ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 if !failed.isEmpty { failedCard }
                 if !folders.isEmpty {
-                    Picker("Folder", selection: $folder) {
+                    Picker("Folder", selection: Binding(get: { folder.flatMap { folders.contains($0) ? $0 : nil } }, set: { folder = $0 })) {
                         Text("All notes").tag(String?.none)
                         ForEach(folders, id: \.self) { Text($0).tag(String?.some($0)) }
                     }
                     .labelsHidden()
-                    // The last note left it: show all rather than an empty list.
-                    .onChange(of: folders) { if let f = folder, !folders.contains(f) { folder = nil } }
                 }
                 if !open.isEmpty {
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -767,19 +766,19 @@ public struct MeetingsView: View {
 
     private func toggle(_ n: ScryNoteFile, _ item: ScryActions.Item) {
         let url = n.url
-        update(url) { try ScryNotes.toggle(url, line: item.line, owner: item.owner, task: item.task) }
+        update(url, undo: item.done ? "Item opened again." : "Item done.") { try ScryNotes.toggle(url, line: item.line, owner: item.owner, task: item.task) }
     }
 
     private func addAction(_ n: ScryNoteFile) {
         let url = n.url, task = newTask.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !task.isEmpty else { return }
         newTask = ""
-        update(url) { try ScryNotes.addAction(url, owner: "You", task: task) }
+        update(url, undo: "Item added.") { try ScryNotes.addAction(url, owner: "You", task: task) }
     }
 
     private func removeAction(_ n: ScryNoteFile, _ item: ScryActions.Item) {
         let url = n.url
-        update(url) { try ScryNotes.removeAction(url, line: item.line, owner: item.owner, task: item.task) }
+        update(url, undo: "Item removed.") { try ScryNotes.removeAction(url, line: item.line, owner: item.owner, task: item.task) }
     }
 
     /// To the Trash; the list and selection drop it straight away.

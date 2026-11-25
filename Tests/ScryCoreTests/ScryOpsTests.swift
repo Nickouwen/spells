@@ -181,6 +181,7 @@ private func tempVault() throws -> URL {
                  ["What's the account number?", "I don't have it. What's your phone?", "864-555-0142"],
                  ["What's the account number?", "Actually, phone number?", "8645550142"],
                  ["What's the account number?", "Sure.", "864-555-0142."],
+                 ["Call the number on your account, 1-800-555-0142."],
                  ["Social: 120,000,000 people."]] {
         #expect(ScryOps.redacted(turns: kept) == kept)
     }

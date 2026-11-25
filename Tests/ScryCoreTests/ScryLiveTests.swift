@@ -251,6 +251,8 @@ private let noteText = "---\ntitle: \"T\"\ndate: 2026-11-24\nstart: 2026-11-24T1
     #expect(ScryNames.soleSpeaker(segs, names: ["Sam Chen", "Alex Client"], userName: "Sam Rivera").isEmpty)
     #expect(ScryNames.soleSpeaker(segs, names: ["Sam Rivera", "Alex Client"], userName: "Sam Rivera") == ["Speaker A": "Alex Client"])
     #expect(ScryNames.soleSpeaker(segs, names: ["Sam Rivera", "Sam Chen", "Alex Client"], userName: "Sam").isEmpty)
+    #expect(ScryNames.soleSpeaker(segs, names: ["Sam R."], userName: "Sam Rivera").isEmpty)
+    #expect(ScryNames.soleSpeaker(segs, names: ["Sam Rivera", "Sam Chen"], userName: "Sam Rivera") == ["Speaker A": "Sam Chen"])
 }
 
 @Test func aCorrectionOverThemIsNotEcho() {

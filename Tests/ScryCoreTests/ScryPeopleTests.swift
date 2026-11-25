@@ -194,4 +194,19 @@ private func md(_ extra: String = "") -> String {
     let new = "---\ntitle: B\nsource: scry\n---\n\n# B\n\n## Summary\n\nNew.\n\n## Transcript\n\n**[00:01] You:** Hi.\n"
     #expect(ScryNotes.carried(from: old, to: new) == "---\ntitle: B\nsource: scry\ntags:\n  - deal\n---\n\n# B\n\n## Summary\n\nNew.\n\n## Corrections\n\nMine.\n\n## Transcript\n\n**[00:01] You:** Hi.\n")
     #expect(ScryNotes.carried(from: new, to: new) == new)
+    let hand = old.replacingOccurrences(of: "# A\n", with: "# A\n\nRead this first.\n").replacingOccurrences(of: "## Corrections\n\nMine.", with: "## people\n\n- **Dana** (speaker)\n- Ask Dana for Marcus's name")
+    let rows = new.replacingOccurrences(of: "## Transcript", with: "## People\n\n- **Dana** (speaker)\n\n## Transcript")
+    let kept = ScryNotes.carried(from: hand, to: rows)
+    #expect(kept.contains("# B\n\nRead this first.\n\n## Summary") && kept.contains("- **Dana** (speaker)\n- Ask Dana for Marcus's name\n\n## Transcript"))
+    #expect(ScryNotes.carried(from: hand, to: new).contains("## People\n\n- Ask Dana for Marcus's name\n\n## Transcript"))
+}
+
+@Test func anInvitesEmailIsASpeakersAndTwoPicksOfOneNameLinkNobody() throws {
+    let v = try vault(); defer { try? FileManager.default.removeItem(at: v) }
+    let all = ScryPeople.load([v.appending(path: "People")]), note = v.appending(path: "calls/n.md")
+    let s = [ScrySegment(speaker: "Dana Whitfield", start: 0, end: 1, text: "Hi.")]
+    func links(_ picked: [String: String], _ m: String) -> [Bool] {
+        ScryPeople.rows(segments: s, mentioned: [.init(name: m, role: .mentioned)], emails: ["Dana Whitfield": "dana@example.com", "D": "dana@example.com"], owner: "Sam", known: all, note: note, picked: picked).map { $0.link != nil }
+    }
+    #expect(links([:], "D") == [true, false] && links(["Dana Whitfield": ""], "D") == [false, false])
 }
