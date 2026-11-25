@@ -185,7 +185,7 @@ public struct ScrySettings: Equatable, Sendable {
     public var autoRecord = false
     /// Pop up "Your meeting is starting now" when a meeting starts and you're in no call.
     public var meetingAlarm = true
-    /// A quiet bar with the countdown, a minute before a meeting starts.
+    /// A quiet bar with the countdown: a notice five minutes before a meeting, and Join two minutes before.
     public var meetingSoon = true
     /// Your Google Cloud OAuth client (type iOS, bundle ID dev.nic.spells.scry) for Google Calendar; not a secret.
     public var googleClientID = ""

@@ -18,20 +18,27 @@ private let meeting = ScryMeeting(title: "Check-in", start: t0, end: t0.addingTi
     #expect(a.due([moved], call: nil, at: at(120)) == moved)   // rescheduled: rings again
 }
 
-@Test func headsUpShowsTheLastMinuteAndLeavesTheAlarmAlone() {
+@Test func headsUpFiveMinutesBeforeThenJoinAtTwo() {
     var a = ScryMeetingAlarm()
-    #expect(a.soon([meeting], at: at(-61)) == nil)
-    #expect(a.soon([meeting], at: at(-60)) == meeting)
+    let early = ScryMeetingAlarm.Soon(meeting: meeting, join: false), join = ScryMeetingAlarm.Soon(meeting: meeting, join: true)
+    #expect(a.soon([meeting], at: at(-301)) == nil)
+    #expect(a.soon([meeting], at: at(-300)) == early)
+    #expect(a.soon([meeting], at: at(-271)) == early)
+    #expect(a.soon([meeting], at: at(-270)) == nil)
+    a.notice(early)
+    #expect(a.soon([meeting], at: at(-290)) == nil)
+    #expect(a.soon([meeting], at: at(-121)) == nil)
+    #expect(a.soon([meeting], at: at(-120)) == join)   // dismissing the notice leaves this one
     #expect(a.soon([meeting], at: at(0)) == nil)   // now it's the alarm's
-    a.notice(meeting)
+    a.notice(join)
     #expect(a.soon([meeting], at: at(-30)) == nil)
     #expect(a.due([meeting], call: nil, at: at(0)) == meeting)
     var joined = ScryMeetingAlarm()
-    _ = joined.due([meeting], call: "zoom", at: at(-40))
-    #expect(joined.soon([meeting], at: at(-40)) == nil)
-    var over = ScryMeetingAlarm()   // another call runs over
-    for s in stride(from: -1800.0, through: -50, by: 1) { _ = over.due([meeting], call: "zoom", at: at(s)) }
-    #expect(over.soon([meeting], at: at(-50)) == meeting)
+    _ = joined.due([meeting], call: "zoom", at: at(-110))
+    #expect(joined.soon([meeting], at: at(-110)) == nil)
+    var over = ScryMeetingAlarm()   // another call, begun 8 min before
+    for s in stride(from: -480.0, through: -110, by: 1) { _ = over.due([meeting], call: "zoom", at: at(s)) }
+    #expect(over.soon([meeting], at: at(-110)) == join)
 }
 
 @Test func joiningTakesTheAlarmDownAndLeavingDoesNotBringItBack() {

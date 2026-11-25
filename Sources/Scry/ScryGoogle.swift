@@ -113,7 +113,10 @@ import ScryCore
             guard status == 200 else { throw Failure.http(status) }
             let read = try ScryCalendarEvent.google(data)
             guard connected else { return }   // disconnected meanwhile
-            if account == nil { SupportLog.scry.info("google: \(read.events.count, privacy: .public) event(s) read") }
+            if account == nil {
+                let next = read.events.compactMap(\.meeting).map(\.start).filter { $0 > now }.min()
+                SupportLog.scry.info("google: \(read.events.count, privacy: .public) event(s) read, next meeting \(next?.formatted(date: .omitted, time: .shortened) ?? "none", privacy: .public)")
+            }
             (account, events) = (read.account, read.events)
             error = nil
         } catch { report(error) }

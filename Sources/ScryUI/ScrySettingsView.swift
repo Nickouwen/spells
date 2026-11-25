@@ -41,7 +41,7 @@ public struct ScrySettingsView: View {
                     var s = saved; s.autoRecord = v; persist(s)
                 }))
                 SettingsDivider()
-                SettingsToggleRow("Show a countdown one minute before a meeting", isOn: Binding(get: { saved.meetingSoon }, set: { v in
+                SettingsToggleRow("Show a notice 5 minutes before a meeting, and Join 2 minutes before", isOn: Binding(get: { saved.meetingSoon }, set: { v in
                     var s = saved; s.meetingSoon = v; persist(s)
                 }))
                 SettingsDivider()

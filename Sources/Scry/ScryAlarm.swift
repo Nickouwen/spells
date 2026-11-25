@@ -5,12 +5,12 @@ import SpellsUI
 import ScryCore
 
 /// Watches your meetings (the calendar's and the ones added by hand) and puts up "Your meeting is starting now"
-/// when one starts and you're in no call. Joining a call takes the alarm down. A quiet bar counts down the minute before.
+/// when one starts and you're in no call. Joining a call takes the alarm down. A quiet bar says so 5 minutes before, and offers Join 2 minutes before.
 @MainActor final class ScryAlarm {
     /// The call app on the mic, or any name while recording in person; nil = not in a meeting.
     var call: () -> String? = { nil }
     private var alarm = ScryMeetingAlarm(), meetings: [ScryMeeting] = [], readAt = Date.distantPast
-    private var panel: NSPanel?, shown: ScryMeeting?, soonPanel: NSPanel?, soon: ScryMeeting?
+    private var panel: NSPanel?, shown: ScryMeeting?, soonPanel: NSPanel?, soon: ScryMeetingAlarm.Soon?
     private var ring = false, notice = false
     private var sound: NSSound?, timer: Timer?
 
@@ -64,13 +64,14 @@ import ScryCore
         shown = nil
     }
 
-    private func showSoon(_ m: ScryMeeting) {
-        guard soon != m else { return }
+    private func showSoon(_ s: ScryMeetingAlarm.Soon) {
+        guard soon != s else { return }
         hideSoon()
-        soon = m
+        soon = s
+        let m = s.meeting
         SupportLog.scry.info("meeting heads-up shown")
         let view = ScrySoonView(meeting: m,
-                                join: m.link.map { url in { [weak self] in
+                                join: !s.join ? nil : m.link.map { url in { [weak self] in
                                     NSWorkspace.shared.open(url)
                                     self?.alarm.handle(m)   // on your way in: no alarm while you wait to be let in
                                     self?.dismissSoon()
@@ -79,7 +80,7 @@ import ScryCore
         // Top middle, below the menu bar. Drops into place.
         soonPanel = present(view, rise: 8) { f, size in NSPoint(x: f.midX - size.width / 2, y: f.maxY - size.height - 10) }
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
-                             userInfo: [.announcement: "\(m.title) starts in one minute", .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+                             userInfo: [.announcement: "\(m.title) starts in \(s.join ? "two" : "five") minutes", .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
 
     private func dismissSoon() {
@@ -133,17 +134,17 @@ private final class FirstMouseHost<V: View>: NSHostingView<V> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-/// The heads-up: the meeting and its countdown on one line.
+/// The heads-up: the meeting, its countdown and (time to join) Join on one line.
 struct ScrySoonView: View {
     let meeting: ScryMeeting
-    /// nil = the meeting has no call link.
+    /// nil = no call link, or not time yet.
     let join: (() -> Void)?
     let dismiss: () -> Void
 
     var body: some View {
         HStack(spacing: Theme.Space.m) {
-            Image(systemName: join == nil ? "calendar" : "video.fill").foregroundStyle(Theme.ink).accessibilityHidden(true)
-            Text(meeting.title).textRole(.bodyEmph).lineLimit(1)
+            Image(systemName: meeting.link == nil ? "calendar" : "video.fill").foregroundStyle(Theme.ink).accessibilityHidden(true)
+            Text(meeting.title).textRole(.bodyEmph).lineLimit(1).help(meeting.title)
             Spacer(minLength: 0)
             Text("Starts in \(Text(timerInterval: min(Date(), meeting.start)...meeting.start, countsDown: true))")
                 .textRole(.body).monospacedDigit().fixedSize()
