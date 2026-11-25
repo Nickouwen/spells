@@ -104,9 +104,9 @@ public final class ScryMeetWatch: @unchecked Sendable {
             lines.append(ScryMeet.Line(t: t, participants: people))
         }
         let tile = marker.speaking(s)
-        let name = tile.flatMap { $0.isSelf ? nil : $0.name }
+        let mine = s.selfName ?? s.tiles.first(where: \.isSelf)?.name   // Meet doesn't mark your tile itself every time
+        let name = tile.flatMap { $0.isSelf || $0.name == mine ? nil : $0.name }
         if let name { lines.append(ScryMeet.Line(t: t, speaking: name)) }
-        let mine = s.selfName ?? s.tiles.first(where: \.isSelf)?.name
         seen.withLock { $0 = (people, name, mine ?? $0.selfName, true) }
         guard !lines.isEmpty else { return }
         append(lines.map { $0.encoded + "\n" }.joined())

@@ -233,3 +233,12 @@ private func md(_ extra: String = "") -> String {
     try md().write(to: url, atomically: true, encoding: .utf8)
     #expect(throws: ScryNotes.Changed.self) { try ScryNotes.linkPerson(url, .init(name: "Nobody", role: .speaker), to: dana) }
 }
+
+@Test func aTranscriptHeadingInAnyCaseIsNeverShared() throws {
+    let lower = md().replacingOccurrences(of: "## Transcript", with: "## transcript")
+    #expect(!ScryNotes.shared(lower, transcript: false).contains("**[") && ScryNotes.shared(lower, transcript: true).contains("**["))
+    let s = try #require(ScryNote.parse(lower)).segments
+    #expect(ScryNote.parse(ScryPeople.setting(.init(name: "Zoe", role: .mentioned), in: lower))?.people.map(\.name) == ["Zoe"])
+    #expect(ScryNote.parse(ScryPeople.setting(.init(name: "Zoe", role: .mentioned), in: lower))?.segments == s)
+    #expect(ScryNotes.editedLine(lower, index: 1, old: s[1], speaker: "X", text: "y")?.contains("X:** y") == true)
+}

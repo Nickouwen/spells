@@ -92,7 +92,10 @@ public enum ScryPeople {
 
     /// The name; for one of two people of one name, with the folder and file that tell them apart.
     public static func label(_ p: ScryPerson, among people: [ScryPerson]) -> String {
-        people.contains { $0.name == p.name && $0.id != p.id } ? "\(p.name) (\(p.url.deletingLastPathComponent().lastPathComponent)/\(p.url.lastPathComponent))" : p.name
+        let twins = people.filter { $0.name == p.name && $0.id != p.id }
+        func short(_ p: ScryPerson) -> String { "\(p.url.deletingLastPathComponent().lastPathComponent)/\(p.url.lastPathComponent)" }
+        let place = twins.contains { short($0) == short(p) } ? (p.url.path as NSString).abbreviatingWithTildeInPath : short(p)
+        return twins.isEmpty ? p.name : "\(p.name) (\(place))"
     }
 
     // MARK: Matching
@@ -198,8 +201,8 @@ public enum ScryPeople {
     /// Adds or replaces one row of the note's "## People" section; everything else stays as it is.
     public static func setting(_ p: ScryNotePerson, in md: String) -> String {
         var lines = md.components(separatedBy: "\n")
-        let head = lines.firstIndex(of: "## Transcript") ?? lines.count   // never inside the transcript
-        if let start = lines[..<head].firstIndex(where: isHeading) {
+        let head = lines.firstIndex(where: isTranscript) ?? lines.count   // never inside the transcript
+        if let start = lines[..<head].firstIndex(where: { isHeading($0) }) {
             let end = lines[(start + 1)...].firstIndex { $0.hasPrefix("## ") } ?? lines.count
             let same = (start + 1..<end).filter { ScryNotePerson.parse(lines[$0])?.id == p.id }
             if let i = same.first {
@@ -211,7 +214,7 @@ public enum ScryPeople {
             }
             return lines.joined(separator: "\n")
         }
-        let at = ["## Your notes", "## Follow-up email", "## Transcript"].compactMap { lines[..<min(head + 1, lines.count)].firstIndex(of: $0) }.min() ?? lines.count
+        let at = ["## Your notes", "## Follow-up email"].compactMap { lines[..<head].firstIndex(of: $0) }.min() ?? head
         lines.insert(contentsOf: ["## People", "", p.markdown, ""], at: at)
         return lines.joined(separator: "\n")
     }
@@ -245,11 +248,13 @@ public enum ScryPeople {
         return lines.joined(separator: "\n")
     }
 
-    static func isHeading(_ l: String) -> Bool { l.trimmingCharacters(in: .whitespaces).lowercased() == "## people" }   // as `ScryNote.parse` reads it
+    /// A "## People" or "## Transcript" line in any case, as `ScryNote.parse` reads it.
+    static func isHeading(_ l: String, _ name: String = "people") -> Bool { l.trimmingCharacters(in: .whitespaces).lowercased() == "## " + name }
+    static func isTranscript(_ l: String) -> Bool { isHeading(l, "transcript") }
 
     static func rows(in md: String) -> [(line: Int, person: ScryNotePerson)] {
-        let lines = md.components(separatedBy: "\n"), head = lines.firstIndex(of: "## Transcript") ?? lines.count
-        guard let start = lines[..<head].firstIndex(where: isHeading) else { return [] }
+        let lines = md.components(separatedBy: "\n"), head = lines.firstIndex(where: isTranscript) ?? lines.count
+        guard let start = lines[..<head].firstIndex(where: { isHeading($0) }) else { return [] }
         let end = lines[(start + 1)...].firstIndex { $0.hasPrefix("## ") } ?? lines.count
         return (start + 1..<end).compactMap { i in ScryNotePerson.parse(lines[i]).map { (i, $0) } }
     }
@@ -258,7 +263,6 @@ public enum ScryPeople {
     public static func create(_ name: String, email: String?, detail: String, from note: URL, in folder: URL, date: String) throws -> ScryPerson {
         let name = ScryNotePerson.plain(name).filter { !"/\\:#^".contains($0) }.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
         guard !name.isEmpty else { throw CocoaError(.fileWriteInvalidFileName) }
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appending(path: name + ".md"), from = note.deletingPathExtension().lastPathComponent
         let md = (["---", "type: person", "email: \(email ?? "")", "created: \(date)", "author: ai", "source: Scry note \(from)", "---", "# \(name)", "",
                    "**How I know them:** from the call in [[\(from)]]."] + (detail.isEmpty ? [] : ["", detail])).joined(separator: "\n") + "\n"

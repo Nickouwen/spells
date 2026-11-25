@@ -239,7 +239,7 @@ public enum ScryNotes {
             else { out.insert(contentsOf: ["## People", ""] + people + [""], at: out.firstIndex(of: "## Transcript") ?? out.count) }
         }
         // Words of yours between or below the transcript's lines go below it.
-        let loose = old.sections.filter { $0.head.lowercased().trimmingCharacters(in: .whitespaces) == "## transcript" }.flatMap(\.lines).filter { !$0.allSatisfy(\.isWhitespace) && ScryNote.transcriptLine($0) == nil }
+        let loose = old.sections.filter { ScryPeople.isTranscript($0.head) }.flatMap(\.lines).filter { !$0.allSatisfy(\.isWhitespace) && ScryNote.transcriptLine($0) == nil }
         if !loose.isEmpty { out += (out.last == "" ? [] : [""]) + loose + [""] }
         if let title = out.firstIndex(where: { $0.hasPrefix("# ") }), let words = old.preamble { out.insert(contentsOf: ["", words], at: title + 1) }
         if let close = out.dropFirst().firstIndex(of: "---") { out.insert(contentsOf: fields, at: close) }
@@ -253,7 +253,7 @@ public enum ScryNotes {
     public static func shared(_ md: String, transcript: Bool) -> String {
         var lines = md.components(separatedBy: "\n")
         for row in ScryPeople.rows(in: md) { var p = row.person; p.link = nil; lines[row.line] = p.markdown }   // who you know, and where their notes are, stays here
-        if !transcript, let t = lines.lastIndex(of: "## Transcript") { lines.removeSubrange(t...) }
+        if !transcript, let t = lines.lastIndex(where: ScryPeople.isTranscript) { lines.removeSubrange(t...) }
         if lines.first == "---", let close = lines.dropFirst().firstIndex(of: "---") { lines.removeSubrange(...close) }
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -281,7 +281,7 @@ public enum ScryNotes {
 
     public static func editedLine(_ md: String, index: Int, old: ScrySegment, speaker: String, text: String?) -> String? {
         var lines = md.components(separatedBy: "\n")
-        guard let start = lines.lastIndex(of: "## Transcript") else { return nil }
+        guard let start = lines.lastIndex(where: ScryPeople.isTranscript) else { return nil }
         let turns = lines.indices.filter { $0 > start && lines[$0].range(of: #"^\*\*\[\d+:\d\d\] "#, options: .regularExpression) != nil }
         guard turns.indices.contains(index) else { return nil }
         let i = turns[index], stamp = lines[i].prefix(through: lines[i].firstIndex(of: "]")!)

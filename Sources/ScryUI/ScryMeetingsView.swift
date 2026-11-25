@@ -366,7 +366,7 @@ public struct MeetingsView: View {
         .alert("Summarize this note again?", isPresented: Binding(get: { redoing != nil }, set: { if !$0 { redoing = nil } })) {
             Button("Summarize") { if let r = redoing { resummarize(r.note, language: r.language) } }
             Button("Cancel", role: .cancel) {}
-        } message: { Text("It replaces the title, summary, lists and action items, ticks included. The transcript and your notes stay. You can undo it.") }
+        } message: { Text("It replaces the title, summary, lists, follow-up email and action items, ticks included. The transcript and your notes stay. You can undo it.") }
     }
 
     // MARK: People
@@ -425,6 +425,11 @@ public struct MeetingsView: View {
 
     private func create(_ n: ScryNoteFile, _ p: ScryNotePerson, said: String, as name: String) {
         guard let folder = peopleFolders.first else { return }
+        // Before the person's note is written, not after.
+        if p.name.isEmpty, n.note.people.contains(where: { $0.role == p.role && $0.name == ScryNotePerson(name: said.isEmpty ? name : said, role: p.role).name }) {
+            workError = "“\(said.isEmpty ? name : said)” is already in People. Use a fuller name for this one."
+            return
+        }
         let url = n.url, date = ISO8601DateFormatter.string(from: Date(), timeZone: timeZone, formatOptions: [.withFullDate])
         Task {
             do {
@@ -773,8 +778,7 @@ public struct MeetingsView: View {
     private func addAction(_ n: ScryNoteFile) {
         let url = n.url, task = ScryOps.redacted(newTask.trimmingCharacters(in: .whitespacesAndNewlines), numbersOnly: true)
         guard !task.isEmpty else { return }
-        newTask = ""
-        update(url, undo: "Item added.") { try ScryNotes.addAction(url, owner: "You", task: task) }
+        update(url, undo: "Item added.", done: { newTask = "" }) { try ScryNotes.addAction(url, owner: "You", task: task) }
     }
 
     private func removeAction(_ n: ScryNoteFile, _ item: ScryActions.Item) {
@@ -802,7 +806,7 @@ public struct MeetingsView: View {
     }
 
     /// `undo`: what the edit was ("Line deleted."), offered for taking back.
-    private func update(_ url: URL, undo what: String? = nil, _ body: @escaping @Sendable () throws -> ScryNoteFile?) {
+    private func update(_ url: URL, undo what: String? = nil, done: @escaping () -> Void = {}, _ body: @escaping @Sendable () throws -> ScryNoteFile?) {
         workError = nil
         let previous = lastEdit
         lastEdit = Task {
@@ -811,6 +815,7 @@ public struct MeetingsView: View {
                 let (before, fresh) = try await Task.detached(priority: .userInitiated) { (try String(contentsOf: url, encoding: .utf8), try body()) }.value
                 guard let fresh, let i = notes?.firstIndex(where: { $0.url == url }) else { return }
                 notes?[i] = fresh
+                done()
                 if before != fresh.markdown { undo = what.map { (url, $0, before, fresh.markdown) } }   // the last edit's, once it's saved
             } catch {
                 SupportLog.scry.error("scry note not saved: \(String(describing: error), privacy: .public)")

@@ -80,8 +80,8 @@ public enum ScryPipeline {
         // The names you gave in the live panel (`ScryLive.saveNames`), with who they are when you picked someone you know.
         let given = ScryLiveName.load(dir)
         let expected = (capture.invite?.invitees.map(\.name) ?? []) + [settings.userName]
-        let seen = meet.participants.isEmpty ? ScryNames.completed(ScryNames.fromOCR(capture.screenshotText, known: expected), capture.invite)
-                                             : meet.participants
+        let shown = meet.participants.isEmpty ? ScryNames.fromOCR(capture.screenshotText, known: expected) : meet.participants
+        let seen = meet.participants.isEmpty ? ScryNames.completed(shown, capture.invite) : shown
         let names = seen.isEmpty ? capture.invite?.invitees.map(\.name) ?? [] : seen
         // ponytail: on-screen names join the vocabulary, so Scribe spells them the way the call shows them.
         var vocab: [String] = []
@@ -155,8 +155,10 @@ public enum ScryPipeline {
         let emails = Dictionary(grouping: capture.invite?.invitees ?? [], by: \.name)   // two invitees with one name: neither email is sure
             .compactMapValues { $0.count == 1 ? $0[0].email : nil }
         var picked = Dictionary(given.compactMap { g in g.person.map { (g.name, $0) } }, uniquingKeysWith: { _, b in b })
-        // Named only because one person was invited and nobody was seen: that's a guess, so the link is yours to make.
-        if seen.isEmpty, named.isEmpty { for n in sole.values where picked[n] == nil { picked[n] = "" } }
+        // A voice named from the invite or by the model is a guess, so its link is yours to make: sure is Meet's marker, the
+        // only other name on the screen as it stood there, or a name you gave.
+        let sure = named.union(fromMeet.values).union(sole.values.filter(shown.contains))
+        for s in spoken where !sure.contains(s.speaker) && picked[s.speaker] == nil { picked[s.speaker] = "" }
         let people = ScryPeople.rows(segments: spoken, mentioned: summary.people, emails: emails, owner: settings.userName,
                                      known: ScryPeople.load(settings.people.compactMap(ScrySettings.folder)), note: url,
                                      picked: picked)
@@ -200,7 +202,8 @@ public enum ScryPipeline {
         let spoken = ScryTranscript.renamed(safe, summary.speakers)
         // Links already made stay (yours or not linking someone included); people found this time join them.
         let found = ScryPeople.rows(segments: spoken, mentioned: summary.people, emails: [:], owner: settings.userName,
-                                    known: ScryPeople.load(settings.people.compactMap(ScrySettings.folder)), note: url)
+                                    known: ScryPeople.load(settings.people.compactMap(ScrySettings.folder)), note: url,
+                                    picked: Dictionary(summary.speakers.values.map { ($0, "") }, uniquingKeysWith: { a, _ in a }))   // the model's names: guesses
         let kept = note.people.map { p in
             p.role == .speaker ? ScryNotePerson(name: summary.speakers[p.name] ?? p.name, role: p.role, at: p.at, detail: p.detail, link: p.link) : p
         }
