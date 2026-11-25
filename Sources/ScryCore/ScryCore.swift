@@ -177,7 +177,7 @@ public struct ScryInvite: Codable, Equatable, Sendable {
 public struct ScrySettings: Equatable, Sendable {
     public static let autoOfferKey = "scry_auto_offer", liveKey = "scry_live", rootKey = "scry_root",
                       neverKey = "scry_never_apps", nameKey = "scry_user_name",
-                      autoRecordKey = "scry_auto_record", meetingAlarmKey = "scry_meeting_alarm", googleClientIDKey = "scry_google_client_id", skillsKey = "scry_skills", peopleKey = "scry_people", liveOpenKey = "scry_live_open", opsPushKey = "scry_ops_push", opsVaultKey = "scry_ops_vault",
+                      autoRecordKey = "scry_auto_record", meetingAlarmKey = "scry_meeting_alarm", meetingSoonKey = "scry_meeting_soon", googleClientIDKey = "scry_google_client_id", skillsKey = "scry_skills", peopleKey = "scry_people", liveOpenKey = "scry_live_open", opsPushKey = "scry_ops_push", opsVaultKey = "scry_ops_vault",
                       opsSourcesKey = "scry_ops_sources", opsSlackUserKey = "scry_ops_slack_user", opsRulesKey = "scry_ops_rules"
     public static let defaultRoot = "~/Documents/Scry"
     public var autoOffer = true
@@ -185,6 +185,8 @@ public struct ScrySettings: Equatable, Sendable {
     public var autoRecord = false
     /// Pop up "Your meeting is starting now" when a meeting starts and you're in no call.
     public var meetingAlarm = true
+    /// A quiet bar with the countdown, a minute before a meeting starts.
+    public var meetingSoon = true
     /// Your Google Cloud OAuth client (type iOS, bundle ID dev.nic.spells.scry) for Google Calendar; not a secret.
     public var googleClientID = ""
     /// Live transcript + "What did I miss?" during the call (two realtime sockets, $0.39/h each).
@@ -220,6 +222,7 @@ public struct ScrySettings: Equatable, Sendable {
         if let v = value(autoOfferKey) { s.autoOffer = v == "1" }
         if let v = value(autoRecordKey) { s.autoRecord = v == "1" }
         if let v = value(meetingAlarmKey) { s.meetingAlarm = v == "1" }
+        if let v = value(meetingSoonKey) { s.meetingSoon = v == "1" }
         if let v = value(googleClientIDKey) { s.googleClientID = v }
         if let v = value(liveKey) { s.live = v == "1" }
         if let v = value(skillsKey) { s.skills = lines(v) }
@@ -249,7 +252,7 @@ public struct ScrySettings: Equatable, Sendable {
     }
 
     public var rows: [String: String] {
-        [Self.autoOfferKey: autoOffer ? "1" : "0", Self.autoRecordKey: autoRecord ? "1" : "0", Self.meetingAlarmKey: meetingAlarm ? "1" : "0", Self.googleClientIDKey: googleClientID, Self.liveOpenKey: liveOpen ? "1" : "0", Self.skillsKey: skills.joined(separator: "\n"), Self.peopleKey: people.joined(separator: "\n"), Self.liveKey: live ? "1" : "0", Self.rootKey: root,
+        [Self.autoOfferKey: autoOffer ? "1" : "0", Self.autoRecordKey: autoRecord ? "1" : "0", Self.meetingAlarmKey: meetingAlarm ? "1" : "0", Self.meetingSoonKey: meetingSoon ? "1" : "0", Self.googleClientIDKey: googleClientID, Self.liveOpenKey: liveOpen ? "1" : "0", Self.skillsKey: skills.joined(separator: "\n"), Self.peopleKey: people.joined(separator: "\n"), Self.liveKey: live ? "1" : "0", Self.rootKey: root,
          Self.neverKey: never.joined(separator: "\n"), Self.nameKey: userName, Self.opsPushKey: opsPush ? "1" : "0",
          Self.opsVaultKey: opsVault, Self.opsSourcesKey: opsSources.joined(separator: "\n"), Self.opsSlackUserKey: opsSlackUser, Self.opsRulesKey: opsRules]
     }

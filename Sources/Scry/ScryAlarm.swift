@@ -5,12 +5,13 @@ import SpellsUI
 import ScryCore
 
 /// Watches your meetings (the calendar's and the ones added by hand) and puts up "Your meeting is starting now"
-/// when one starts and you're in no call. Joining a call takes the alarm down.
+/// when one starts and you're in no call. Joining a call takes the alarm down. A quiet bar counts down the minute before.
 @MainActor final class ScryAlarm {
     /// The call app on the mic, or any name while recording in person; nil = not in a meeting.
     var call: () -> String? = { nil }
     private var alarm = ScryMeetingAlarm(), meetings: [ScryMeeting] = [], readAt = Date.distantPast
-    private var panel: NSPanel?, shown: ScryMeeting?
+    private var panel: NSPanel?, shown: ScryMeeting?, soonPanel: NSPanel?, soon: ScryMeeting?
+    private var ring = false, notice = false
     private var sound: NSSound?, timer: Timer?
 
     func start() {
@@ -23,11 +24,13 @@ import ScryCore
         let now = Date()
         if now.timeIntervalSince(readAt) >= 15 {
             readAt = now
-            let on = ScryApp.loadSettings().settings.meetingAlarm
-            meetings = on ? ScryCalendar.meetings(now: now) + ScryReminders.load() : []
+            let s = ScryApp.loadSettings().settings
+            (ring, notice) = (s.meetingAlarm, s.meetingSoon)
+            meetings = ring || notice ? ScryCalendar.meetings(now: now) + ScryReminders.load() : []
         }
         let due = alarm.due(meetings, call: call(), at: now)
-        if let due { show(due) } else { hide() }
+        if ring, let due { show(due) } else { hide() }
+        if notice, let next = alarm.soon(meetings, at: now) { showSoon(next) } else { hideSoon() }
     }
 
     private func show(_ m: ScryMeeting) {
@@ -38,32 +41,8 @@ import ScryCore
         let view = ScryAlarmView(meeting: m,
                                  join: m.link.map { url in { [weak self] in NSWorkspace.shared.open(url); self?.dismiss() } },
                                  dismiss: { [weak self] in self?.dismiss() })
-        let host = NSHostingView(rootView: view)
-        let p = NSPanel(contentRect: NSRect(origin: .zero, size: host.fittingSize), styleMask: [.borderless, .nonactivatingPanel],
-                        backing: .buffered, defer: false)
-        p.level = .statusBar
-        p.isOpaque = false
-        p.backgroundColor = .clear
-        p.hidesOnDeactivate = false
-        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        p.contentView = host
-        // The screen you're on (the mouse's), upper middle.
-        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
-        if let f = screen?.visibleFrame {
-            p.setFrameOrigin(NSPoint(x: f.midX - p.frame.width / 2, y: f.minY + f.height * 0.62 - p.frame.height / 2))
-        }
-        // Rises a little into place; with Reduce Motion it only fades.
-        let end = p.frame, move: CGFloat = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 8
-        p.alphaValue = 0
-        p.setFrame(end.offsetBy(dx: 0, dy: -move), display: false)
-        p.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.22
-            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
-            p.animator().setFrame(end, display: true)
-            p.animator().alphaValue = 1
-        }
-        panel = p
+        // The screen you're on, upper middle. Rises into place.
+        panel = present(view, rise: -8) { f, size in NSPoint(x: f.midX - size.width / 2, y: f.minY + f.height * 0.62 - size.height / 2) }
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
                              userInfo: [.announcement: "Your meeting is starting now: \(m.title)", .priority: NSAccessibilityPriorityLevel.high.rawValue])
         let s = NSSound(named: "Glass")
@@ -80,15 +59,97 @@ import ScryCore
 
     private func hide() {
         sound?.stop(); sound = nil
-        if let p = panel {
-            p.ignoresMouseEvents = true   // a second click on Join must not open it twice
-            NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = 0.12
-                p.animator().alphaValue = 0
-            }) { MainActor.assumeIsolated { p.orderOut(nil) } }
-        }
+        if let panel { leave(panel) }
         panel = nil
         shown = nil
+    }
+
+    private func showSoon(_ m: ScryMeeting) {
+        guard soon != m else { return }
+        hideSoon()
+        soon = m
+        SupportLog.scry.info("meeting heads-up shown")
+        let view = ScrySoonView(meeting: m,
+                                join: m.link.map { url in { [weak self] in NSWorkspace.shared.open(url); self?.dismissSoon() } },
+                                dismiss: { [weak self] in self?.dismissSoon() })
+        // Top middle, below the menu bar. Drops into place.
+        soonPanel = present(view, rise: 8) { f, size in NSPoint(x: f.midX - size.width / 2, y: f.maxY - size.height - 10) }
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
+                             userInfo: [.announcement: "\(m.title) starts in one minute", .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+    }
+
+    private func dismissSoon() {
+        if let soon { alarm.notice(soon) }
+        hideSoon()
+    }
+
+    private func hideSoon() {
+        if let soonPanel { leave(soonPanel) }
+        soonPanel = nil
+        soon = nil
+    }
+
+    /// A borderless panel on the mouse's screen, in from `rise` points off; with Reduce Motion it only fades.
+    private func present(_ view: some View, rise: CGFloat, at origin: (NSRect, NSSize) -> NSPoint) -> NSPanel {
+        let host = FirstMouseHost(rootView: view)
+        let p = NSPanel(contentRect: NSRect(origin: .zero, size: host.fittingSize), styleMask: [.borderless, .nonactivatingPanel],
+                        backing: .buffered, defer: false)
+        p.level = .statusBar
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hidesOnDeactivate = false
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        p.contentView = host
+        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
+        if let f = screen?.visibleFrame { p.setFrameOrigin(origin(f, p.frame.size)) }
+        let end = p.frame, move = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : rise
+        p.alphaValue = 0
+        p.setFrame(end.offsetBy(dx: 0, dy: move), display: false)
+        p.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.22
+            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+            p.animator().setFrame(end, display: true)
+            p.animator().alphaValue = 1
+        }
+        return p
+    }
+
+    private func leave(_ p: NSPanel) {
+        p.ignoresMouseEvents = true   // a second click on Join must not open it twice
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.12
+            p.animator().alphaValue = 0
+        }) { MainActor.assumeIsolated { p.orderOut(nil) } }
+    }
+}
+
+/// Clicks land on the first try even though the panel is never key.
+private final class FirstMouseHost<V: View>: NSHostingView<V> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// The heads-up: the meeting and its countdown on one line.
+struct ScrySoonView: View {
+    let meeting: ScryMeeting
+    /// nil = the meeting has no call link.
+    let join: (() -> Void)?
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: Theme.Space.m) {
+            Text(meeting.title).textRole(.body).lineLimit(1)
+            Spacer(minLength: 0)
+            Text("In \(Text(timerInterval: min(Date(), meeting.start)...meeting.start, countsDown: true))")
+                .textRole(.label, Theme.inkSecondary).monospacedDigit().fixedSize()
+            if let join { Button("Join", action: join).buttonStyle(PrimaryButtonStyle()) }
+            Button("Dismiss", action: dismiss).buttonStyle(RewindButtonStyle())
+        }
+        .padding(.leading, Theme.Space.l).padding(.trailing, Theme.Space.s).padding(.vertical, Theme.Space.s)
+        .frame(width: 420)
+        .background(Theme.canvas, in: RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous).strokeBorder(Theme.hairline, lineWidth: Theme.Stroke.hairline))
+        .accessibilityElement(children: .contain)
     }
 }
 

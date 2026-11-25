@@ -6,7 +6,7 @@ standalone modules you install only if you want them.
 - **Spells** (the hub): lists the modules installed in `~/Applications/Spells` and the ones in the catalog; installs, updates and removes them, starts and stops them, and sets which ones start at login. Its sidebar also carries every installed module's own views — Rewind's Day / Week / Range and settings, Scry's Meetings and settings, Incant's settings, Transmute's Invoices and settings — read straight from their data whether or not the module is running. It ships with nothing installed.
 - **Rewind**: local-first automatic time tracking with SQLite, classification rules, editing, reports, CSV/PDF exports, and tamper-evident proof bundles. Its tracker helper runs at login.
 - **Incant**: press-to-dictate. A menu-bar app with its own settings window.
-- **Scry**: meeting note capture and summarization, with a Meetings window for the notes, and an alarm when a meeting (from macOS Calendar, or added by hand) starts and you're not in a call. A menu-bar app.
+- **Scry**: meeting note capture and summarization, with a Meetings window for the notes, a countdown bar one minute before a meeting (from your calendar, or added by hand), and an alarm when it starts and you're not in a call. A menu-bar app.
 - **Ward**: network watch. A root LaunchDaemon keeps a rolling packet capture (dumpcap, a ~1 GB ring on `en0`, 256 bytes per packet: headers, DNS, TLS server names) in `/var/log/netcap`, so a security incident can be audited after the fact. The window shows whether it runs and what it covers, reads the captures with your password, and lists the destinations, DNS lookups and TLS names in a window of time plus a scan for the 2026-11-02 infostealer's indicators. The shell scripts it runs ship in its bundle. A windowed app; its views also sit in the hub.
 - **Transmute**: invoices from your hours. Picks a period (the billing period just finished, the one in progress, or any dates; Rewind's pay-period setting makes these semi-months or two-week periods), reads the days' time from Rewind's database, prices it at your rate and writes a PDF (one line item, then the day-by-day hours). Keeps a ledger of what it issued and numbers the next one. A windowed app; its views also sit in the hub.
 
@@ -25,7 +25,7 @@ No real user database, recordings, transcripts, exports, API keys, or private pl
 
 ## Scry: meeting alarm and Google Calendar
 
-When a meeting starts and you're not in a call, Scry pops up "Your meeting is starting now". Menu › **Meeting reminders…** adds one by hand and connects Google Calendar (read-only, your main calendar). macOS Calendar accounts count too. Only events with other people count as meetings. The sign-in happens in your browser, and the token stays in your Keychain.
+A minute before a meeting, Scry shows a small bar with the countdown and Join. When a meeting starts and you're not in a call, Scry pops up "Your meeting is starting now". Menu › **Meeting reminders…** adds one by hand and connects Google Calendar (read-only, your main calendar). macOS Calendar accounts count too. Only events with other people count as meetings. The sign-in happens in your browser, and the token stays in your Keychain.
 
 Google needs an OAuth client of your own, once per organization:
 
